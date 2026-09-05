@@ -2,7 +2,7 @@
 # Ecommerce API Documentation
 
 Base URL:
-http://localhost:5000/api
+https://managanuga.in/api
 
 ---
 
