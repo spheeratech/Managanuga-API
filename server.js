@@ -1,6 +1,6 @@
 const app = require("./src/app");
 
-const PORT = 5001;
+const PORT = process.env.PORT || 5001;
 
 console.log("SERVER FILE LOADED");
 
