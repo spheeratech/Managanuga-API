@@ -1,6 +1,5 @@
 const pool = require("../../db");
 const Notification = require("../models/Notification");
-const User = require("../models/User");
 const { sendPushNotification } = require("../services/fcmService");
 
 // Get all notifications
@@ -154,17 +153,29 @@ const createTestNotification = async (req, res) => {
       });
 
     // Get user's FCM token
-    const user = await User.findById(userId);
+    const result = await pool.query(
+  `
+  SELECT
+    user_id,
+    fcm_token
+  FROM user_login
+  WHERE user_id = $1
+  LIMIT 1
+  `,
+  [userId]
+);
 
-    console.log("👤 User:", user);
+const user = result.rows[0];
 
-    if (!user?.fcm_token) {
-      return res.status(400).json({
-        success: false,
-        message: "User does not have an FCM token",
-        notification,
-      });
-    }
+console.log("👤 Notification User:", user);
+
+if (!user?.fcm_token) {
+  return res.status(400).json({
+    success: false,
+    message: "User does not have an FCM token",
+    notification,
+  });
+}
 
     // 🔥 SEND REAL PUSH NOTIFICATION
     const fcmResponse = await sendPushNotification({
