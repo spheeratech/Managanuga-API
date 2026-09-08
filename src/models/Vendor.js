@@ -41,6 +41,7 @@ const getCustomers = async (vendorId) => {
   return result.rows;
 
 };
+
 const getOrders = async (vendorId) => {
 
   const result = await pool.query(
@@ -85,7 +86,52 @@ const getOrders = async (vendorId) => {
 
 };
 
+// Get vendor membership benefits
+const getBenefits = async (vendorId) => {
+
+  const result = await pool.query(
+    `
+    SELECT
+
+      b.id,
+
+      b.membership_id,
+
+      b.customer_id,
+
+      b.beneficiary_id,
+
+      b.beneficiary_role,
+
+      b.benefit_percent,
+
+      b.benefit_amount,
+
+      b.status,
+
+      b.created_at
+
+    FROM benefits b
+
+    WHERE
+
+      b.beneficiary_id = $1
+
+      AND b.beneficiary_role = 'VENDOR'
+
+    ORDER BY
+
+      b.created_at DESC;
+    `,
+    [vendorId]
+  );
+
+  return result.rows;
+
+};
+
 module.exports = {
   getCustomers,
   getOrders,
+  getBenefits,
 };

@@ -13,25 +13,33 @@ const getProductById = async (id) => {
 
   return result.rows[0];
 };
+
 const createProduct = async (productData) => {
   const query = `
     INSERT INTO products (
       name,
       price,
-      stock
+      stock,
+      keywords
     )
-    VALUES ($1, $2, $3)
+    VALUES ($1, $2, $3, $4)
     RETURNING *;
   `;
 
-  const values = [productData.name, productData.price, productData.stock];
+  const values = [
+    productData.name,
+    productData.price,
+    productData.stock,
+    productData.keywords,
+  ];
 
   const result = await pool.query(query, values);
 
   return result.rows[0];
 };
+
 const updateProduct = async (id, data) => {
-  const allowedFields = ["name", "price", "stock"];
+  const allowedFields = ["name", "price", "stock", "currency", "keywords"];
 
   const fields = Object.keys(data).filter((field) =>
     allowedFields.includes(field),
