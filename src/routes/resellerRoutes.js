@@ -4,10 +4,17 @@ const router = express.Router();
 
 const {
   getCustomers,
+  getBenefits,
 } = require("../controllers/resellerController");
+
 router.get(
   "/customers",
   getCustomers
+);
+
+router.get(
+  "/benefits",
+  getBenefits
 );
 
 module.exports = router;

@@ -32,6 +32,36 @@ const getCustomers = async (resellerId) => {
   return result.rows;
 };
 
+const getBenefits = async (resellerId) => {
+  const result = await pool.query(
+    `
+    SELECT
+      id,
+      membership_id,
+      customer_id,
+      beneficiary_id,
+      beneficiary_role,
+      benefit_percent,
+      benefit_amount,
+      status,
+      created_at
+
+    FROM benefits
+
+    WHERE
+      beneficiary_id = $1
+      AND beneficiary_role = 'RESELLER'
+
+    ORDER BY
+      created_at DESC;
+    `,
+    [resellerId]
+  );
+
+  return result.rows;
+};
+
 module.exports = {
   getCustomers,
+  getBenefits,
 };
