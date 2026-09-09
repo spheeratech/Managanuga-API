@@ -119,7 +119,45 @@ const getActiveMembership = async (userId) => {
 
   return result.rows[0];
 };
+const updateMembershipUsage = async ({
+  userId,
+  litresUsed,
+  walletUsed,
+}) => {
 
+  const result = await pool.query(
+    `
+    UPDATE user_memberships
+
+    SET
+
+      used_litres =
+        used_litres + $1,
+
+      monthly_claim_used =
+        monthly_claim_used + $2,
+
+      wallet_balance =
+        wallet_balance - $2,
+
+      updated_at = NOW()
+
+    WHERE
+      user_id = $3
+
+      AND status = 'ACTIVE'
+
+    RETURNING *;
+    `,
+    [
+      litresUsed,
+      walletUsed,
+      userId,
+    ]
+  );
+
+  return result.rows[0];
+};
 const resetMonthlyBenefits = async (
   membershipId,
 ) => {
