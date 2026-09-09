@@ -114,7 +114,7 @@ const benefits =
 
     
 // TEST MODE: send only ₹1 to Razorpay; keep the actual order/payment amount unchanged.
-const razorpayAmount = 1;
+const razorpayAmount = Number(finalAmount);
 
 const razorpayOrder =
   await razorpayService.createRazorpayOrder(
