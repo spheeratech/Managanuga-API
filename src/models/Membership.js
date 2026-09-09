@@ -63,6 +63,33 @@ const createMembership = async ({
 };
 
 const getActiveMembership = async (userId) => {
+  let resolvedUserId = userId;
+
+  // Resolve public MGU user ID to numeric users.id
+  if (
+    typeof userId === "string" &&
+    userId.startsWith("MGU")
+  ) {
+    const userResult = await pool.query(
+      `
+      SELECT u.id
+      FROM users u
+      JOIN user_login ul
+        ON ul.mobile_no = u.mobile
+      WHERE ul.user_id = $1
+        AND ul.is_active = true
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (!userResult.rows[0]) {
+      return null;
+    }
+
+    resolvedUserId = userResult.rows[0].id;
+  }
+
   const result = await pool.query(
     `
     SELECT
@@ -87,7 +114,7 @@ const getActiveMembership = async (userId) => {
 
     LIMIT 1
     `,
-    [userId]
+    [resolvedUserId]
   );
 
   return result.rows[0];
@@ -116,10 +143,9 @@ const updateMembershipUsage = async ({
       updated_at = NOW()
 
     WHERE
-
       user_id = $3
 
-      AND status='ACTIVE'
+      AND status = 'ACTIVE'
 
     RETURNING *;
     `,
@@ -131,7 +157,6 @@ const updateMembershipUsage = async ({
   );
 
   return result.rows[0];
-
 };
 const resetMonthlyBenefits = async (
   membershipId,

@@ -15,3 +15,8 @@ production.env
 
 # Visual Studio
 .vs/
+
+# Database backups
+*.sql
+*.dump
+*.sq
