@@ -1,4 +1,5 @@
 const Order = require("../models/Order");
+const pool = require("../../db");
 const {
   sendOrderConfirmation,
 } = require("../services/whatsappService");
@@ -85,10 +86,43 @@ const getOrders = async (req, res) => {
   try {
     const { entity_type, entity_id } = req.query;
 
+    let resolvedEntityId = entity_id;
+
+    if (
+      entity_type === "USER" &&
+      typeof entity_id === "string" &&
+      entity_id.startsWith("MGU")
+    ) {
+      const userResult = await pool.query(
+        `
+        SELECT u.id
+        FROM users u
+        JOIN user_login ul
+          ON ul.mobile_no = u.mobile
+        WHERE ul.user_id = $1
+          AND ul.is_active = true
+        LIMIT 1
+        `,
+        [entity_id]
+      );
+
+      if (!userResult.rows[0]) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      resolvedEntityId = userResult.rows[0].id;
+    }
+
     let orders;
 
-    if (entity_type && entity_id) {
-      orders = await Order.getOrdersByEntity(entity_type, entity_id);
+    if (entity_type && resolvedEntityId) {
+      orders = await Order.getOrdersByEntity(
+        entity_type,
+        resolvedEntityId
+      );
     } else {
       orders = await Order.getOrders();
     }
@@ -99,6 +133,8 @@ const getOrders = async (req, res) => {
       data: orders,
     });
   } catch (error) {
+    console.error("GET ORDERS ERROR:", error);
+
     res.status(500).json({
       success: false,
       message: error.message,
