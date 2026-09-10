@@ -32,13 +32,18 @@ const {
     } = req.body;
     let resolvedEntityId = entity_id;
 
-if (typeof entity_id === "string" && entity_id.startsWith("MGU")) {
+if (
+  typeof entity_id === "string" &&
+  entity_id.startsWith("MGU")
+) {
   const userResult = await pool.query(
     `
-    SELECT id
-    FROM user_login
-    WHERE user_id = $1
-      AND is_active = true
+    SELECT u.id
+    FROM users u
+    JOIN user_login ul
+      ON ul.mobile_no = u.mobile
+    WHERE ul.user_id = $1
+      AND ul.is_active = true
     LIMIT 1
     `,
     [entity_id]
