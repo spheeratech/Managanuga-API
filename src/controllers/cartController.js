@@ -1,5 +1,5 @@
 const Cart = require("../models/Cart");
-const pool = require("../db");
+const pool = require("../../db");
 
 
 // Add Item
