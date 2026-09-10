@@ -432,10 +432,13 @@ const addressResult = await pool.query(
   FROM addresses
   WHERE id = $1
     AND entity_type = 'USER'
-    AND entity_id = $2
+    AND (
+      entity_id = $2
+      OR entity_id = $3
+    )
   LIMIT 1
   `,
-  [address_id, resolvedUserId]
+  [address_id, String(resolvedUserId), String(userId)]
 );
 
 const address = addressResult.rows[0];
