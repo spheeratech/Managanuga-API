@@ -1,0 +1,22 @@
+node_modules/
+.env
+*.log
+
+# Firebase service account
+managanuga-2026-firebase-adminsdk-fbsvc-f104f22e18.json
+
+# Environment / secrets
+.env
+production.env
+*.env
+
+# Firebase credentials
+*-firebase-adminsdk-*.json
+
+# Visual Studio
+.vs/
+
+# Database backups
+*.sql
+*.dump
+*.sq
