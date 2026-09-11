@@ -2,14 +2,56 @@ const pool = require("../../db");
 
 // Get all products
 const getProducts = async () => {
-  const result = await pool.query("SELECT * FROM products ORDER BY id DESC");
+  const result = await pool.query(`
+    SELECT
+      p.*,
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', ai.id,
+            'image_name', ai.image_name,
+            'url', ai.url,
+            'format', ai.format
+          )
+          ORDER BY ai.id
+        ) FILTER (WHERE ai.id IS NOT NULL),
+        '[]'
+      ) AS images
+    FROM products p
+    LEFT JOIN app_images ai
+      ON ai.product_id = p.id
+      AND ai.image_type = 'PRODUCT_IMAGE'
+    GROUP BY p.id
+    ORDER BY p.id DESC
+  `);
 
   return result.rows;
 };
 
 // Get product by id
 const getProductById = async (id) => {
-  const result = await pool.query("SELECT * FROM products WHERE id = $1", [id]);
+  const result = await pool.query(`
+    SELECT
+      p.*,
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', ai.id,
+            'image_name', ai.image_name,
+            'url', ai.url,
+            'format', ai.format
+          )
+          ORDER BY ai.id
+        ) FILTER (WHERE ai.id IS NOT NULL),
+        '[]'
+      ) AS images
+    FROM products p
+    LEFT JOIN app_images ai
+      ON ai.product_id = p.id
+      AND ai.image_type = 'PRODUCT_IMAGE'
+    WHERE p.id = $1
+    GROUP BY p.id
+  `, [id]);
 
   return result.rows[0];
 };
