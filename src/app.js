@@ -2,9 +2,13 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
+const authRoutes = require("./routes/authRoutes");
+const adminOrderRoutes = require("./routes/adminOrderRoutes");
+const categoryRoutes = require("./routes/categoryRoutes");
+const adminUserRoutes = require("./routes/adminUserRoutes");
+const hubRoutes = require("./routes/hubRoutes");
 const vendorRoutes = require("./routes/vendorRoutes");
 const resellerRoutes = require("./routes/resellerRoutes");
-const authRoutes = require("./routes/authRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const productRoutes = require("./routes/productRoutes");
 const productReviewRoutes = require("./routes/productReviewRoutes");
@@ -20,7 +24,11 @@ const userDocumentRoutes = require("./routes/userDocumentRoutes");
 const eventPosterRoutes = require("./routes/eventPosterRoutes");
 app.use(cors());
 app.use(express.json());
-
+app.use("/api/categories", categoryRoutes);
+app.use("/api/admin/users", adminUserRoutes);
+app.use("/api/admin/orders", adminOrderRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/hubs", hubRoutes);
 app.use("/auth", authRoutes);
 app.use("/products", productRoutes);
 app.use("/event-posters", eventPosterRoutes);
@@ -30,15 +38,15 @@ app.use("/address", addressRoutes);
 app.use("/user-documents", userDocumentRoutes);
 app.use("/orders", orderRoutes);
 app.use("/payments", paymentRoutes);
-app.use("/subscriptions", subscriptionRoutes);
+// app.use("/subscriptions", subscriptionRoutes);
 app.use("/wallet", walletRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/vendor", vendorRoutes);
 app.use("/reseller", resellerRoutes);
 app.use("/legal", legalContentRoutes);
 app.get("/test", (req, res) => {
-res.json({
-    message: "Main app working"
+  res.json({
+    message: "Main app working",
   });
 });
 

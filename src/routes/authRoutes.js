@@ -9,24 +9,15 @@ router.get("/test", (req, res) => {
 router.post("/send-otp", authController.sendOtp);
 router.post("/verify-otp", authController.verifyOtp);
 
-router.post(
-  "/forgot-password/send-otp",
-  authController.sendForgotPasswordOtp
-);
+router.post("/forgot-password/send-otp", authController.sendForgotPasswordOtp);
 
-router.post(
-  "/forgot-password/reset",
-  authController.resetPasswordWithOtp
-);
+router.post("/forgot-password/reset", authController.resetPasswordWithOtp);
 router.post(
   "/forgot-password/verify-otp",
-  authController.verifyForgotPasswordOtp
+  authController.verifyForgotPasswordOtp,
 );
-router.post(
-  "/change-password",
-  authController.changePassword
-);
-
+router.post("/change-password", authController.changePassword);
+router.post("/login", authController.login);
 router.post("/login-password", authController.loginWithPassword);
 router.post("/fcm-token", authController.updateFcmToken);
 router.post("/update-name", authController.updateUsername);
