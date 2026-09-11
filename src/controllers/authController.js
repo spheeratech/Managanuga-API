@@ -606,6 +606,7 @@ exports.deleteAccount = async (req, res) => {
     });
   }
 };
+
 exports.login = async (req, res) => {
   console.log("COMMON LOGIN ROUTE HIT");
   console.log("BODY:", req.body);
