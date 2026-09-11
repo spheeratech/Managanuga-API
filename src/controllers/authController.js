@@ -1,3 +1,4 @@
+const pool = require("../../db");
 const {
   sendOtp,
   verifyOtp,
@@ -19,13 +20,13 @@ exports.sendOtp = async (req, res) => {
     const { mobile } = req.body;
     const loginUser = await UserLogin.findByMobile(mobile);
 
-if (loginUser) {
-  return res.status(200).json({
-    success: true,
-    existingUser: true,
-    message: "Please login with your password.",
-  });
-}
+    if (loginUser) {
+      return res.status(200).json({
+        success: true,
+        existingUser: true,
+        message: "Please login with your password.",
+      });
+    }
 
     if (!mobile) {
       return res.status(400).json({ message: "Mobile required" });
@@ -70,7 +71,6 @@ exports.sendForgotPasswordOtp = async (req, res) => {
       success: true,
       message: "OTP sent successfully",
     });
-
   } catch (err) {
     console.error("FORGOT PASSWORD OTP ERROR:", err);
 
@@ -86,18 +86,12 @@ exports.resetPasswordWithOtp = async (req, res) => {
   console.log("BODY:", req.body);
 
   try {
-    const {
-      mobile,
-      otp,
-      newPassword,
-      confirmPassword,
-    } = req.body;
+    const { mobile, otp, newPassword, confirmPassword } = req.body;
 
     if (!mobile || !otp || !newPassword || !confirmPassword) {
       return res.status(400).json({
         success: false,
-        message:
-          "Mobile, OTP, new password and confirm password are required",
+        message: "Mobile, OTP, new password and confirm password are required",
       });
     }
 
@@ -118,17 +112,15 @@ exports.resetPasswordWithOtp = async (req, res) => {
     }
 
     // Verify OTP
-  // Check that the OTP was already verified
-const verified = isForgotPasswordVerified(mobile);
+    // Check that the OTP was already verified
+    const verified = isForgotPasswordVerified(mobile);
 
-if (!verified) {
-  return res.status(400).json({
-    success: false,
-    message: "OTP verification required",
-  });
-}
-
-  
+    if (!verified) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP verification required",
+      });
+    }
 
     // Find existing login account
     const loginUser = await UserLogin.findByMobile(mobile);
@@ -141,11 +133,10 @@ if (!verified) {
     }
 
     // Update password chosen by the user
-    const updatedLoginUser =
-      await UserLogin.updatePassword(
-        loginUser.user_id,
-        newPassword
-      );
+    const updatedLoginUser = await UserLogin.updatePassword(
+      loginUser.user_id,
+      newPassword,
+    );
 
     if (!updatedLoginUser) {
       return res.status(500).json({
@@ -155,16 +146,12 @@ if (!verified) {
     }
     clearForgotPasswordVerified(mobile);
 
-    console.log(
-      "PASSWORD RESET SUCCESSFUL FOR USER:",
-      loginUser.user_id
-    );
+    console.log("PASSWORD RESET SUCCESSFUL FOR USER:", loginUser.user_id);
 
     return res.json({
       success: true,
       message: "Password reset successfully",
     });
-
   } catch (err) {
     console.error("RESET PASSWORD ERROR:", err);
 
@@ -181,11 +168,7 @@ exports.verifyOtp = async (req, res) => {
   console.log("BODY:", req.body);
 
   try {
-    const {
-      mobile,
-      otp,
-      vendorId,
-    } = req.body;
+    const { mobile, otp, vendorId } = req.body;
 
     if (!mobile || !otp) {
       return res.status(400).json({
@@ -215,15 +198,15 @@ exports.verifyOtp = async (req, res) => {
     // EXISTING ACTIVE USER
     // --------------------------------------------------
     if (loginUser) {
-     const authenticatedUser = { 
-  id: loginUser.user_id, 
-  user_id: loginUser.user_id, 
-  login_id: loginUser.id,
-  username: loginUser.username, 
-  mobile: loginUser.mobile_no, 
-  role: loginUser.role, 
-  requiresName: false, 
-};
+      const authenticatedUser = {
+        id: loginUser.user_id,
+        user_id: loginUser.user_id,
+        login_id: loginUser.id,
+        username: loginUser.username,
+        mobile: loginUser.mobile_no,
+        role: loginUser.role,
+        requiresName: false,
+      };
 
       const token = generateToken(authenticatedUser);
 
@@ -244,9 +227,7 @@ exports.verifyOtp = async (req, res) => {
     let randomPassword = "";
 
     for (let i = 0; i < 8; i++) {
-      randomPassword += chars.charAt(
-        Math.floor(Math.random() * chars.length)
-      );
+      randomPassword += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
     // Create new user_login record.
@@ -257,13 +238,10 @@ exports.verifyOtp = async (req, res) => {
     const createdLoginUser = await UserLogin.create(
       mobile,
       randomPassword,
-      vendorId
+      vendorId,
     );
 
-    console.log(
-      "NEW USER CREATED:",
-      createdLoginUser
-    );
+    console.log("NEW USER CREATED:", createdLoginUser);
 
     if (!createdLoginUser) {
       return res.status(500).json({
@@ -276,45 +254,33 @@ exports.verifyOtp = async (req, res) => {
     const passwordMessage =
       `We are delighted to have you with us. Your account for managanuga has been created successfully.\n` +
       `User ID: ${createdLoginUser.mobile_no}\n` +
-      `Password: ${randomPassword}\n` + 
+      `Password: ${randomPassword}\n` +
       `For your peace of mind, we recommend updating your password after your first login.\n` +
       `managanuga`;
 
-    console.log(
-      "PASSWORD SMS TEMPLATE:",
-      process.env.SMS_PASSWORD_TEMPLATE_ID
-    );
+    console.log("PASSWORD SMS TEMPLATE:", process.env.SMS_PASSWORD_TEMPLATE_ID);
 
-    console.log(
-      "PASSWORD SMS MOBILE:",
-      mobile
-    );
+    console.log("PASSWORD SMS MOBILE:", mobile);
 
-    console.log(
-      "PASSWORD SMS USER ID:",
-      createdLoginUser.user_id
-    );
+    console.log("PASSWORD SMS USER ID:", createdLoginUser.user_id);
 
-    console.log(
-      "PASSWORD SMS PASSWORD:",
-      randomPassword
-    );
+    console.log("PASSWORD SMS PASSWORD:", randomPassword);
 
     await sendSMS(
       mobile,
       passwordMessage,
-      process.env.SMS_PASSWORD_TEMPLATE_ID
+      process.env.SMS_PASSWORD_TEMPLATE_ID,
     );
 
-   const authenticatedUser = { 
-  id: createdLoginUser.user_id, 
-  user_id: createdLoginUser.user_id, 
-  login_id: createdLoginUser.id,
-  username: createdLoginUser.username, 
-  mobile: createdLoginUser.mobile_no, 
-  role: createdLoginUser.role, 
-  requiresName: true, 
-};
+    const authenticatedUser = {
+      id: createdLoginUser.user_id,
+      user_id: createdLoginUser.user_id,
+      login_id: createdLoginUser.id,
+      username: createdLoginUser.username,
+      mobile: createdLoginUser.mobile_no,
+      role: createdLoginUser.role,
+      requiresName: true,
+    };
 
     const token = generateToken(authenticatedUser);
 
@@ -324,7 +290,6 @@ exports.verifyOtp = async (req, res) => {
       user: authenticatedUser,
       requiresName: true,
     });
-
   } catch (err) {
     console.log("VERIFY ERROR:", err);
 
@@ -343,70 +308,58 @@ exports.loginWithPassword = async (req, res) => {
   try {
     const { mobile, password } = req.body;
 
-if (!mobile || !password) {
-  return res.status(400).json({
-    message: "Mobile and password are required",
-  });
-}
+    if (!mobile || !password) {
+      return res.status(400).json({
+        message: "Mobile and password are required",
+      });
+    }
 
-// Remove only accidental spaces at the beginning/end.
-// DO NOT change uppercase/lowercase.
-const cleanPassword = password.trim();
+    // Remove only accidental spaces at the beginning/end.
+    // DO NOT change uppercase/lowercase.
+    const cleanPassword = password.trim();
 
-console.log(
-  "PASSWORD FROM APP:",
-  JSON.stringify(password)
-);
+    console.log("PASSWORD FROM APP:", JSON.stringify(password));
 
-console.log(
-  "CLEAN PASSWORD:",
-  JSON.stringify(cleanPassword)
-);
+    console.log("CLEAN PASSWORD:", JSON.stringify(cleanPassword));
 
-// Find login record
-const loginUser = await UserLogin.findByMobile(mobile);
+    // Find login record
+    const loginUser = await UserLogin.findByMobile(mobile);
 
-if (!loginUser) {
-  return res.status(404).json({
-    message: "User not found",
-  });
-}
+    if (!loginUser) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
 
-console.log(
-  "PASSWORD FROM DATABASE:",
-  JSON.stringify(loginUser.password)
-);
+    console.log("PASSWORD FROM DATABASE:", JSON.stringify(loginUser.password));
 
-console.log(
-  "PASSWORD MATCH:",
-  loginUser.password === cleanPassword
-);
+    console.log("PASSWORD MATCH:", loginUser.password === cleanPassword);
 
-// Verify password
-if (loginUser.password !== cleanPassword) {
-  return res.status(401).json({
-    message: "Invalid password",
-  });
-}
+    // Verify password
+    if (loginUser.password !== cleanPassword) {
+      return res.status(401).json({
+        message: "Invalid password",
+      });
+    }
     // Find user
-   // Build authenticated user from PostgreSQL user_login record
-const user = { 
-  id: loginUser.user_id, 
-  user_id: loginUser.user_id, 
-  login_id: loginUser.id,
-  username: loginUser.username, 
-  mobile: loginUser.mobile_no, 
-  role: loginUser.role, 
-};
+    // Build authenticated user from PostgreSQL user_login record
+    const user = {
+      id: loginUser.user_id,
+      user_id: loginUser.user_id,
+      login_id: loginUser.id,
+      username: loginUser.username,
+      mobile: loginUser.mobile_no,
+      role: loginUser.role,
+    };
 
-// Generate token
-const token = generateToken(user);
+    // Generate token
+    const token = generateToken(user);
 
-res.json({
-  message: "Login successful",
-  token,
-  user,
-});
+    res.json({
+      message: "Login successful",
+      token,
+      user,
+    });
   } catch (err) {
     console.log("PASSWORD LOGIN ERROR:", err);
     res.status(500).json({
@@ -443,7 +396,6 @@ exports.updateFcmToken = async (req, res) => {
       message: "FCM token saved successfully",
       user,
     });
-
   } catch (err) {
     console.error("FCM TOKEN ERROR:", err);
 
@@ -470,10 +422,7 @@ exports.updateUsername = async (req, res) => {
 
     const cleanUsername = username.trim();
 
-    const updatedUser = await UserLogin.updateUsername(
-      userId,
-      cleanUsername
-    );
+    const updatedUser = await UserLogin.updateUsername(userId, cleanUsername);
 
     if (!updatedUser) {
       return res.status(404).json({
@@ -487,18 +436,15 @@ exports.updateUsername = async (req, res) => {
       message: "Name updated successfully",
       user: updatedUser,
     });
-
-   } catch (err) {
+  } catch (err) {
     console.error("UPDATE USERNAME ERROR:", err);
 
     // Duplicate username
-    if (
-      err.code === "23505" &&
-      err.constraint === "user_login_username_key"
-    ) {
+    if (err.code === "23505" && err.constraint === "user_login_username_key") {
       return res.status(409).json({
         success: false,
-        message: "This name is already registered. Please choose a different name.",
+        message:
+          "This name is already registered. Please choose a different name.",
       });
     }
 
@@ -548,7 +494,6 @@ exports.verifyForgotPasswordOtp = async (req, res) => {
       success: true,
       message: "OTP verified successfully",
     });
-
   } catch (err) {
     console.error("VERIFY FORGOT PASSWORD OTP ERROR:", err);
 
@@ -564,19 +509,9 @@ exports.changePassword = async (req, res) => {
   console.log("BODY:", req.body);
 
   try {
-    const {
-      userId,
-      currentPassword,
-      newPassword,
-      confirmPassword,
-    } = req.body;
+    const { userId, currentPassword, newPassword, confirmPassword } = req.body;
 
-    if (
-      !userId ||
-      !currentPassword ||
-      !newPassword ||
-      !confirmPassword
-    ) {
+    if (!userId || !currentPassword || !newPassword || !confirmPassword) {
       return res.status(400).json({
         success: false,
         message: "All password fields are required",
@@ -613,10 +548,7 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    const updatedUser = await UserLogin.updatePassword(
-      userId,
-      newPassword
-    );
+    const updatedUser = await UserLogin.updatePassword(userId, newPassword);
 
     if (!updatedUser) {
       return res.status(500).json({
@@ -625,16 +557,12 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    console.log(
-      "PASSWORD CHANGED SUCCESSFULLY FOR USER:",
-      userId
-    );
+    console.log("PASSWORD CHANGED SUCCESSFULLY FOR USER:", userId);
 
     return res.json({
       success: true,
       message: "Password changed successfully",
     });
-
   } catch (error) {
     console.error("CHANGE PASSWORD ERROR:", error);
 
@@ -646,7 +574,7 @@ exports.changePassword = async (req, res) => {
 };
 exports.deleteAccount = async (req, res) => {
   try {
-    const {userId} = req.body;
+    const { userId } = req.body;
 
     if (!userId) {
       return res.status(400).json({
@@ -655,8 +583,7 @@ exports.deleteAccount = async (req, res) => {
       });
     }
 
-    const deletedUser =
-      await UserLogin.deactivateAccount(userId);
+    const deletedUser = await UserLogin.deactivateAccount(userId);
 
     if (!deletedUser) {
       return res.status(404).json({
@@ -670,16 +597,121 @@ exports.deleteAccount = async (req, res) => {
       message: "Account deleted successfully",
       data: deletedUser,
     });
-
   } catch (error) {
-    console.error(
-      "DELETE ACCOUNT ERROR:",
-      error
-    );
+    console.error("DELETE ACCOUNT ERROR:", error);
 
     return res.status(500).json({
       success: false,
       message: "Failed to delete account",
+    });
+  }
+};
+exports.login = async (req, res) => {
+  console.log("COMMON LOGIN ROUTE HIT");
+  console.log("BODY:", req.body);
+
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Username/email and password are required",
+      });
+    }
+
+    const loginValue = username.trim();
+
+    const result = await pool.query(
+      `
+      SELECT
+        ul.id,
+        ul.user_id,
+        ul.username,
+        ul.mobile_no,
+        ul.password,
+        ul.role,
+        ul.is_active,
+        ul.created_by,
+        ul.assigned_by,
+        ul.relationship_type,
+        ui.first_name,
+        ui.last_name,
+        ui.email
+      FROM user_login ul
+      LEFT JOIN user_info ui
+        ON ui.user_id = ul.user_id
+      WHERE
+        LOWER(ul.username) = LOWER($1)
+        OR LOWER(ui.email) = LOWER($1)
+      LIMIT 1
+      `,
+      [loginValue],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid username/email or password",
+      });
+    }
+
+    const user = result.rows[0];
+
+    if (!user.is_active) {
+      return res.status(403).json({
+        success: false,
+        message: "This account is inactive",
+      });
+    }
+
+    // Your database currently stores plain passwords
+    const passwordMatch = password === user.password;
+
+    if (!passwordMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid username/email or password",
+      });
+    }
+
+    const fullName = `${user.first_name || ""} ${user.last_name || ""}`.trim();
+
+    console.log("LOGIN USER:", {
+      user_id: user.user_id,
+      username: user.username,
+      role: user.role,
+      created_by: user.created_by,
+      assigned_by: user.assigned_by,
+      relationship_type: user.relationship_type,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+
+      user: {
+        id: user.id,
+        userId: user.user_id,
+        username: user.username,
+        email: user.email,
+        name: fullName || user.username,
+        role: user.role,
+        mobile: user.mobile_no,
+
+        // IMPORTANT
+        createdBy: user.created_by,
+        assignedBy: user.assigned_by,
+        relationshipType: user.relationship_type,
+      },
+    });
+  } catch (error) {
+    console.error("COMMON LOGIN ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error during login",
+      error: error.message,
     });
   }
 };
