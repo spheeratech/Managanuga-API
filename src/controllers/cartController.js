@@ -22,7 +22,8 @@ const addItem = async (req, res) => {
         JOIN user_login ul
           ON ul.mobile_no = u.mobile
         WHERE ul.user_id = $1
-          AND ul.is_active = true
+  AND ul.is_active = true
+  AND u.is_active = true
         LIMIT 1
         `,
         [entity_id]
@@ -86,8 +87,9 @@ const getItems = async (req, res) => {
         FROM users u
         JOIN user_login ul
           ON ul.mobile_no = u.mobile
-        WHERE ul.user_id = $1
-          AND ul.is_active = true
+      WHERE ul.user_id = $1
+  AND ul.is_active = true
+  AND u.is_active = true
         LIMIT 1
         `,
         [entity_id]
