@@ -17,10 +17,39 @@ const createOrder = async (req, res) => {
       quantity,
       tracking_number,
     } = req.body;
+    let resolvedEntityId = entity_id;
 
+    if (
+      entity_type === "USER" &&
+      typeof entity_id === "string" &&
+      entity_id.startsWith("MGU")
+    ) {
+      const userResult = await pool.query(
+        `
+        SELECT u.id
+        FROM users u
+        JOIN user_login ul
+          ON ul.mobile_no = u.mobile
+      WHERE ul.user_id = $1
+  AND ul.is_active = true
+  AND u.is_active = true
+        LIMIT 1
+        `,
+        [entity_id]
+      );
+
+      if (!userResult.rows[0]) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      resolvedEntityId = userResult.rows[0].id;
+    }
     const order = await Order.createOrder(
       entity_type,
-      entity_id,
+      resolvedEntityId,
       address_id,
       buyNow,
       productId,
@@ -101,6 +130,7 @@ const getOrders = async (req, res) => {
           ON ul.mobile_no = u.mobile
         WHERE ul.user_id = $1
           AND ul.is_active = true
+          AND u.is_active = true
         LIMIT 1
         `,
         [entity_id]

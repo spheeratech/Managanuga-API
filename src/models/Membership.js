@@ -78,6 +78,7 @@ const getActiveMembership = async (userId) => {
         ON ul.mobile_no = u.mobile
       WHERE ul.user_id = $1
         AND ul.is_active = true
+        AND u.is_active = true
       LIMIT 1
       `,
       [userId]
@@ -221,6 +222,34 @@ async (userId) => {
 
 
 const acceptTerms = async (userId) => {
+  let resolvedUserId = userId;
+
+  // Resolve public MGU user ID to numeric users.id
+  if (
+    typeof userId === "string" &&
+    userId.startsWith("MGU")
+  ) {
+    const userResult = await pool.query(
+      `
+      SELECT u.id
+      FROM users u
+      JOIN user_login ul
+        ON ul.mobile_no = u.mobile
+      WHERE ul.user_id = $1
+        AND ul.is_active = true
+        AND u.is_active = true
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (!userResult.rows[0]) {
+      throw new Error("User not found");
+    }
+
+    resolvedUserId = userResult.rows[0].id;
+  }
+
   const result = await pool.query(
     `
     UPDATE user_memberships
@@ -228,7 +257,7 @@ const acceptTerms = async (userId) => {
     WHERE user_id = $1
     RETURNING *
     `,
-    [userId]
+    [resolvedUserId]
   );
 
   if (result.rows.length === 0) {

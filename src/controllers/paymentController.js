@@ -214,6 +214,7 @@ if (typeof userId === "string" && userId.startsWith("MGU")) {
       ON ul.mobile_no = u.mobile
     WHERE ul.user_id = $1
       AND ul.is_active = true
+      AND u.is_active = true
     LIMIT 1
     `,
     [userId]
