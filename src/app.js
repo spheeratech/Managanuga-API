@@ -18,6 +18,7 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const legalContentRoutes = require("./routes/legalContentRoutes");
 const userDocumentRoutes = require("./routes/userDocumentRoutes");
 const eventPosterRoutes = require("./routes/eventPosterRoutes");
+const appImageRoutes = require("./routes/appImageRoutes");
 app.use(cors());
 app.use(express.json());
 
@@ -37,6 +38,7 @@ app.use("/vendor", vendorRoutes);
 app.use("/reseller", resellerRoutes);
 app.use("/legal", legalContentRoutes);
 app.get("/test", (req, res) => {
+  app.use("/app-images", appImageRoutes);
 res.json({
     message: "Main app working"
   });
