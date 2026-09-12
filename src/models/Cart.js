@@ -1,5 +1,31 @@
 const pool = require("../../db");
 
+const resolveEntityId = async (entityId) => {
+  if (typeof entityId !== "string" || !entityId.startsWith("MGU")) {
+    return entityId;
+  }
+
+  const result = await pool.query(
+    `
+    SELECT u.id
+    FROM users u
+    JOIN user_login ul
+      ON ul.mobile_no = u.mobile
+    WHERE ul.user_id = $1
+      AND ul.is_active = true
+      AND u.is_active = true
+    LIMIT 1
+    `,
+    [entityId],
+  );
+
+  if (result.rowCount === 0) {
+    throw new Error("User not found");
+  }
+
+  return result.rows[0].id;
+};
+
 /* --------------------------------
    HELPER: GET CART ITEM DETAILS
 -------------------------------- */
@@ -34,6 +60,7 @@ const getCartItemDetails = async (cartId) => {
 -------------------------------- */
 const addItem = async (data) => {
   const { entity_type, entity_id, item_type, item_id, quantity } = data;
+  const resolvedEntityId = await resolveEntityId(entity_id);
 
   const existing = await pool.query(
     `
@@ -44,7 +71,7 @@ const addItem = async (data) => {
       AND item_type = $3
       AND item_id = $4
     `,
-    [entity_type, entity_id, item_type, item_id],
+    [entity_type, resolvedEntityId, item_type, item_id],
   );
 
   // Item already exists
@@ -59,7 +86,7 @@ const addItem = async (data) => {
         AND item_id = $5
       RETURNING *
       `,
-      [quantity, entity_type, entity_id, item_type, item_id],
+      [quantity, entity_type, resolvedEntityId, item_type, item_id],
     );
 
     return await getCartItemDetails(updated.rows[0].id);
@@ -78,7 +105,7 @@ const addItem = async (data) => {
     VALUES ($1,$2,$3,$4,$5)
     RETURNING *
     `,
-    [entity_type, entity_id, item_type, item_id, quantity],
+    [entity_type, resolvedEntityId, item_type, item_id, quantity],
   );
 
   return await getCartItemDetails(result.rows[0].id);
@@ -88,6 +115,7 @@ const addItem = async (data) => {
    GET ALL ITEMS
 -------------------------------- */
 const getItems = async (entity_type, entity_id) => {
+  const resolvedEntityId = await resolveEntityId(entity_id);
   const result = await pool.query(
     `
     SELECT
@@ -109,7 +137,7 @@ const getItems = async (entity_type, entity_id) => {
       AND c.entity_id = $2
     ORDER BY c.id DESC
     `,
-    [entity_type, entity_id],
+    [entity_type, resolvedEntityId],
   );
 
   return result.rows;
