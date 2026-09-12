@@ -22,6 +22,7 @@ const getSubscriptionPlans = async (req, res) => {
   }
 };
 
+
 const getMyMembership = async (req, res) => {
   try {
     const { userId } = req.query;
