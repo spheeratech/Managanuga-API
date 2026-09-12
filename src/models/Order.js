@@ -225,14 +225,36 @@ const getOrdersByEntity = async (entity_type, entity_id) => {
   const result = await pool.query(
     `
     SELECT
-      id,
-      total_amount,
-      status,
-      created_at
-    FROM orders
-    WHERE entity_type = $1
-      AND entity_id = $2
-    ORDER BY id DESC
+      o.id,
+      o.total_amount,
+      o.status,
+      o.created_at,
+      oi.item_id AS product_id,
+      COALESCE(
+        (
+          SELECT ai.url
+          FROM app_images ai
+          WHERE ai.product_id = oi.item_id
+            AND ai.image_type = 'PRODUCT_IMAGE'
+          ORDER BY ai.id ASC
+          LIMIT 1
+        ),
+        p.image
+      ) AS image
+    FROM orders o
+    LEFT JOIN LATERAL (
+      SELECT
+        oi.item_id
+      FROM order_items oi
+      WHERE oi.order_id = o.id
+      ORDER BY oi.id ASC
+      LIMIT 1
+    ) oi ON TRUE
+    LEFT JOIN products p
+      ON p.id = oi.item_id
+    WHERE o.entity_type = $1
+      AND o.entity_id = $2
+    ORDER BY o.id DESC
     `,
     [entity_type, entity_id]
   );
@@ -250,7 +272,17 @@ const getOrderItems = async (orderId) => {
       oi.id,
       oi.item_id AS product_id,
       p.name AS product_name,
-      p.image,
+      COALESCE(
+        (
+          SELECT ai.url
+          FROM app_images ai
+          WHERE ai.product_id = oi.item_id
+            AND ai.image_type = 'PRODUCT_IMAGE'
+          ORDER BY ai.id ASC
+          LIMIT 1
+        ),
+        p.image
+      ) AS image,
       oi.quantity,
       oi.unit_price,
       (oi.quantity * oi.unit_price) AS total_price
@@ -275,6 +307,7 @@ const updateOrder = async (id, status) => {
     SET status = $1
     WHERE id = $2
     RETURNING *
+    
     `,
     [status, id],
   );
