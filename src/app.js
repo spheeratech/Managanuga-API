@@ -33,7 +33,7 @@ app.use(express.json());
 app.use("/api/categories", categoryRoutes);
 app.use("/api/admin/users", adminUserRoutes);
 app.use("/api/admin/orders", adminOrderRoutes);
-app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/subscriptions", subscriptionRoutes);
 app.use("/api/hubs", hubRoutes);
 
 app.use("/auth", authRoutes);
@@ -45,8 +45,6 @@ app.use("/address", addressRoutes);
 app.use("/user-documents", userDocumentRoutes);
 app.use("/orders", orderRoutes);
 app.use("/payments", paymentRoutes);
-
-// app.use("/subscriptions", subscriptionRoutes);
 
 app.use("/wallet", walletRoutes);
 app.use("/notifications", notificationRoutes);
