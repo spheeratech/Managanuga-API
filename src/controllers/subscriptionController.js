@@ -15,10 +15,10 @@ const getSubscriptionPlans = async (req, res) => {
   } catch (error) {
     console.error("Subscription Plans Error:", error);
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch subscription plans",
-    });
+   res.status(500).json({
+  success: false,
+  message: "Failed to fetch subscription plans",
+});
   }
 };
 
