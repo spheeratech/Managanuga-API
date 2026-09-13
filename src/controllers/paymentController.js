@@ -386,9 +386,8 @@ if (
     JOIN users u
       ON u.mobile = ul.mobile_no
     WHERE ul.user_id = $1
-      AND ul.is_active = true
-      AND u.is_active = true
-      AND ul.role IN ('VENDOR', 'RESELLER')
+    AND ul.is_active = true
+    AND u.is_active = true
     LIMIT 1
     `,
     [cleanReferralCode]
@@ -419,7 +418,7 @@ if (
 
 // Create membership
 const membership = await Membership.createMembership({
-    userId: resolvedUserId,
+  userId: resolvedUserId,
   planId: plan.id,
   paymentId: payment.id,
   walletBalance: plan.wallet_bonus,
@@ -429,6 +428,7 @@ const membership = await Membership.createMembership({
   termsAndConditions: true,
   assignedBy,
   assignedRole,
+  referralCode: validatedReferralCode,
 });
 
 // Process Vendor / Reseller benefit
