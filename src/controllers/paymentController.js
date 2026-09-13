@@ -202,6 +202,7 @@ const razorpayOrder =
   buyNow,
   productId,
   quantity,
+  referralCode,
 } = req.body;
 let resolvedUserId = userId;
 
@@ -362,6 +363,59 @@ console.log("Customer numeric ID:", customer.numeric_user_id);
 console.log("Customer login ID:", customer.login_user_id);
 console.log("Assigned By:", assignedBy);
 console.log("Assigned Role:", assignedRole);
+
+// ========================================
+// VALIDATE REFERRAL CODE
+// ========================================
+
+let validatedReferralCode = null;
+
+if (
+  typeof referralCode === "string" &&
+  referralCode.trim() !== ""
+) {
+  const cleanReferralCode = referralCode.trim();
+
+  const referralResult = await pool.query(
+    `
+    SELECT
+      u.id AS referrer_user_id,
+      ul.user_id AS referral_code,
+      ul.role
+    FROM user_login ul
+    JOIN users u
+      ON u.mobile = ul.mobile_no
+    WHERE ul.user_id = $1
+      AND ul.is_active = true
+      AND u.is_active = true
+      AND ul.role IN ('VENDOR', 'RESELLER')
+    LIMIT 1
+    `,
+    [cleanReferralCode]
+  );
+
+  const referrer = referralResult.rows[0];
+
+  if (!referrer) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid referral code",
+    });
+  }
+
+  if (
+    Number(referrer.referrer_user_id) ===
+    Number(resolvedUserId)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "You cannot use your own referral code",
+    });
+  }
+
+  validatedReferralCode = referrer.referral_code;
+}
+
 
 // Create membership
 const membership = await Membership.createMembership({
