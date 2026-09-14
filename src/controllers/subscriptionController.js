@@ -677,6 +677,111 @@ const deleteSubscriptionPlan = async (req, res) => {
     });
   }
 };
+const validateReferralCode = async (req, res) => {
+  try {
+    const {referralCode, userId} = req.body;
+
+    if (!referralCode || !referralCode.trim()) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        message: "Referral code is required",
+      });
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        message: "userId is required",
+      });
+    }
+
+    const referralResult = await pool.query(
+      `
+      SELECT
+        u.id AS referrer_user_id,
+        ul.user_id AS referral_code
+      FROM user_login ul
+      JOIN users u
+        ON u.mobile = ul.mobile_no
+      WHERE ul.user_id = $1
+        AND ul.is_active = true
+        AND u.is_active = true
+      LIMIT 1
+      `,
+      [referralCode.trim()]
+    );
+
+    const referrer = referralResult.rows[0];
+
+    if (!referrer) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        message: "Invalid referral code",
+      });
+    }
+
+    // Resolve the current user so self-referral can be rejected.
+    let currentUserId = userId;
+
+    if (
+      typeof userId === "string" &&
+      userId.startsWith("MGU")
+    ) {
+      const currentUserResult = await pool.query(
+        `
+        SELECT u.id
+        FROM users u
+        JOIN user_login ul
+          ON ul.mobile_no = u.mobile
+        WHERE ul.user_id = $1
+          AND ul.is_active = true
+          AND u.is_active = true
+        LIMIT 1
+        `,
+        [userId]
+      );
+
+      if (currentUserResult.rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          valid: false,
+          message: "Invalid user",
+        });
+      }
+
+      currentUserId = currentUserResult.rows[0].id;
+    }
+
+    if (
+      Number(referrer.referrer_user_id) ===
+      Number(currentUserId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        message: "You cannot use your own referral code",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      valid: true,
+      message: "Referral code is valid",
+      referralCode: referrer.referral_code,
+    });
+  } catch (error) {
+    console.error("Validate Referral Code Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      valid: false,
+      message: "Failed to validate referral code",
+    });
+  }
+};
 module.exports = {
   getSubscriptionPlans,
   getMyMembership,
@@ -688,4 +793,5 @@ module.exports = {
   assignSubscriptionToCustomer,
   toggleSubscriptionPlanStatus,
   deleteSubscriptionPlan,
+  validateReferralCode,
 };

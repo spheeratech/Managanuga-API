@@ -8,6 +8,7 @@ const {
   acceptSubscriptionTerms,
   createSubscriptionOrder,
   verifySubscriptionPayment,
+  validateReferralCode,
   createSubscriptionPlan,
   toggleSubscriptionPlanStatus,
   deleteSubscriptionPlan,
@@ -19,6 +20,7 @@ router.get("/plans", getSubscriptionPlans);
 router.get("/my-membership", getMyMembership);
 router.put("/accept-terms", acceptSubscriptionTerms);
 router.post("/create-order", createSubscriptionOrder);
+router.post("/validate-referral", validateReferralCode);
 router.post("/verify-payment", verifySubscriptionPayment);
 router.get("/admin/plans", getAdminSubscriptionPlans);
 router.post("/admin/plans", createSubscriptionPlan);
