@@ -115,6 +115,8 @@ const getProfile = async (userId) => {
       ui.city,
       ui.state,
       ui.pincode,
+      ui.contact_person_name,
+      ui.contact_person_mobile,
       ui.bank_account_no,
       ui.ifsc_code,
       ui.bank_name,
