@@ -74,8 +74,43 @@ const getBenefits = async (req, res) => {
   }
 
 };
+const getProfile = async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId is required",
+      });
+    }
+
+    const profile = await Vendor.getProfile(userId);
+
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        message: "Vendor profile not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: profile,
+    });
+  } catch (err) {
+    console.log(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
 module.exports = {
   getCustomers,
     getOrders,
   getBenefits,
+  getProfile,
 };

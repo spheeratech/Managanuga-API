@@ -7,6 +7,7 @@ const {
   getCustomers,
   getOrders,
   getBenefits,
+  getProfile,
 } = require("../controllers/vendorController");
 
 router.get(
@@ -21,6 +22,10 @@ router.get(
 router.get(
   "/benefits",
   getBenefits
+);
+router.get(
+  "/profile",
+  getProfile
 );
 
 module.exports = router;

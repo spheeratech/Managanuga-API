@@ -102,8 +102,36 @@ const getBenefits = async (vendorId) => {
 
 };
 
+const getProfile = async (userId) => {
+  const result = await pool.query(
+    `
+    SELECT
+      user_id,
+      first_name,
+      last_name,
+      email,
+      mobile,
+      address,
+      city,
+      state,
+      pincode,
+      bank_account_no,
+      ifsc_code,
+      bank_name,
+      bank_holder_name
+    FROM user_info
+    WHERE user_id = $1
+    LIMIT 1;
+    `,
+    [userId]
+  );
+
+  return result.rows[0] || null;
+};
+
 module.exports = {
   getCustomers,
   getOrders,
   getBenefits,
+  getProfile,
 };
