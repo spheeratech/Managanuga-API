@@ -106,24 +106,28 @@ const getProfile = async (userId) => {
   const result = await pool.query(
     `
     SELECT
-      user_id,
-      first_name,
-      last_name,
-      email,
-      mobile,
-      address,
-      city,
-      state,
-      pincode,
-      bank_account_no,
-      ifsc_code,
-      bank_name,
-      bank_holder_name
-    FROM user_info
-    WHERE user_id = $1
+      ui.user_id,
+      ui.first_name,
+      ui.last_name,
+      ui.email,
+      ui.mobile,
+      ui.address,
+      ui.city,
+      ui.state,
+      ui.pincode,
+      ui.bank_account_no,
+      ui.ifsc_code,
+      ui.bank_name,
+      ui.bank_holder_name
+    FROM user_login ul
+    INNER JOIN user_info ui
+      ON ui.mobile = ul.mobile_no
+    WHERE ul.user_id = $1
+      AND ul.role = 'VENDOR'
+      AND ul.is_active = true
     LIMIT 1;
     `,
-    [userId]
+    [String(userId).trim()]
   );
 
   return result.rows[0] || null;
