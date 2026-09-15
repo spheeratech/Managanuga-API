@@ -697,21 +697,17 @@ const validateReferralCode = async (req, res) => {
       });
     }
 
-    const referralResult = await pool.query(
-      `
-      SELECT
-        u.id AS referrer_user_id,
-        ul.user_id AS referral_code
-      FROM user_login ul
-      JOIN users u
-        ON u.mobile = ul.mobile_no
-      WHERE ul.user_id = $1
-        AND ul.is_active = true
-        AND u.is_active = true
-      LIMIT 1
-      `,
-      [referralCode.trim()]
-    );
+   const referralResult = await pool.query(
+  `
+  SELECT
+    ul.user_id AS referral_code
+  FROM user_login ul
+  WHERE ul.user_id = $1
+    AND ul.is_active = true
+  LIMIT 1
+  `,
+  [referralCode.trim()]
+);
 
     const referrer = referralResult.rows[0];
 
@@ -724,47 +720,35 @@ const validateReferralCode = async (req, res) => {
     }
 
     // Resolve the current user so self-referral can be rejected.
-    let currentUserId = userId;
+    const currentUserResult = await pool.query(
+  `
+  SELECT user_id
+  FROM user_login
+  WHERE user_id = $1
+    AND is_active = true
+  LIMIT 1
+  `,
+  [String(userId).trim()]
+);
 
-    if (
-      typeof userId === "string" &&
-      userId.startsWith("MGU")
-    ) {
-      const currentUserResult = await pool.query(
-        `
-        SELECT u.id
-        FROM users u
-        JOIN user_login ul
-          ON ul.mobile_no = u.mobile
-        WHERE ul.user_id = $1
-          AND ul.is_active = true
-          AND u.is_active = true
-        LIMIT 1
-        `,
-        [userId]
-      );
+if (currentUserResult.rows.length === 0) {
+  return res.status(400).json({
+    success: false,
+    valid: false,
+    message: "Invalid user",
+  });
+}
 
-      if (currentUserResult.rows.length === 0) {
-        return res.status(400).json({
-          success: false,
-          valid: false,
-          message: "Invalid user",
-        });
-      }
-
-      currentUserId = currentUserResult.rows[0].id;
-    }
-
-    if (
-      Number(referrer.referrer_user_id) ===
-      Number(currentUserId)
-    ) {
-      return res.status(400).json({
-        success: false,
-        valid: false,
-        message: "You cannot use your own referral code",
-      });
-    }
+   if (
+  String(referrer.referral_code).trim() ===
+  String(userId).trim()
+) {
+  return res.status(400).json({
+    success: false,
+    valid: false,
+    message: "You cannot use your own referral code",
+  });
+}
 
     return res.status(200).json({
       success: true,
