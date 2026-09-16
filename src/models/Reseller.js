@@ -60,8 +60,41 @@ const getBenefits = async (resellerId) => {
 
   return result.rows;
 };
+const getProfile = async (userId) => {
+  const result = await pool.query(
+    `
+    SELECT
+      ui.user_id,
+      ui.first_name,
+      ui.last_name,
+      ui.email,
+      ui.mobile,
+      ui.address,
+      ui.city,
+      ui.state,
+      ui.pincode,
+      ui.contact_person_name,
+      ui.contact_person_mobile,
+      ui.bank_account_no,
+      ui.ifsc_code,
+      ui.bank_name,
+      ui.bank_holder_name
+    FROM user_login ul
+    INNER JOIN user_info ui
+      ON ui.user_id = ul.user_id
+    WHERE ul.user_id = $1
+      AND ul.role = 'RESELLER'
+      AND ul.is_active = true
+    LIMIT 1;
+    `,
+    [String(userId).trim()]
+  );
+
+  return result.rows[0] || null;
+};
 
 module.exports = {
   getCustomers,
   getBenefits,
+  getProfile
 };
