@@ -57,34 +57,37 @@ const Wallet = {
         );
       }
 
-      const redeemResult = await client.query(
-        `
-        INSERT INTO redeem (
-          user_id,
-          user_type,
-          wallet_amount,
-          redeem_status,
-          redeem_created_date,
-          created_by
-        )
-        VALUES ($1, $2, $3, $4, NOW(), $5)
-        RETURNING
-          id,
-          user_id,
-          user_type,
-          wallet_amount,
-          redeem_status,
-          redeem_created_date,
-          created_by
-        `,
-        [
-          userId,
-          "RESELLER",
-          walletAmount,
-          "IN_PROGRESS",
-          userId,
-        ]
-      );
+     const redeemResult = await client.query(
+  `
+  INSERT INTO redeem (
+    transaction_id,
+    user_id,
+    user_type,
+    wallet_amount,
+    redeem_status,
+    redeem_created_date,
+    created_by
+  )
+  VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+  RETURNING
+    id,
+    transaction_id,
+    user_id,
+    user_type,
+    wallet_amount,
+    redeem_status,
+    redeem_created_date,
+    created_by
+  `,
+  [
+    transactionId,
+    userId,
+    "RESELLER",
+    walletAmount,
+    "IN_PROGRESS",
+    userId,
+  ]
+);
 
       await client.query(
         `
@@ -110,6 +113,48 @@ const Wallet = {
       client.release();
     }
   },
-};
 
+  async getLatestRedeem(userId) {
+  const result = await pool.query(
+    `
+    SELECT
+      id,
+      user_id,
+      user_type,
+      wallet_amount,
+      redeem_status,
+      redeem_created_date,
+      created_by
+    FROM redeem
+    WHERE user_id = $1
+    ORDER BY redeem_created_date DESC
+    LIMIT 1
+    `,
+    [userId]
+  );
+
+  return result.rows[0] || null;
+},
+async getRedeemTransactions(userId) {
+  const result = await pool.query(
+    `
+    SELECT
+      id,
+      user_id,
+      user_type,
+      wallet_amount,
+      redeem_status,
+      redeem_created_date,
+      created_by
+    FROM redeem
+    WHERE user_id = $1
+    ORDER BY redeem_created_date DESC
+    `,
+    [userId]
+  );
+
+  return result.rows;
+},
+
+};
 module.exports = Wallet;
