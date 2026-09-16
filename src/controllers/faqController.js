@@ -61,14 +61,15 @@ const getFAQs = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: {
-        user_id: loginUser.user_id,
-        login_id: loginUser.login_id,
-        login_role: loginUser.role,
-        faq_role: faqRole,
-        document_type: faq.document_type,
-        document_link: faq.document_link,
-      },
+     data: {
+  user_id: loginUser.user_id,
+  login_id: loginUser.login_id,
+  login_role: loginUser.role,
+  faq_role: faqRole,
+  document_type: faq.document_type,
+  document_link: faq.document_link,
+  faqs: faq.faqs,
+},
     });
   } catch (error) {
     console.error("Get FAQs error:", error);
