@@ -5,6 +5,7 @@ const router = express.Router();
 const {
   getCustomers,
   getBenefits,
+  getProfile
 } = require("../controllers/resellerController");
 
 router.get(
@@ -16,6 +17,8 @@ router.get(
   "/benefits",
   getBenefits
 );
+
+router.get('/profile', getProfile);
 
 module.exports = router;
 // const express = require("express");
