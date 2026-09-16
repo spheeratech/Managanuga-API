@@ -73,8 +73,74 @@ const createRedeemRequest = async (req, res) => {
     });
   }
 };
+const getRedeemStatus = async (req, res) => {
+  try {
+    const {userId} = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const redeem = await Wallet.getLatestRedeem(
+      String(userId).trim()
+    );
+
+    if (!redeem) {
+      return res.status(200).json({
+        success: true,
+        redeem: null,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      redeem,
+    });
+  } catch (error) {
+    console.error("Get Redeem Status Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+const getRedeemTransactions = async (req, res) => {
+  try {
+    const {userId} = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const transactions = await Wallet.getRedeemTransactions(
+      String(userId).trim()
+    );
+
+    res.status(200).json({
+      success: true,
+      transactions,
+    });
+  } catch (error) {
+    console.error("Get Redeem Transactions Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 module.exports = {
   getWallet,
-  createRedeemRequest
+  createRedeemRequest,
+  getRedeemStatus,
+  getRedeemTransactions
 };
