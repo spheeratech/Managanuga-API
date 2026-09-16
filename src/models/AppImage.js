@@ -9,7 +9,8 @@ const getAppImages = async () => {
       format,
       image_type
     FROM app_images
-    WHERE image_type IN ('LOGO', 'BANNER', 'LOGIN_BG')
+    WHERE is_active = TRUE
+      AND image_type IN ('LOGO', 'BANNER', 'LOGIN_BG')
     ORDER BY
       CASE image_type
         WHEN 'LOGO' THEN 1
