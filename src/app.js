@@ -24,7 +24,7 @@ const legalContentRoutes = require("./routes/legalContentRoutes");
 const userDocumentRoutes = require("./routes/userDocumentRoutes");
 const eventPosterRoutes = require("./routes/eventPosterRoutes");
 const appImageRoutes = require("./routes/appImageRoutes");
-
+const faqRoutes = require("./routes/faqRoutes");
 const app = express();
 
 app.use(cors());
@@ -51,6 +51,8 @@ app.use("/notifications", notificationRoutes);
 app.use("/vendor", vendorRoutes);
 app.use("/reseller", resellerRoutes);
 app.use("/legal", legalContentRoutes);
+app.use("/faqs", faqRoutes);
+
 
 // App-managed images: logo, banners, login background
 app.use("/app-images", appImageRoutes);
