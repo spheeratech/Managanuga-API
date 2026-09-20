@@ -6,7 +6,8 @@ const getProducts = async () => {
     SELECT
       p.*,
       COALESCE(
-        json_agg(
+        (
+          SELECT json_agg(
           json_build_object(
             'id', ai.id,
             'image_name', ai.image_name,
@@ -14,14 +15,33 @@ const getProducts = async () => {
             'format', ai.format
           )
           ORDER BY ai.id
-        ) FILTER (WHERE ai.id IS NOT NULL),
+          )
+          FROM app_images ai
+          WHERE ai.product_id = p.id
+            AND ai.image_type = 'PRODUCT_IMAGE'
+            AND ai.is_active = true
+        ),
         '[]'
-      ) AS images
+      ) AS images,
+      COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', ai.id,
+              'image_name', ai.image_name,
+              'url', ai.url,
+              'format', ai.format
+            )
+            ORDER BY ai.id
+          )
+          FROM app_images ai
+          WHERE ai.product_id = p.id
+            AND ai.image_type = 'PRODUCT_VIEW'
+            AND ai.is_active = true
+        ),
+        '[]'
+      ) AS product_views
     FROM products p
-    LEFT JOIN app_images ai
-      ON ai.product_id = p.id
-      AND ai.image_type = 'PRODUCT_IMAGE'
-    GROUP BY p.id
     ORDER BY p.id DESC
   `);
 
@@ -34,7 +54,8 @@ const getProductById = async (id) => {
     SELECT
       p.*,
       COALESCE(
-        json_agg(
+        (
+          SELECT json_agg(
           json_build_object(
             'id', ai.id,
             'image_name', ai.image_name,
@@ -42,15 +63,34 @@ const getProductById = async (id) => {
             'format', ai.format
           )
           ORDER BY ai.id
-        ) FILTER (WHERE ai.id IS NOT NULL),
+          )
+          FROM app_images ai
+          WHERE ai.product_id = p.id
+            AND ai.image_type = 'PRODUCT_IMAGE'
+            AND ai.is_active = true
+        ),
         '[]'
-      ) AS images
+      ) AS images,
+      COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', ai.id,
+              'image_name', ai.image_name,
+              'url', ai.url,
+              'format', ai.format
+            )
+            ORDER BY ai.id
+          )
+          FROM app_images ai
+          WHERE ai.product_id = p.id
+            AND ai.image_type = 'PRODUCT_VIEW'
+            AND ai.is_active = true
+        ),
+        '[]'
+      ) AS product_views
     FROM products p
-    LEFT JOIN app_images ai
-      ON ai.product_id = p.id
-      AND ai.image_type = 'PRODUCT_IMAGE'
     WHERE p.id = $1
-    GROUP BY p.id
   `, [id]);
 
   return result.rows[0];
