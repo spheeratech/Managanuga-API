@@ -7,161 +7,206 @@ const calculateMembershipBenefits = async (
 
   // Load active membership
   const membershipResult = await pool.query(
-  `
-  SELECT *
-  FROM user_memberships
-  WHERE user_id = $1
-    AND status = 'ACTIVE'
+    `
+    SELECT *
+    FROM user_memberships
+    WHERE user_id = $1
+      AND status = 'ACTIVE'
+    ORDER BY id DESC
+    LIMIT 1
+    `,
+    [userId]
+  );
 
-  ORDER BY id DESC
-
-  LIMIT 1
-  `,
-  [userId]
-);
   const membership = membershipResult.rows[0];
 
   if (!membership) {
     return null;
   }
-  // Calculate subtotal and total litres
-let subtotal = 0;
-let totalLitres = 0;
 
-for (const item of cartItems) {
+  // Calculate current cart subtotal and litres
+  let subtotal = 0;
+  let totalLitres = 0;
 
-  subtotal +=
-    Number(item.price) * Number(item.quantity);
+  for (const item of cartItems) {
+    subtotal +=
+      Number(item.price) * Number(item.quantity);
 
-  totalLitres +=
-    Number(item.quantity);
+    totalLitres +=
+      Number(item.quantity);
+  }
 
-}
-// Membership usage
-const usedLitres =
-  Number(membership.used_litres);
+  // --------------------------------------------------
+  // PAYMENT SCREEN USAGE
+  // Count litres from previous non-refunded orders
+  // after the current membership started.
+  // --------------------------------------------------
 
-const monthlyLimit =
-  Number(membership.monthly_limit_litres);
-
-const remainingLitres =
-  Math.max(
-    monthlyLimit - usedLitres,
-    0
+  const previousOrdersResult = await pool.query(
+    `
+    SELECT
+      COALESCE(
+        SUM(oi.quantity * COALESCE(p.weight, 0)),
+        0
+      ) AS previous_order_litres
+    FROM orders o
+    INNER JOIN order_items oi
+      ON oi.order_id = o.id
+    INNER JOIN products p
+      ON p.id = oi.item_id
+    WHERE o.entity_type = 'USER'
+      AND o.entity_id = $1
+      AND o.status IN (
+        'PLACED',
+        'PROCESSING',
+        'PACKED',
+        'DELIVERED'
+      )
+      AND o.created_at >= $2
+    `,
+    [
+      userId,
+      membership.start_date,
+    ]
   );
 
-// Full discount litres
-const fullDiscountLitres =
-  Math.min(
-    totalLitres,
-    remainingLitres
-  );
-
-// Half discount litres
-const halfDiscountLitres =
-  Math.max(
-    totalLitres - remainingLitres,
-    0
-  );
-  // Membership discount calculation
-const discountPercent =
-  Number(membership.discount_percent);
-
-const halfDiscountPercent =
-  discountPercent / 2;
-
-let membershipDiscount = 0;
-
-// Calculate discount item-wise
-let remainingFullLitres =
-  fullDiscountLitres;
-
-for (const item of cartItems) {
-
-  const quantity =
-    Number(item.quantity);
-
-  const price =
-    Number(item.price);
-
-  // Full discount litres
-  const fullQty =
-    Math.min(
-      quantity,
-      remainingFullLitres
+  const previousOrderLitres =
+    Number(
+      previousOrdersResult.rows[0]?.previous_order_litres || 0
     );
 
-  membershipDiscount +=
-    fullQty *
-    price *
-    (discountPercent / 100);
+  const paymentUsageLitres =
+    Number(membership.used_litres || 0) +
+    previousOrderLitres;
 
-  remainingFullLitres -= fullQty;
+  const monthlyLimit =
+    Number(membership.monthly_limit_litres || 0);
 
-  // Remaining litres get half discount
-  const halfQty =
-    quantity - fullQty;
+  const paymentRemainingLitres =
+    Math.max(
+      monthlyLimit - paymentUsageLitres,
+      0
+    );
 
-  membershipDiscount +=
-    halfQty *
-    price *
-    (halfDiscountPercent / 100);
+  // --------------------------------------------------
+  // EXISTING MEMBERSHIP DISCOUNT CALCULATION
+  // --------------------------------------------------
 
-}
-// Monthly wallet claim
-const monthlyClaim =
-  Number(membership.monthly_claim);
+  const usedLitres =
+    Number(membership.used_litres);
 
-const monthlyClaimUsed =
-  Number(membership.monthly_claim_used);
+  const remainingLitres =
+    Math.max(
+      monthlyLimit - usedLitres,
+      0
+    );
 
-const remainingWalletClaim =
-  Math.max(
-    monthlyClaim - monthlyClaimUsed,
-    0
-  );
+  const fullDiscountLitres =
+    Math.min(
+      totalLitres,
+      remainingLitres
+    );
 
-// Wallet deduction cannot exceed subtotal after discount
-const walletClaim =
-  Math.min(
-    remainingWalletClaim,
-    subtotal - membershipDiscount
-  );
-  // Delivery charge
-// Members always get free delivery
-const deliveryCharge = 0;
-const payableAmount =
-  subtotal -
-  membershipDiscount -
-  walletClaim +
-  deliveryCharge;
+  const halfDiscountLitres =
+    Math.max(
+      totalLitres - remainingLitres,
+      0
+    );
 
-return {
+  const discountPercent =
+    Number(membership.discount_percent);
 
-  membership,
+  const halfDiscountPercent =
+    discountPercent / 2;
 
-  subtotal,
+  let membershipDiscount = 0;
 
-  totalLitres,
+  let remainingFullLitres =
+    fullDiscountLitres;
 
-  usedLitres,
+  for (const item of cartItems) {
 
-  remainingLitres,
+    const quantity =
+      Number(item.quantity);
 
-  fullDiscountLitres,
+    const price =
+      Number(item.price);
 
-  halfDiscountLitres,
+    const fullQty =
+      Math.min(
+        quantity,
+        remainingFullLitres
+      );
 
-  membershipDiscount,
+    membershipDiscount +=
+      fullQty *
+      price *
+      (discountPercent / 100);
 
-  walletClaim,
+    remainingFullLitres -= fullQty;
 
-  deliveryCharge,
+    const halfQty =
+      quantity - fullQty;
 
-  payableAmount,
+    membershipDiscount +=
+      halfQty *
+      price *
+      (halfDiscountPercent / 100);
+  }
 
+  // Monthly wallet claim
+  const monthlyClaim =
+    Number(membership.monthly_claim);
+
+  const monthlyClaimUsed =
+    Number(membership.monthly_claim_used);
+
+  const remainingWalletClaim =
+    Math.max(
+      monthlyClaim - monthlyClaimUsed,
+      0
+    );
+
+  const walletClaim =
+    Math.min(
+      remainingWalletClaim,
+      subtotal - membershipDiscount
+    );
+
+  // Members always get free delivery
+  const deliveryCharge = 0;
+
+  const payableAmount =
+    subtotal -
+    membershipDiscount -
+    walletClaim +
+    deliveryCharge;
+
+  return {
+    membership,
+
+    subtotal,
+    totalLitres,
+
+    // Existing membership values
+    usedLitres,
+    remainingLitres,
+
+    // Payment-screen-only values
+    paymentUsageLitres,
+    paymentRemainingLitres,
+
+    fullDiscountLitres,
+    halfDiscountLitres,
+
+    membershipDiscount,
+    walletClaim,
+
+    deliveryCharge,
+    payableAmount,
+  };
 };
-};
+
 module.exports = {
   calculateMembershipBenefits,
 };
