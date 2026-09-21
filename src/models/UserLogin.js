@@ -40,21 +40,76 @@ const UserLogin = {
     return result.rows[0];
   },
 
-async create(mobile, password, createdBy = null) {
+  async create(mobile, password, createdBy = null) {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    // Prevent simultaneous registrations from generating
-    // the same user ID.
+    // Lock registration for the same mobile number
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext($1))`,
+      [`USER_REGISTRATION:${mobile}`]
+    );
+
+    // Find existing customer record, if any.
+    // This allows a previously deactivated account to register again
+    // without creating a duplicate users row.
+    const existingUserResult = await client.query(
+      `
+      SELECT *
+      FROM users
+      WHERE mobile = $1
+      FOR UPDATE
+      `,
+      [mobile]
+    );
+
+    let customerUser;
+
+    if (existingUserResult.rows.length > 0) {
+      customerUser = existingUserResult.rows[0];
+
+      // Reactivate the customer record when registering again.
+      const updateUserResult = await client.query(
+        `
+        UPDATE users
+        SET
+          is_active = true,
+          deleted_at = NULL,
+          deleted_by = NULL,
+          role = 'USER'
+        WHERE id = $1
+        RETURNING *
+        `,
+        [customerUser.id]
+      );
+
+      customerUser = updateUserResult.rows[0];
+    } else {
+      // Create the numeric customer/entity record.
+      const userResult = await client.query(
+        `
+        INSERT INTO users (
+          mobile,
+          role,
+          is_active
+        )
+        VALUES ($1, 'USER', true)
+        RETURNING *
+        `,
+        [mobile]
+      );
+
+      customerUser = userResult.rows[0];
+    }
+
+    // Generate the next MGU ID safely.
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtext($1))`,
       ["MGU_USER_ID"]
     );
 
-    // Generate YYMMDD
-    // Example: 26 August 2026 -> 260826
     const dateResult = await client.query(`
       SELECT TO_CHAR(CURRENT_DATE, 'YYMMDD') AS date_code
     `);
@@ -62,7 +117,6 @@ async create(mobile, password, createdBy = null) {
     const dateCode = dateResult.rows[0].date_code;
     const prefix = `MGU${dateCode}`;
 
-    // Find the highest sequence for today
     const sequenceResult = await client.query(
       `
       SELECT COALESCE(
@@ -81,16 +135,14 @@ async create(mobile, password, createdBy = null) {
       Number(sequenceResult.rows[0].last_sequence) + 1;
 
     if (nextSequence > 99) {
-      throw new Error(
-        "Daily user registration limit exceeded"
-      );
+      throw new Error("Daily user registration limit exceeded");
     }
 
     const sequence = String(nextSequence).padStart(2, "0");
-
     const userId = `${prefix}${sequence}`;
 
-    const result = await client.query(
+    // Create authentication/MGU record.
+    const loginResult = await client.query(
       `
       INSERT INTO user_login
       (
@@ -103,7 +155,7 @@ async create(mobile, password, createdBy = null) {
         is_active
       )
       VALUES
-      ($1,$2,$3,$4,$5,$6,true)
+      ($1, $2, $3, $4, $5, $6, true)
       RETURNING *
       `,
       [
@@ -116,9 +168,14 @@ async create(mobile, password, createdBy = null) {
       ]
     );
 
+    const createdLoginUser = loginResult.rows[0];
+
     await client.query("COMMIT");
 
-    return result.rows[0];
+    return {
+      ...createdLoginUser,
+      numeric_user_id: customerUser.id,
+    };
 
   } catch (error) {
     await client.query("ROLLBACK");
