@@ -42,6 +42,26 @@ const getCartItemDetails = async (cartId) => {
         p.price,
         p.weight,
         p.stock,
+
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', ai.id,
+                'image_name', ai.image_name,
+                'url', ai.url,
+                'format', ai.format
+              )
+              ORDER BY ai.id
+            )
+            FROM app_images ai
+            WHERE ai.product_id = p.id
+              AND ai.image_type = 'PRODUCT_IMAGE'
+              AND ai.is_active = true
+          ),
+          '[]'
+        ) AS images,
+
         c.quantity,
         (p.price * c.quantity) AS total_price,
         c.created_at
@@ -129,6 +149,24 @@ const getItems = async (entity_type, entity_id) => {
       p.price,
       p.weight,
       p.stock,
+            COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', ai.id,
+              'image_name', ai.image_name,
+              'url', ai.url,
+              'format', ai.format
+            )
+            ORDER BY ai.id
+          )
+          FROM app_images ai
+          WHERE ai.product_id = p.id
+            AND ai.image_type = 'PRODUCT_IMAGE'
+            AND ai.is_active = true
+        ),
+        '[]'
+      ) AS images,
       c.quantity,
       (p.price * c.quantity) AS total_price,
       c.created_at
@@ -200,6 +238,24 @@ const getAllItems = async () => {
       p.price,
       p.weight,
       p.stock,
+COALESCE(
+  (
+    SELECT json_agg(
+      json_build_object(
+        'id', ai.id,
+        'image_name', ai.image_name,
+        'url', ai.url,
+        'format', ai.format
+      )
+      ORDER BY ai.id
+    )
+    FROM app_images ai
+    WHERE ai.product_id = p.id
+      AND ai.image_type = 'PRODUCT_IMAGE'
+      AND ai.is_active = true
+  ),
+  '[]'
+) AS images,
       c.quantity,
       (p.price * c.quantity) AS total_price,
       c.created_at
