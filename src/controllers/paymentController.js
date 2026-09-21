@@ -88,30 +88,46 @@ if (
     // Membership discount only for normal product orders
     if (paymentTypeUpper !== "MEMBERSHIP") {
 
-    const cartItems = await Cart.getItems(
-  "USER",
-  resolvedEntityId,
-);
-
-const benefits =
-  await calculateMembershipBenefits(
+  const cartItems = await Cart.getItems(
+    "USER",
     resolvedEntityId,
-    cartItems,
   );
 
-      if (benefits) {
+  const benefits =
+    await calculateMembershipBenefits(
+      resolvedEntityId,
+      cartItems,
+    );
 
-        finalAmount =
-          benefits.payableAmount;
+  if (benefits) {
 
-        console.log(
-          "Membership Benefits:",
-          benefits,
-        );
+    finalAmount = Number(
+      benefits.payableAmount
+    );
 
-      }
+    console.log(
+      "Membership Benefits:",
+      benefits,
+    );
 
-    }
+  } else {
+
+    const subtotal = cartItems.reduce(
+      (sum, item) =>
+        sum +
+        Number(item.price || 0) *
+          Number(item.quantity || 0),
+      0,
+    );
+
+    const deliveryCharge = 40;
+
+    finalAmount =
+      subtotal + deliveryCharge;
+
+  }
+
+}
 
     console.log(
       "Final Amount:",
@@ -714,16 +730,24 @@ const benefits =
     cartItems,
   );
 
-    return res.json({
+const subtotal = cartItems.reduce(
+  (sum, item) =>
+    sum +
+    Number(item.price || 0) *
+      Number(item.quantity || 0),
+  0,
+);
 
-      success: true,
+const payableAmount = benefits
+  ? Number(benefits.payableAmount)
+  : subtotal + 40;
 
-        cartItems,
-
-      membershipBenefits: benefits,
-
-
-    });
+return res.json({
+  success: true,
+  cartItems,
+  membershipBenefits: benefits,
+  payableAmount,
+});
 
   } catch (err) {
 
