@@ -766,6 +766,47 @@ if (currentUserResult.rows.length === 0) {
     });
   }
 };
+const getMembershipWallet = async (req, res) => {
+  try {
+    const userId =
+      req.user?.user_id ||
+      req.user?.id ||
+      req.query.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const wallet =
+      await Membership.getMembershipWallet(userId);
+
+    if (!wallet) {
+      return res.status(404).json({
+        success: false,
+        message: "Active membership not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: wallet,
+    });
+
+  } catch (error) {
+    console.error(
+      "GET MEMBERSHIP WALLET ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 module.exports = {
   getSubscriptionPlans,
   getMyMembership,
@@ -778,4 +819,5 @@ module.exports = {
   toggleSubscriptionPlanStatus,
   deleteSubscriptionPlan,
   validateReferralCode,
+  getMembershipWallet,
 };

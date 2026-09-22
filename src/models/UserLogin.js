@@ -215,22 +215,90 @@ async updateUsername(userId, username) {
 },
 
 async deactivateAccount(userId) {
-  const result = await pool.query(
-    `
-    UPDATE user_login
-    SET
-      is_active = false,
-      deleted_at = CURRENT_TIMESTAMP,
-      deleted_by = $1,
-      fcm_token = NULL
-    WHERE user_id = $1
-      AND is_active = true
-    RETURNING user_id, mobile_no, is_active, deleted_at, deleted_by;
-    `,
-    [userId]
-  );
+  const client = await pool.connect();
 
-  return result.rows[0];
+  try {
+    await client.query("BEGIN");
+
+    // Find the numeric customer ID linked to this MGU user ID.
+    const userResult = await client.query(
+      `
+      SELECT u.id
+      FROM users u
+      INNER JOIN user_login ul
+        ON ul.mobile_no = u.mobile
+      WHERE ul.user_id = $1
+        AND ul.is_active = true
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const numericUserId = userResult.rows[0].id;
+
+    // Deactivate all active memberships belonging to this customer.
+    await client.query(
+      `
+      UPDATE user_memberships
+      SET
+        status = 'INACTIVE',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1
+        AND status = 'ACTIVE'
+      `,
+      [numericUserId]
+    );
+
+    // Deactivate the login account.
+    const result = await client.query(
+      `
+      UPDATE user_login
+      SET
+        is_active = false,
+        deleted_at = CURRENT_TIMESTAMP,
+        deleted_by = $1,
+        fcm_token = NULL
+      WHERE user_id = $1
+        AND is_active = true
+      RETURNING user_id, mobile_no, is_active, deleted_at, deleted_by;
+      `,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    // Also mark the numeric customer record inactive.
+    await client.query(
+      `
+      UPDATE users
+      SET
+        is_active = false,
+        deleted_at = CURRENT_TIMESTAMP,
+        deleted_by = $1
+      WHERE id = $2
+      `,
+      [userId, numericUserId]
+    );
+
+    await client.query("COMMIT");
+
+    return result.rows[0];
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+
+  } finally {
+    client.release();
+  }
 },
 };
 

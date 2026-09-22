@@ -597,17 +597,17 @@ if (
   membershipBenefits
 ) {
 
-  await Membership.updateMembershipUsage({
+await Membership.updateMembershipUsage({
+  userId: resolvedUserId,
 
-      userId: resolvedUserId,
+  litresUsed:
+    membershipBenefits.totalLitres,
 
-    litresUsed:
-      membershipBenefits.totalLitres,
+  walletUsed:
+    membershipBenefits.walletClaim,
 
-    walletUsed:
-      membershipBenefits.walletClaim,
-
-  });
+  orderId: order.id,
+});
 
 }
 shipment = await xpressbeesService.createShipment({
