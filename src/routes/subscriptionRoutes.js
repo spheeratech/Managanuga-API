@@ -5,6 +5,7 @@ const router = express.Router();
 const {
   getSubscriptionPlans,
   getMyMembership,
+  getMembershipWallet,
   acceptSubscriptionTerms,
   createSubscriptionOrder,
   verifySubscriptionPayment,
@@ -18,6 +19,7 @@ const {
 
 router.get("/plans", getSubscriptionPlans);
 router.get("/my-membership", getMyMembership);
+router.get("/my-membership-wallet", getMembershipWallet);
 router.put("/accept-terms", acceptSubscriptionTerms);
 router.post("/create-order", createSubscriptionOrder);
 router.post("/validate-referral", validateReferralCode);

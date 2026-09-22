@@ -123,45 +123,242 @@ const getActiveMembership = async (userId) => {
 
   return result.rows[0];
 };
+
+const getMembershipWallet = async (userId) => {
+  let resolvedUserId = userId;
+
+  // Resolve public MGU ID to numeric users.id
+  if (
+    typeof userId === "string" &&
+    userId.startsWith("MGU")
+  ) {
+    const userResult = await pool.query(
+      `
+      SELECT u.id
+      FROM users u
+      JOIN user_login ul
+        ON ul.mobile_no = u.mobile
+      WHERE ul.user_id = $1
+        AND ul.is_active = true
+        AND u.is_active = true
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (!userResult.rows[0]) {
+      return null;
+    }
+
+    resolvedUserId = userResult.rows[0].id;
+  }
+
+  const membershipResult = await pool.query(
+    `
+    SELECT
+      um.id AS membership_id,
+      um.user_id,
+      um.status,
+      um.wallet_balance,
+      um.monthly_claim,
+      um.monthly_claim_used,
+      um.expiry_date,
+
+      sp.plan_name,
+      sp.plan_price,
+      sp.wallet_bonus,
+      sp.discount_percentage,
+      sp.monthly_claim AS plan_monthly_claim
+
+    FROM user_memberships um
+
+    INNER JOIN subscription_plans sp
+      ON sp.id = um.plan_id
+
+    WHERE
+      um.user_id = $1
+      AND um.status = 'ACTIVE'
+
+    ORDER BY um.id DESC
+
+    LIMIT 1
+    `,
+    [resolvedUserId]
+  );
+
+  if (membershipResult.rows.length === 0) {
+    return null;
+  }
+
+  const membership = membershipResult.rows[0];
+
+  const transactionResult = await pool.query(
+    `
+    SELECT
+      mwt.id,
+      mwt.order_id,
+      mwt.transaction_type,
+      mwt.amount,
+      mwt.balance_after,
+      mwt.description,
+      mwt.created_at
+
+    FROM membership_wallet_transactions mwt
+
+    WHERE
+      mwt.membership_id = $1
+
+    ORDER BY mwt.created_at DESC, mwt.id DESC
+    `,
+    [membership.membership_id]
+  );
+
+  const walletBonus = Number(membership.wallet_bonus || 0);
+  const walletBalance = Number(membership.wallet_balance || 0);
+
+  const usedWalletAmount = Math.max(
+    0,
+    walletBonus - walletBalance
+  );
+
+  return {
+    membership: {
+      id: membership.membership_id,
+      userId: resolvedUserId,
+      status: membership.status,
+      planName: membership.plan_name,
+      planPrice: Number(membership.plan_price || 0),
+      walletBonus,
+      walletBalance,
+      usedWalletAmount,
+      monthlyClaim: Number(
+        membership.monthly_claim || membership.plan_monthly_claim || 0
+      ),
+      monthlyClaimUsed: Number(
+        membership.monthly_claim_used || 0
+      ),
+      discountPercentage: Number(
+        membership.discount_percentage || 0
+      ),
+      expiryDate: membership.expiry_date,
+    },
+
+    transactions: transactionResult.rows.map((transaction) => ({
+      id: transaction.id,
+      orderId: transaction.order_id,
+      type: transaction.transaction_type,
+      amount: Number(transaction.amount),
+      balanceAfter: Number(transaction.balance_after),
+      description: transaction.description,
+      createdAt: transaction.created_at,
+    })),
+  };
+};
+
+
 const updateMembershipUsage = async ({
   userId,
   litresUsed,
   walletUsed,
+  orderId,
 }) => {
+  const client = await pool.connect();
 
-  const result = await pool.query(
-    `
-    UPDATE user_memberships
+  try {
+    await client.query("BEGIN");
 
-    SET
+    const membershipResult = await client.query(
+      `
+      SELECT
+        id,
+        wallet_balance
+      FROM user_memberships
+      WHERE
+        user_id = $1
+        AND status = 'ACTIVE'
+      ORDER BY id DESC
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [userId]
+    );
 
-      used_litres =
-        used_litres + $1,
+    if (membershipResult.rows.length === 0) {
+      throw new Error("Active membership not found");
+    }
 
-      monthly_claim_used =
-        monthly_claim_used + $2,
+    const membership = membershipResult.rows[0];
 
-      wallet_balance =
-        wallet_balance - $2,
+    const result = await client.query(
+      `
+      UPDATE user_memberships
+      SET
+        used_litres =
+          used_litres + $1,
 
-      updated_at = NOW()
+        monthly_claim_used =
+          monthly_claim_used + $2,
 
-    WHERE
-      user_id = $3
+        wallet_balance =
+          wallet_balance - $2,
 
-      AND status = 'ACTIVE'
+        updated_at = NOW()
 
-    RETURNING *;
-    `,
-    [
-      litresUsed,
-      walletUsed,
-      userId,
-    ]
-  );
+      WHERE id = $3
 
-  return result.rows[0];
+      RETURNING *;
+      `,
+      [
+        litresUsed,
+        walletUsed,
+        membership.id,
+      ]
+    );
+
+    const updatedMembership = result.rows[0];
+
+    // Record wallet usage only when money was actually used.
+    if (Number(walletUsed) > 0) {
+      await client.query(
+        `
+        INSERT INTO membership_wallet_transactions
+        (
+          membership_id,
+          user_id,
+          order_id,
+          transaction_type,
+          amount,
+          balance_after,
+          description
+        )
+        VALUES
+        ($1, $2, $3, 'DEBIT', $4, $5, $6)
+        `,
+        [
+          updatedMembership.id,
+          userId,
+          orderId,
+          Number(walletUsed),
+          Number(updatedMembership.wallet_balance),
+          `Used for Order #${orderId}`,
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return updatedMembership;
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+
+  } finally {
+    client.release();
+  }
 };
+
+
 const resetMonthlyBenefits = async (
   membershipId,
 ) => {
@@ -273,6 +470,7 @@ const acceptTerms = async (userId) => {
 module.exports = {
   createMembership,
   getActiveMembership,
+  getMembershipWallet,
   updateMembershipUsage,
   acceptTerms,
   resetMonthlyBenefits,
