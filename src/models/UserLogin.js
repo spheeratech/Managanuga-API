@@ -276,18 +276,17 @@ async deactivateAccount(userId) {
     }
 
     // Also mark the numeric customer record inactive.
-    await client.query(
-      `
-      UPDATE users
-      SET
-        is_active = false,
-        deleted_at = CURRENT_TIMESTAMP,
-        deleted_by = $1
-      WHERE id = $2
-      `,
-      [userId, numericUserId]
-    );
-
+   await client.query(
+  `
+  UPDATE users
+  SET
+    is_active = false,
+    deleted_at = CURRENT_TIMESTAMP,
+    deleted_by = $1
+  WHERE id = $2
+  `,
+  [numericUserId, numericUserId]
+);
     await client.query("COMMIT");
 
     return result.rows[0];
