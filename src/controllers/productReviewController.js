@@ -1,5 +1,9 @@
 const ProductReview = require("../models/ProductReview");
 
+/* --------------------------------
+   CREATE SINGLE PRODUCT REVIEW
+   Existing product-detail review
+-------------------------------- */
 const createReview = async (req, res) => {
   try {
     const { productId } = req.params;
@@ -48,6 +52,56 @@ const createReview = async (req, res) => {
   }
 };
 
+/* --------------------------------
+   CREATE ORDER REVIEW
+
+   One review applies to every
+   product in the order
+-------------------------------- */
+const createOrderReview = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { user_id, rating, review } = req.body;
+
+    if (!orderId || !user_id || !rating) {
+      return res.status(400).json({
+        success: false,
+        message: "orderId, user_id and rating are required",
+      });
+    }
+
+    if (Number(rating) < 1 || Number(rating) > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Rating must be between 1 and 5",
+      });
+    }
+
+    const result = await ProductReview.createOrderReview(
+      Number(orderId),
+      user_id,
+      Number(rating),
+      review || null
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Order review submitted successfully",
+      data: result,
+    });
+  } catch (error) {
+    console.error("CREATE ORDER REVIEW ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/* --------------------------------
+   GET PRODUCT REVIEWS
+-------------------------------- */
 const getProductReviews = async (req, res) => {
   try {
     const { productId } = req.params;
@@ -78,5 +132,6 @@ const getProductReviews = async (req, res) => {
 
 module.exports = {
   createReview,
+  createOrderReview,
   getProductReviews,
 };
