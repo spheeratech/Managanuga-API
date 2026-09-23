@@ -616,6 +616,55 @@ console.log(
     }
 
     /* --------------------------------
+   SAVE ORDER PRICE BREAKDOWN
+-------------------------------- */
+
+const itemsCost = membershipBenefits
+  ? Number(membershipBenefits.subtotal || 0)
+  : Number(order.total_amount || 0);
+
+const membershipDiscount = membershipBenefits
+  ? Number(membershipBenefits.membershipDiscount || 0)
+  : 0;
+
+const walletClaim = membershipBenefits
+  ? Number(membershipBenefits.walletClaim || 0)
+  : 0;
+
+const deliveryCharge = membershipBenefits
+  ? Number(membershipBenefits.deliveryCharge || 0)
+  : 40;
+
+await pool.query(
+  `
+  UPDATE orders
+  SET
+    items_cost = $1,
+    membership_discount = $2,
+    wallet_claim = $3,
+    delivery_charge = $4
+  WHERE id = $5
+  `,
+  [
+    itemsCost,
+    membershipDiscount,
+    walletClaim,
+    deliveryCharge,
+    order.id,
+  ]
+);
+
+console.log("===== ORDER PRICE BREAKDOWN =====");
+console.log({
+  orderId: order.id,
+  itemsCost,
+  membershipDiscount,
+  walletClaim,
+  deliveryCharge,
+  totalAmount: order.total_amount,
+});
+
+    /* --------------------------------
        GET DELIVERY ADDRESS
     -------------------------------- */
     const addressResult =
