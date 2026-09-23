@@ -1,7 +1,14 @@
 const pool = require("../../db");
 
+
+// =====================================================
+// HELPER: RESOLVE PUBLIC MGU ID → INTERNAL USER ID
+// =====================================================
 const resolveEntityId = async (entityId) => {
-  if (typeof entityId !== "string" || !entityId.startsWith("MGU")) {
+  if (
+    typeof entityId !== "string" ||
+    !entityId.startsWith("MGU")
+  ) {
     return entityId;
   }
 
@@ -13,7 +20,7 @@ const resolveEntityId = async (entityId) => {
       AND is_active = true
     LIMIT 1
     `,
-    [entityId],
+    [entityId]
   );
 
   if (result.rowCount === 0) {
@@ -23,12 +30,17 @@ const resolveEntityId = async (entityId) => {
   return result.rows[0].id;
 };
 
-/* --------------------------------
-   HELPER: GET CART ITEM DETAILS
--------------------------------- */
-const getCartItemDetails = async (cartId) => {
-  const result = await pool.query(
-    `
+
+// =====================================================
+// HELPER: GET CART ITEM DETAILS
+// =====================================================
+const getCartItemDetails = async (
+  cartId,
+  entity_type = null,
+  entity_id = null
+) => {
+
+  let query = `
     SELECT
         c.id AS cart_id,
         c.entity_type,
@@ -62,21 +74,43 @@ const getCartItemDetails = async (cartId) => {
         c.quantity,
         (p.price * c.quantity) AS total_price,
         c.created_at
+
     FROM cart_items c
+
     JOIN products p
       ON p.id = c.item_id
+
     WHERE c.id = $1
-    `,
-    [cartId],
+  `;
+
+  const values = [cartId];
+
+  // IMPORTANT:
+  // If user information is supplied,
+  // the cart item MUST belong to that user.
+  if (entity_type !== null && entity_id !== null) {
+    query += `
+      AND c.entity_type = $2
+      AND c.entity_id = $3
+    `;
+
+    values.push(entity_type, entity_id);
+  }
+
+  const result = await pool.query(
+    query,
+    values
   );
 
-  return result.rows[0];
+  return result.rows[0] || null;
 };
 
-/* --------------------------------
-   ADD ITEM
--------------------------------- */
+
+// =====================================================
+// ADD ITEM
+// =====================================================
 const addItem = async (data) => {
+
   const {
     entity_type,
     entity_id,
@@ -85,8 +119,11 @@ const addItem = async (data) => {
     quantity,
   } = data;
 
-  const resolvedEntityId = await resolveEntityId(entity_id);
+  const resolvedEntityId = await resolveEntityId(
+    entity_id
+  );
 
+  // Check if this SAME USER already has this product
   const existing = await pool.query(
     `
     SELECT *
@@ -101,11 +138,15 @@ const addItem = async (data) => {
       resolvedEntityId,
       item_type,
       item_id,
-    ],
+    ]
   );
 
-  // Item already exists
+
+  // ===================================================
+  // ITEM ALREADY EXISTS
+  // ===================================================
   if (existing.rowCount > 0) {
+
     const updated = await pool.query(
       `
       UPDATE cart_items
@@ -122,13 +163,18 @@ const addItem = async (data) => {
         resolvedEntityId,
         item_type,
         item_id,
-      ],
+      ]
     );
 
-    return await getCartItemDetails(updated.rows[0].id);
+    return await getCartItemDetails(
+      updated.rows[0].id
+    );
   }
 
-  // New item
+
+  // ===================================================
+  // NEW ITEM
+  // ===================================================
   const result = await pool.query(
     `
     INSERT INTO cart_items (
@@ -147,17 +193,26 @@ const addItem = async (data) => {
       item_type,
       item_id,
       quantity,
-    ],
+    ]
   );
 
-  return await getCartItemDetails(result.rows[0].id);
+  return await getCartItemDetails(
+    result.rows[0].id
+  );
 };
 
-/* --------------------------------
-   GET ALL ITEMS FOR USER
--------------------------------- */
-const getItems = async (entity_type, entity_id) => {
-  const resolvedEntityId = await resolveEntityId(entity_id);
+
+// =====================================================
+// GET ALL ITEMS FOR SPECIFIC USER
+// =====================================================
+const getItems = async (
+  entity_type,
+  entity_id
+) => {
+
+  const resolvedEntityId = await resolveEntityId(
+    entity_id
+  );
 
   const result = await pool.query(
     `
@@ -194,72 +249,136 @@ const getItems = async (entity_type, entity_id) => {
       c.quantity,
       (p.price * c.quantity) AS total_price,
       c.created_at
+
     FROM cart_items c
+
     JOIN products p
       ON p.id = c.item_id
+
     WHERE c.entity_type = $1
       AND c.entity_id = $2
+
     ORDER BY c.id DESC
     `,
     [
       entity_type,
       resolvedEntityId,
-    ],
+    ]
   );
 
   return result.rows;
 };
 
-/* --------------------------------
-   GET ITEM BY ID
--------------------------------- */
-const getItemById = async (id) => {
-  return await getCartItemDetails(id);
+
+// =====================================================
+// GET ONE ITEM FOR SPECIFIC USER
+// =====================================================
+const getItemById = async (
+  id,
+  entity_type,
+  entity_id
+) => {
+
+  const resolvedEntityId = await resolveEntityId(
+    entity_id
+  );
+
+  return await getCartItemDetails(
+    id,
+    entity_type,
+    resolvedEntityId
+  );
 };
 
-/* --------------------------------
-   UPDATE ITEM
--------------------------------- */
-const updateItem = async (id, quantity) => {
+
+// =====================================================
+// UPDATE ITEM FOR SPECIFIC USER
+// =====================================================
+const updateItem = async (
+  id,
+  entity_type,
+  entity_id,
+  quantity
+) => {
+
+  const resolvedEntityId = await resolveEntityId(
+    entity_id
+  );
+
   const result = await pool.query(
     `
     UPDATE cart_items
+
     SET quantity = $1
+
     WHERE id = $2
+      AND entity_type = $3
+      AND entity_id = $4
+
     RETURNING *
     `,
-    [quantity, id],
+    [
+      quantity,
+      id,
+      entity_type,
+      resolvedEntityId,
+    ]
   );
 
   if (result.rowCount === 0) {
     return null;
   }
 
-  return await getCartItemDetails(id);
+  return await getCartItemDetails(
+    id,
+    entity_type,
+    resolvedEntityId
+  );
 };
 
-/* --------------------------------
-   DELETE ITEM
--------------------------------- */
-const deleteItem = async (id) => {
+
+// =====================================================
+// DELETE ITEM FOR SPECIFIC USER
+// =====================================================
+const deleteItem = async (
+  id,
+  entity_type,
+  entity_id
+) => {
+
+  const resolvedEntityId = await resolveEntityId(
+    entity_id
+  );
+
   const result = await pool.query(
     `
     DELETE FROM cart_items
+
     WHERE id = $1
+      AND entity_type = $2
+      AND entity_id = $3
+
     RETURNING *
     `,
-    [id],
+    [
+      id,
+      entity_type,
+      resolvedEntityId,
+    ]
   );
 
-  return result.rows[0];
+  return result.rows[0] || null;
 };
 
-/* --------------------------------
-   GET ALL CART ITEMS
-   Admin / internal use
--------------------------------- */
+
+// =====================================================
+// GET ALL CART ITEMS
+// ADMIN / INTERNAL USE ONLY
+// =====================================================
 const getAllItems = async () => {
-  const result = await pool.query(`
+
+  const result = await pool.query(
+    `
     SELECT
       c.id AS cart_id,
       c.entity_type,
@@ -293,15 +412,23 @@ const getAllItems = async () => {
       c.quantity,
       (p.price * c.quantity) AS total_price,
       c.created_at
+
     FROM cart_items c
+
     JOIN products p
       ON p.id = c.item_id
+
     ORDER BY c.id DESC
-  `);
+    `
+  );
 
   return result.rows;
 };
 
+
+// =====================================================
+// EXPORTS
+// =====================================================
 module.exports = {
   addItem,
   getItems,
