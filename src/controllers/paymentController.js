@@ -287,23 +287,6 @@ const verifyPayment = async (req, res) => {
             razorpay_payment_id,
         }
       );
-/* --------------------------------
-   UPDATE ORDER PAYMENT STATUS
--------------------------------- */
-await pool.query(
-  `
-  UPDATE orders
-  SET payment_status = 'PAID'
-  WHERE id = $1
-  `,
-  [payment.order_id]
-);
-
-console.log(
-  `Order ${payment.order_id} payment_status updated to PAID`
-);
-
-
 
     /* --------------------------------
        PAYMENT SUCCESS NOTIFICATION
@@ -597,6 +580,33 @@ console.log(
           address_id
         );
     }
+
+
+    /* --------------------------------
+   UPDATE PAYMENT + ORDER PAYMENT STATUS
+-------------------------------- */
+
+await pool.query(
+  `
+  UPDATE payments
+  SET order_id = $1
+  WHERE id = $2
+  `,
+  [order.id, payment.id]
+);
+
+await pool.query(
+  `
+  UPDATE orders
+  SET payment_status = 'PAID'
+  WHERE id = $1
+  `,
+  [order.id]
+);
+
+console.log(
+  `Payment ${payment.id} linked to order ${order.id} and marked PAID`
+);
 
     if (!order) {
       return res.status(400).json({
