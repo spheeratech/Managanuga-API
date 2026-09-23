@@ -7,13 +7,10 @@ const resolveEntityId = async (entityId) => {
 
   const result = await pool.query(
     `
-    SELECT u.id
-    FROM users u
-    JOIN user_login ul
-      ON ul.mobile_no = u.mobile
-    WHERE ul.user_id = $1
-      AND ul.is_active = true
-      AND u.is_active = true
+    SELECT id
+    FROM user_login
+    WHERE user_id = $1
+      AND is_active = true
     LIMIT 1
     `,
     [entityId],
@@ -80,7 +77,14 @@ const getCartItemDetails = async (cartId) => {
    ADD ITEM
 -------------------------------- */
 const addItem = async (data) => {
-  const { entity_type, entity_id, item_type, item_id, quantity } = data;
+  const {
+    entity_type,
+    entity_id,
+    item_type,
+    item_id,
+    quantity,
+  } = data;
+
   const resolvedEntityId = await resolveEntityId(entity_id);
 
   const existing = await pool.query(
@@ -92,7 +96,12 @@ const addItem = async (data) => {
       AND item_type = $3
       AND item_id = $4
     `,
-    [entity_type, resolvedEntityId, item_type, item_id],
+    [
+      entity_type,
+      resolvedEntityId,
+      item_type,
+      item_id,
+    ],
   );
 
   // Item already exists
@@ -107,7 +116,13 @@ const addItem = async (data) => {
         AND item_id = $5
       RETURNING *
       `,
-      [quantity, entity_type, resolvedEntityId, item_type, item_id],
+      [
+        quantity,
+        entity_type,
+        resolvedEntityId,
+        item_type,
+        item_id,
+      ],
     );
 
     return await getCartItemDetails(updated.rows[0].id);
@@ -123,20 +138,27 @@ const addItem = async (data) => {
       item_id,
       quantity
     )
-    VALUES ($1,$2,$3,$4,$5)
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING *
     `,
-    [entity_type, resolvedEntityId, item_type, item_id, quantity],
+    [
+      entity_type,
+      resolvedEntityId,
+      item_type,
+      item_id,
+      quantity,
+    ],
   );
 
   return await getCartItemDetails(result.rows[0].id);
 };
 
 /* --------------------------------
-   GET ALL ITEMS
+   GET ALL ITEMS FOR USER
 -------------------------------- */
 const getItems = async (entity_type, entity_id) => {
   const resolvedEntityId = await resolveEntityId(entity_id);
+
   const result = await pool.query(
     `
     SELECT
@@ -149,7 +171,8 @@ const getItems = async (entity_type, entity_id) => {
       p.price,
       p.weight,
       p.stock,
-            COALESCE(
+
+      COALESCE(
         (
           SELECT json_agg(
             json_build_object(
@@ -167,6 +190,7 @@ const getItems = async (entity_type, entity_id) => {
         ),
         '[]'
       ) AS images,
+
       c.quantity,
       (p.price * c.quantity) AS total_price,
       c.created_at
@@ -177,7 +201,10 @@ const getItems = async (entity_type, entity_id) => {
       AND c.entity_id = $2
     ORDER BY c.id DESC
     `,
-    [entity_type, resolvedEntityId],
+    [
+      entity_type,
+      resolvedEntityId,
+    ],
   );
 
   return result.rows;
@@ -226,6 +253,11 @@ const deleteItem = async (id) => {
 
   return result.rows[0];
 };
+
+/* --------------------------------
+   GET ALL CART ITEMS
+   Admin / internal use
+-------------------------------- */
 const getAllItems = async () => {
   const result = await pool.query(`
     SELECT
@@ -238,24 +270,26 @@ const getAllItems = async () => {
       p.price,
       p.weight,
       p.stock,
-COALESCE(
-  (
-    SELECT json_agg(
-      json_build_object(
-        'id', ai.id,
-        'image_name', ai.image_name,
-        'url', ai.url,
-        'format', ai.format
-      )
-      ORDER BY ai.id
-    )
-    FROM app_images ai
-    WHERE ai.product_id = p.id
-      AND ai.image_type = 'PRODUCT_IMAGE'
-      AND ai.is_active = true
-  ),
-  '[]'
-) AS images,
+
+      COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', ai.id,
+              'image_name', ai.image_name,
+              'url', ai.url,
+              'format', ai.format
+            )
+            ORDER BY ai.id
+          )
+          FROM app_images ai
+          WHERE ai.product_id = p.id
+            AND ai.image_type = 'PRODUCT_IMAGE'
+            AND ai.is_active = true
+        ),
+        '[]'
+      ) AS images,
+
       c.quantity,
       (p.price * c.quantity) AS total_price,
       c.created_at

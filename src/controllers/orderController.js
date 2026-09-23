@@ -4,6 +4,34 @@ const {
   sendOrderConfirmation,
 } = require("../services/whatsappService");
 const xpressbeesService = require("../services/xpressbeesService");
+
+const resolveUserId = async (entityId) => {
+  if (
+    typeof entityId !== "string" ||
+    !entityId.startsWith("MGU")
+  ) {
+    return entityId;
+  }
+
+  const result = await pool.query(
+    `
+    SELECT id
+    FROM user_login
+    WHERE user_id = $1
+      AND is_active = true
+    LIMIT 1
+    `,
+    [entityId]
+  );
+
+  if (!result.rows[0]) {
+    return null;
+  }
+
+  return result.rows[0].id;
+};
+
+
 const createOrder = async (req, res) => {
   console.log("ORDER BODY:", req.body);
 
@@ -17,6 +45,7 @@ const createOrder = async (req, res) => {
       quantity,
       tracking_number,
     } = req.body;
+
     let resolvedEntityId = entity_id;
 
     if (
@@ -24,29 +53,16 @@ const createOrder = async (req, res) => {
       typeof entity_id === "string" &&
       entity_id.startsWith("MGU")
     ) {
-      const userResult = await pool.query(
-        `
-        SELECT u.id
-        FROM users u
-        JOIN user_login ul
-          ON ul.mobile_no = u.mobile
-      WHERE ul.user_id = $1
-  AND ul.is_active = true
-  AND u.is_active = true
-        LIMIT 1
-        `,
-        [entity_id]
-      );
+      resolvedEntityId = await resolveUserId(entity_id);
 
-      if (!userResult.rows[0]) {
+      if (!resolvedEntityId) {
         return res.status(404).json({
           success: false,
           message: "User not found",
         });
       }
-
-      resolvedEntityId = userResult.rows[0].id;
     }
+
     const order = await Order.createOrder(
       entity_type,
       resolvedEntityId,
@@ -67,11 +83,17 @@ const createOrder = async (req, res) => {
     // SEND WHATSAPP ORDER CONFIRMATION
     // --------------------------------
     try {
-      const orderDetails = await Order.getOrderById(order.id);
-      const orderItems = await Order.getOrderItems(order.id);
+      const orderDetails =
+        await Order.getOrderById(order.id);
+
+      const orderItems =
+        await Order.getOrderItems(order.id);
 
       const productNames = orderItems
-        .map((item) => `${item.product_name} x${item.quantity}`)
+        .map(
+          (item) =>
+            `${item.product_name} x${item.quantity}`
+        )
         .join(", ");
 
       if (orderDetails?.phone) {
@@ -87,7 +109,6 @@ const createOrder = async (req, res) => {
         );
       }
     } catch (whatsappError) {
-      // IMPORTANT:
       // WhatsApp failure must NOT fail the order.
       console.error(
         "WHATSAPP ORDER CONFIRMATION FAILED:",
@@ -111,9 +132,13 @@ const createOrder = async (req, res) => {
   }
 };
 
+
 const getOrders = async (req, res) => {
   try {
-    const { entity_type, entity_id } = req.query;
+    const {
+      entity_type,
+      entity_id,
+    } = req.query;
 
     let resolvedEntityId = entity_id;
 
@@ -122,39 +147,28 @@ const getOrders = async (req, res) => {
       typeof entity_id === "string" &&
       entity_id.startsWith("MGU")
     ) {
-      const userResult = await pool.query(
-        `
-        SELECT u.id
-        FROM users u
-        JOIN user_login ul
-          ON ul.mobile_no = u.mobile
-        WHERE ul.user_id = $1
-          AND ul.is_active = true
-          AND u.is_active = true
-        LIMIT 1
-        `,
-        [entity_id]
-      );
+      resolvedEntityId =
+        await resolveUserId(entity_id);
 
-      if (!userResult.rows[0]) {
+      if (!resolvedEntityId) {
         return res.status(404).json({
           success: false,
           message: "User not found",
         });
       }
-
-      resolvedEntityId = userResult.rows[0].id;
     }
 
     let orders;
 
     if (entity_type && resolvedEntityId) {
-      orders = await Order.getOrdersByEntity(
-        entity_type,
-        resolvedEntityId
-      );
+      orders =
+        await Order.getOrdersByEntity(
+          entity_type,
+          resolvedEntityId
+        );
     } else {
-      orders = await Order.getOrders();
+      orders =
+        await Order.getOrders();
     }
 
     res.json({
@@ -162,8 +176,12 @@ const getOrders = async (req, res) => {
       count: orders.length,
       data: orders,
     });
+
   } catch (error) {
-    console.error("GET ORDERS ERROR:", error);
+    console.error(
+      "GET ORDERS ERROR:",
+      error
+    );
 
     res.status(500).json({
       success: false,
@@ -172,9 +190,13 @@ const getOrders = async (req, res) => {
   }
 };
 
+
 const getOrderById = async (req, res) => {
   try {
-    const order = await Order.getOrderById(req.params.id);
+    const order =
+      await Order.getOrderById(
+        req.params.id
+      );
 
     if (!order) {
       return res.status(404).json({
@@ -187,6 +209,7 @@ const getOrderById = async (req, res) => {
       success: true,
       data: order,
     });
+
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -195,15 +218,20 @@ const getOrderById = async (req, res) => {
   }
 };
 
+
 const getOrderItems = async (req, res) => {
   try {
-    const items = await Order.getOrderItems(req.params.id);
+    const items =
+      await Order.getOrderItems(
+        req.params.id
+      );
 
     res.json({
       success: true,
       count: items.length,
       data: items,
     });
+
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -212,15 +240,21 @@ const getOrderItems = async (req, res) => {
   }
 };
 
+
 const updateOrder = async (req, res) => {
   try {
-    const order = await Order.updateOrder(req.params.id, req.body.status);
+    const order =
+      await Order.updateOrder(
+        req.params.id,
+        req.body.status
+      );
 
     res.json({
       success: true,
       message: "Order updated successfully",
       data: order,
     });
+
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -229,15 +263,20 @@ const updateOrder = async (req, res) => {
   }
 };
 
+
 const deleteOrder = async (req, res) => {
   try {
-    const order = await Order.deleteOrder(req.params.id);
+    const order =
+      await Order.deleteOrder(
+        req.params.id
+      );
 
     res.json({
       success: true,
       message: "Order deleted successfully",
       data: order,
     });
+
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -245,11 +284,14 @@ const deleteOrder = async (req, res) => {
     });
   }
 };
+
+
 const trackOrder = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const order = await Order.getOrderById(id);
+    const order =
+      await Order.getOrderById(id);
 
     if (!order) {
       return res.status(404).json({
@@ -265,20 +307,29 @@ const trackOrder = async (req, res) => {
       });
     }
 
-    const tracking = await xpressbeesService.trackShipment(
-      order.tracking_number
-    );
+    const tracking =
+      await xpressbeesService.trackShipment(
+        order.tracking_number
+      );
 
     res.json(tracking);
- } catch (err) {
-  console.error("Tracking Error:", err.response?.data || err.message);
 
-  res.status(500).json({
-    success: false,
-    message: err.response?.data || err.message,
-  });
-}
-}
+  } catch (err) {
+    console.error(
+      "Tracking Error:",
+      err.response?.data ||
+        err.message
+    );
+
+    res.status(500).json({
+      success: false,
+      message:
+        err.response?.data ||
+        err.message,
+    });
+  }
+};
+
 
 module.exports = {
   createOrder,

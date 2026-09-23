@@ -9,7 +9,7 @@ const addItem = async (req, res) => {
 
     let resolvedEntityId = entity_id;
 
-    // Resolve public MGU user ID to numeric users.id
+    // Resolve public MGU user ID to numeric user_login.id
     if (
       entity_type === "USER" &&
       typeof entity_id === "string" &&
@@ -17,13 +17,10 @@ const addItem = async (req, res) => {
     ) {
       const userResult = await pool.query(
         `
-        SELECT u.id
-        FROM users u
-        JOIN user_login ul
-          ON ul.mobile_no = u.mobile
-        WHERE ul.user_id = $1
-  AND ul.is_active = true
-  AND u.is_active = true
+        SELECT id
+        FROM user_login
+        WHERE user_id = $1
+          AND is_active = true
         LIMIT 1
         `,
         [entity_id]
@@ -57,10 +54,11 @@ const addItem = async (req, res) => {
   }
 };
 
+
 // Get Items by entity id
 const getItems = async (req, res) => {
   try {
-    const {entity_type, entity_id} = req.query;
+    const { entity_type, entity_id } = req.query;
 
     // GET ALL CARTS
     if (!entity_type && !entity_id) {
@@ -75,7 +73,7 @@ const getItems = async (req, res) => {
 
     let resolvedEntityId = entity_id;
 
-    // Resolve public MGU user ID to numeric users.id
+    // Resolve public MGU user ID to numeric user_login.id
     if (
       entity_type === "USER" &&
       typeof entity_id === "string" &&
@@ -83,13 +81,10 @@ const getItems = async (req, res) => {
     ) {
       const userResult = await pool.query(
         `
-        SELECT u.id
-        FROM users u
-        JOIN user_login ul
-          ON ul.mobile_no = u.mobile
-      WHERE ul.user_id = $1
-  AND ul.is_active = true
-  AND u.is_active = true
+        SELECT id
+        FROM user_login
+        WHERE user_id = $1
+          AND is_active = true
         LIMIT 1
         `,
         [entity_id]
@@ -107,7 +102,7 @@ const getItems = async (req, res) => {
 
     const items = await Cart.getItems(
       entity_type,
-      resolvedEntityId,
+      resolvedEntityId
     );
 
     res.json({
@@ -122,6 +117,7 @@ const getItems = async (req, res) => {
     });
   }
 };
+
 
 // Get one item
 const getItemById = async (req, res) => {
@@ -146,6 +142,7 @@ const getItemById = async (req, res) => {
     });
   }
 };
+
 
 // Update Item
 const updateItem = async (req, res) => {
@@ -175,6 +172,7 @@ const updateItem = async (req, res) => {
   }
 };
 
+
 // Delete Item
 const deleteItem = async (req, res) => {
   try {
@@ -199,6 +197,7 @@ const deleteItem = async (req, res) => {
     });
   }
 };
+
 
 module.exports = {
   addItem,

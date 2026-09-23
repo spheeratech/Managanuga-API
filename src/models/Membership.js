@@ -1,4 +1,31 @@
-const pool = require("../../db")
+const pool = require("../../db");
+
+const resolveUserId = async (userId) => {
+  if (
+    typeof userId === "string" &&
+    userId.startsWith("MGU")
+  ) {
+    const result = await pool.query(
+      `
+      SELECT id
+      FROM user_login
+      WHERE user_id = $1
+        AND is_active = true
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (!result.rows[0]) {
+      return null;
+    }
+
+    return result.rows[0].id;
+  }
+
+  return userId;
+};
+
 
 const createMembership = async ({
   userId,
@@ -13,85 +40,69 @@ const createMembership = async ({
   assignedRole = null,
   referralCode = null,
 }) => {
+  const resolvedUserId = await resolveUserId(userId);
+
+  if (!resolvedUserId) {
+    throw new Error("User not found");
+  }
+
   await pool.query(
-  `
-  UPDATE user_memberships
+    `
+    UPDATE user_memberships
+    SET
+      status = 'EXPIRED',
+      updated_at = NOW()
+    WHERE
+      user_id = $1
+      AND status = 'ACTIVE'
+    `,
+    [resolvedUserId]
+  );
 
-  SET
-    status = 'EXPIRED',
-    updated_at = NOW()
-
-  WHERE
-    user_id = $1
-    AND status = 'ACTIVE'
-  `,
-  [userId]
-);
   const result = await pool.query(
-  `
-INSERT INTO user_memberships
-(
-  user_id,
-  plan_id,
-  payment_id,
-  wallet_balance,
-  discount_percent,
-  monthly_claim,
-  expiry_date,
-  terms_and_conditions,
-  assigned_by,
-  assigned_role,
-  referral_code
-)
-VALUES
-($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-  RETURNING *;
-  `,
-  [
-    userId,
-    planId,
-    paymentId,
-    walletBalance,
-    discountPercent,
-    monthlyClaim,
-    expiryDate,
-    termsAndConditions,
-    assignedBy,
-    assignedRole,
-    referralCode,
-  ]
-);
+    `
+    INSERT INTO user_memberships
+    (
+      user_id,
+      plan_id,
+      payment_id,
+      wallet_balance,
+      discount_percent,
+      monthly_claim,
+      expiry_date,
+      terms_and_conditions,
+      assigned_by,
+      assigned_role,
+      referral_code
+    )
+    VALUES
+    ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    RETURNING *;
+    `,
+    [
+      resolvedUserId,
+      planId,
+      paymentId,
+      walletBalance,
+      discountPercent,
+      monthlyClaim,
+      expiryDate,
+      termsAndConditions,
+      assignedBy,
+      assignedRole,
+      referralCode,
+    ]
+  );
 
   return result.rows[0];
 };
 
+
 const getActiveMembership = async (userId) => {
-  let resolvedUserId = userId;
+  const resolvedUserId = await resolveUserId(userId);
 
-  // Resolve public MGU user ID to numeric users.id
-  if (
-    typeof userId === "string" &&
-    userId.startsWith("MGU")
-  ) {
-    const userResult = await pool.query(
-      `
-      SELECT u.id
-      FROM users u
-      JOIN user_login ul
-        ON ul.mobile_no = u.mobile
-      WHERE ul.user_id = $1
-        AND ul.is_active = true
-        AND u.is_active = true
-      LIMIT 1
-      `,
-      [userId]
-    );
-
-    if (!userResult.rows[0]) {
-      return null;
-    }
-
-    resolvedUserId = userResult.rows[0].id;
+  if (!resolvedUserId) {
+    return null;
   }
 
   const result = await pool.query(
@@ -124,33 +135,12 @@ const getActiveMembership = async (userId) => {
   return result.rows[0];
 };
 
+
 const getMembershipWallet = async (userId) => {
-  let resolvedUserId = userId;
+  const resolvedUserId = await resolveUserId(userId);
 
-  // Resolve public MGU ID to numeric users.id
-  if (
-    typeof userId === "string" &&
-    userId.startsWith("MGU")
-  ) {
-    const userResult = await pool.query(
-      `
-      SELECT u.id
-      FROM users u
-      JOIN user_login ul
-        ON ul.mobile_no = u.mobile
-      WHERE ul.user_id = $1
-        AND ul.is_active = true
-        AND u.is_active = true
-      LIMIT 1
-      `,
-      [userId]
-    );
-
-    if (!userResult.rows[0]) {
-      return null;
-    }
-
-    resolvedUserId = userResult.rows[0].id;
+  if (!resolvedUserId) {
+    return null;
   }
 
   const membershipResult = await pool.query(
@@ -213,8 +203,13 @@ const getMembershipWallet = async (userId) => {
     [membership.membership_id]
   );
 
-  const walletBonus = Number(membership.wallet_bonus || 0);
-  const walletBalance = Number(membership.wallet_balance || 0);
+  const walletBonus = Number(
+    membership.wallet_bonus || 0
+  );
+
+  const walletBalance = Number(
+    membership.wallet_balance || 0
+  );
 
   const usedWalletAmount = Math.max(
     0,
@@ -232,7 +227,9 @@ const getMembershipWallet = async (userId) => {
       walletBalance,
       usedWalletAmount,
       monthlyClaim: Number(
-        membership.monthly_claim || membership.plan_monthly_claim || 0
+        membership.monthly_claim ||
+        membership.plan_monthly_claim ||
+        0
       ),
       monthlyClaimUsed: Number(
         membership.monthly_claim_used || 0
@@ -243,15 +240,19 @@ const getMembershipWallet = async (userId) => {
       expiryDate: membership.expiry_date,
     },
 
-    transactions: transactionResult.rows.map((transaction) => ({
-      id: transaction.id,
-      orderId: transaction.order_id,
-      type: transaction.transaction_type,
-      amount: Number(transaction.amount),
-      balanceAfter: Number(transaction.balance_after),
-      description: transaction.description,
-      createdAt: transaction.created_at,
-    })),
+    transactions: transactionResult.rows.map(
+      (transaction) => ({
+        id: transaction.id,
+        orderId: transaction.order_id,
+        type: transaction.transaction_type,
+        amount: Number(transaction.amount),
+        balanceAfter: Number(
+          transaction.balance_after
+        ),
+        description: transaction.description,
+        createdAt: transaction.created_at,
+      })
+    ),
   };
 };
 
@@ -262,6 +263,12 @@ const updateMembershipUsage = async ({
   walletUsed,
   orderId,
 }) => {
+  const resolvedUserId = await resolveUserId(userId);
+
+  if (!resolvedUserId) {
+    throw new Error("User not found");
+  }
+
   const client = await pool.connect();
 
   try {
@@ -280,7 +287,7 @@ const updateMembershipUsage = async ({
       LIMIT 1
       FOR UPDATE
       `,
-      [userId]
+      [resolvedUserId]
     );
 
     if (membershipResult.rows.length === 0) {
@@ -317,7 +324,6 @@ const updateMembershipUsage = async ({
 
     const updatedMembership = result.rows[0];
 
-    // Record wallet usage only when money was actually used.
     if (Number(walletUsed) > 0) {
       await client.query(
         `
@@ -336,10 +342,12 @@ const updateMembershipUsage = async ({
         `,
         [
           updatedMembership.id,
-          userId,
+          resolvedUserId,
           orderId,
           Number(walletUsed),
-          Number(updatedMembership.wallet_balance),
+          Number(
+            updatedMembership.wallet_balance
+          ),
           `Used for Order #${orderId}`,
         ]
       );
@@ -360,36 +368,29 @@ const updateMembershipUsage = async ({
 
 
 const resetMonthlyBenefits = async (
-  membershipId,
+  membershipId
 ) => {
-
   const result = await pool.query(
     `
     UPDATE user_memberships
-
     SET
-
       used_litres = 0,
-
       monthly_claim_used = 0,
-
       last_reset_date = CURRENT_DATE,
-
       updated_at = NOW()
-
     WHERE id = $1
-
     RETURNING *;
     `,
     [membershipId]
   );
 
   return result.rows[0];
-
 };
-  const checkAndResetMonthlyBenefits =
-async (userId) => {
 
+
+const checkAndResetMonthlyBenefits = async (
+  userId
+) => {
   const membership =
     await getActiveMembership(userId);
 
@@ -403,51 +404,26 @@ async (userId) => {
     new Date(membership.last_reset_date);
 
   const monthChanged =
-
-    today.getMonth() !== lastReset.getMonth()
-
-    ||
-
-    today.getFullYear() !== lastReset.getFullYear();
+    today.getMonth() !== lastReset.getMonth() ||
+    today.getFullYear() !==
+      lastReset.getFullYear();
 
   if (!monthChanged) {
     return membership;
   }
 
   return await resetMonthlyBenefits(
-    membership.id,
+    membership.id
   );
-
 };
 
 
 const acceptTerms = async (userId) => {
-  let resolvedUserId = userId;
+  const resolvedUserId =
+    await resolveUserId(userId);
 
-  // Resolve public MGU user ID to numeric users.id
-  if (
-    typeof userId === "string" &&
-    userId.startsWith("MGU")
-  ) {
-    const userResult = await pool.query(
-      `
-      SELECT u.id
-      FROM users u
-      JOIN user_login ul
-        ON ul.mobile_no = u.mobile
-      WHERE ul.user_id = $1
-        AND ul.is_active = true
-        AND u.is_active = true
-      LIMIT 1
-      `,
-      [userId]
-    );
-
-    if (!userResult.rows[0]) {
-      throw new Error("User not found");
-    }
-
-    resolvedUserId = userResult.rows[0].id;
+  if (!resolvedUserId) {
+    throw new Error("User not found");
   }
 
   const result = await pool.query(
@@ -461,11 +437,14 @@ const acceptTerms = async (userId) => {
   );
 
   if (result.rows.length === 0) {
-    throw new Error("Membership record not found");
+    throw new Error(
+      "Membership record not found"
+    );
   }
 
   return result.rows[0];
 };
+
 
 module.exports = {
   createMembership,
