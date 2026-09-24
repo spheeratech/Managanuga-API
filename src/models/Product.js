@@ -41,8 +41,8 @@ const getProducts = async () => {
         ),
         '[]'
       ) AS product_views
-    FROM products p
-    ORDER BY p.id DESC
+     FROM products p
+    ORDER BY p.display_order ASC
   `);
 
   return result.rows;
