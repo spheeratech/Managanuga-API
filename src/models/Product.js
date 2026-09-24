@@ -1,20 +1,31 @@
 const pool = require("../../db");
 
 // Get all products
+// Get all products
 const getProducts = async () => {
   const result = await pool.query(`
     SELECT
       p.*,
+
+      COALESCE(
+        (
+          SELECT ROUND(AVG(pr.rating)::numeric, 1)
+          FROM product_reviews pr
+          WHERE pr.product_id = p.id
+        ),
+        0
+      ) AS average_rating,
+
       COALESCE(
         (
           SELECT json_agg(
-          json_build_object(
-            'id', ai.id,
-            'image_name', ai.image_name,
-            'url', ai.url,
-            'format', ai.format
-          )
-          ORDER BY ai.id
+            json_build_object(
+              'id', ai.id,
+              'image_name', ai.image_name,
+              'url', ai.url,
+              'format', ai.format
+            )
+            ORDER BY ai.id
           )
           FROM app_images ai
           WHERE ai.product_id = p.id
@@ -23,6 +34,7 @@ const getProducts = async () => {
         ),
         '[]'
       ) AS images,
+
       COALESCE(
         (
           SELECT json_agg(
@@ -41,7 +53,8 @@ const getProducts = async () => {
         ),
         '[]'
       ) AS product_views
-     FROM products p
+
+    FROM products p
     ORDER BY p.display_order ASC
   `);
 
