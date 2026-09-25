@@ -22,6 +22,8 @@ const createUser = async (req, res) => {
   const client = await pool.connect();
 
   try {
+    // 🔍 ADD THE LOG RIGHT HERE:
+    console.log("🔥 LIVE SERVER RECEIVED BODY:", req.body);
     const {
       firstName,
       lastName,
@@ -45,7 +47,10 @@ const createUser = async (req, res) => {
       creatorRole,
       creatorUserId,
     } = req.body;
-
+    console.log("========================================");
+    console.log("CREATE USER REQUEST BODY");
+    console.log(JSON.stringify(req.body, null, 2));
+    console.log("========================================");
     // --------------------------------------------------
     // REQUIRED FIELDS
     // --------------------------------------------------
@@ -209,7 +214,7 @@ const createUser = async (req, res) => {
       {
         userId,
         username,
-        mobileNo,
+        mobileNo: clean(mobileNo),
         password: generatedPassword,
         role: targetRole,
         isActive: true,
@@ -221,22 +226,6 @@ const createUser = async (req, res) => {
         relationshipType: targetRole,
       },
       {
-        // userId,
-        // firstName,
-        // lastName: lastName || null,
-        // email: email || null,
-        // address: address || null,
-        // city: city || null,
-        // state: state || null,
-        // pincode: pincode || null,
-        // subscription: subscription || null,
-
-        // bankAccountNumber: bankAccountNumber || null,
-        // ifscCode: ifscCode || null,
-        // bankHolderName: bankHolderName || null,
-        // bankName: bankName || null,
-        // contactPersonName: contactPersonName || null,
-        // contactPersonNumber: contactPersonNumber || null,
         userId,
         firstName: clean(firstName),
         lastName: clean(lastName),
@@ -246,7 +235,7 @@ const createUser = async (req, res) => {
         state: clean(state),
         pincode: clean(pincode),
         subscription: clean(subscription),
-
+        mobile: clean(mobileNo),
         // ✅ Add these lines here:
         bankAccountNumber: clean(bankAccountNumber),
         ifscCode: clean(ifscCode)?.toUpperCase(),
@@ -256,7 +245,33 @@ const createUser = async (req, res) => {
         contactPersonNumber: clean(contactPersonNumber),
       },
     );
-
+    console.log("========================================");
+    console.log("INFO DATA SENT TO USER_INFO");
+    console.log(
+      JSON.stringify(
+        {
+          userId,
+          firstName: clean(firstName),
+          lastName: clean(lastName),
+          email: clean(email),
+          address: clean(address),
+          city: clean(city),
+          state: clean(state),
+          pincode: clean(pincode),
+          subscription: clean(subscription),
+          mobile: clean(mobileNo),
+          bankAccountNumber: clean(bankAccountNumber),
+          ifscCode: clean(ifscCode)?.toUpperCase(),
+          bankHolderName: clean(bankHolderName),
+          bankName: clean(bankName),
+          contactPersonName: clean(contactPersonName),
+          contactPersonNumber: clean(contactPersonNumber),
+        },
+        null,
+        2,
+      ),
+    );
+    console.log("========================================");
     await client.query("COMMIT");
 
     return res.status(201).json({
