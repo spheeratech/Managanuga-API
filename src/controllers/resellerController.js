@@ -1,6 +1,11 @@
 const Reseller = require("../models/Reseller");
 
 
+/*
+ * ============================================================
+ * GET RESELLER CUSTOMERS
+ * ============================================================
+ */
 const getCustomers = async (req, res) => {
   try {
     const { resellerId } = req.query;
@@ -18,6 +23,7 @@ const getCustomers = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      count: customers.length,
       data: customers,
     });
 
@@ -32,38 +38,11 @@ const getCustomers = async (req, res) => {
 };
 
 
-const getOrders = async (req, res) => {
-  try {
-    const { resellerId } = req.query;
-
-    if (!resellerId) {
-      return res.status(400).json({
-        success: false,
-        message: "resellerId is required",
-      });
-    }
-
-    const orders = await Reseller.getOrders(
-      String(resellerId).trim()
-    );
-
-    return res.status(200).json({
-      success: true,
-      count: orders.length,
-      data: orders,
-    });
-
-  } catch (err) {
-    console.error("GET RESELLER ORDERS ERROR:", err);
-
-    return res.status(500).json({
-      success: false,
-      message: err.message,
-    });
-  }
-};
-
-
+/*
+ * ============================================================
+ * GET RESELLER BENEFITS
+ * ============================================================
+ */
 const getBenefits = async (req, res) => {
   try {
     const { resellerId } = req.query;
@@ -81,6 +60,7 @@ const getBenefits = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      count: benefits.length,
       data: benefits,
     });
 
@@ -95,6 +75,11 @@ const getBenefits = async (req, res) => {
 };
 
 
+/*
+ * ============================================================
+ * GET RESELLER PROFILE
+ * ============================================================
+ */
 const getProfile = async (req, res) => {
   try {
     const { userId } = req.query;
@@ -106,7 +91,9 @@ const getProfile = async (req, res) => {
       });
     }
 
-    const profile = await Reseller.getProfile(userId);
+    const profile = await Reseller.getProfile(
+      String(userId).trim()
+    );
 
     if (!profile) {
       return res.status(404).json({
@@ -133,7 +120,6 @@ const getProfile = async (req, res) => {
 
 module.exports = {
   getCustomers,
-  getOrders,
   getBenefits,
   getProfile,
 };

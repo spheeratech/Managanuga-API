@@ -5,18 +5,31 @@ const pool = require("../../db");
  *
  * Rules:
  *
- * 1. Vendor directly assigned customer
+ * 1. Customer directly assigned to Vendor
  *    → Vendor gets 20%
  *
- * 2. Direct ManaGanuga reseller
+ * 2. Customer referred by a direct ManaGanuga Reseller
  *    → Reseller gets 15%
  *
- * 3. Vendor-created reseller assigned customer
+ * 3. Customer referred by a Vendor-created Reseller
  *    → Vendor gets 10%
  *    → Reseller gets 10%
  *
- * 4. No valid assignment
+ * 4. No valid assignment/referrer
  *    → No benefit
+ *
+ * IMPORTANT:
+ *
+ * The caller is responsible for resolving the referral source
+ * and passing its public user_id through assignedBy.
+ *
+ * Example:
+ *
+ * assignedBy  = "MGRS260803"
+ * assignedRole = "RESELLER"
+ *
+ * The service then determines whether that reseller has a
+ * parent vendor through user_login.created_by.
  */
 const processMembershipBenefit = async ({
   membershipId,
@@ -27,7 +40,11 @@ const processMembershipBenefit = async ({
   client = pool,
 }) => {
 
-  // No assignment = no benefit
+  /*
+   * ==========================================================
+   * NO ASSIGNMENT / REFERRER
+   * ==========================================================
+   */
   if (!assignedBy || !assignedRole) {
     console.log(
       "No assigned beneficiary. No wallet benefit."
@@ -36,23 +53,33 @@ const processMembershipBenefit = async ({
     return [];
   }
 
+
   const benefits = [];
 
+
   /*
+   * ==========================================================
    * CASE 1
-   * Customer assigned directly to Vendor
+   * CUSTOMER REFERRED / ASSIGNED DIRECTLY TO VENDOR
+   * ==========================================================
+   *
+   * Vendor gets 20%.
    */
   if (assignedRole === "VENDOR") {
 
     const vendorResult = await client.query(
       `
-      SELECT user_id, role
+      SELECT
+        user_id,
+        role
       FROM user_login
-      WHERE user_id = $1
+      WHERE
+        user_id = $1
         AND role = 'VENDOR'
+        AND is_active = true
       LIMIT 1
       `,
-      [assignedBy]
+      [String(assignedBy).trim()]
     );
 
     const vendor = vendorResult.rows[0];
@@ -78,9 +105,12 @@ const processMembershipBenefit = async ({
     });
   }
 
+
   /*
-   * CASE 2 / 3
-   * Customer assigned to Reseller
+   * ==========================================================
+   * CASE 2 / CASE 3
+   * CUSTOMER REFERRED / ASSIGNED TO RESELLER
+   * ==========================================================
    */
   else if (assignedRole === "RESELLER") {
 
@@ -91,11 +121,13 @@ const processMembershipBenefit = async ({
         role,
         created_by
       FROM user_login
-      WHERE user_id = $1
+      WHERE
+        user_id = $1
         AND role = 'RESELLER'
+        AND is_active = true
       LIMIT 1
       `,
-      [assignedBy]
+      [String(assignedBy).trim()]
     );
 
     const reseller = resellerResult.rows[0];
@@ -106,9 +138,17 @@ const processMembershipBenefit = async ({
       );
     }
 
+
     /*
-     * Check whether this reseller
-     * was created by a Vendor.
+     * ========================================================
+     * FIND PARENT VENDOR
+     * ========================================================
+     *
+     * If this reseller was created by a Vendor:
+     *
+     * Vendor → Reseller → Customer
+     *
+     * then both receive 10%.
      */
     let parentVendor = null;
 
@@ -120,19 +160,27 @@ const processMembershipBenefit = async ({
           user_id,
           role
         FROM user_login
-        WHERE user_id = $1
+        WHERE
+          user_id = $1
           AND role = 'VENDOR'
+          AND is_active = true
         LIMIT 1
         `,
-        [reseller.created_by]
+        [String(reseller.created_by).trim()]
       );
 
       parentVendor = vendorResult.rows[0];
     }
 
+
     /*
+     * ========================================================
      * CASE 3
-     * Vendor-created reseller
+     * VENDOR-CREATED RESELLER
+     * ========================================================
+     *
+     * Vendor → 10%
+     * Reseller → 10%
      */
     if (parentVendor) {
 
@@ -149,6 +197,7 @@ const processMembershipBenefit = async ({
         resellerPercent /
         100;
 
+
       benefits.push({
         beneficiaryId: parentVendor.user_id,
         beneficiaryRole: "VENDOR",
@@ -156,18 +205,23 @@ const processMembershipBenefit = async ({
         benefitAmount: vendorAmount,
       });
 
+
       benefits.push({
         beneficiaryId: reseller.user_id,
         beneficiaryRole: "RESELLER",
         benefitPercent: resellerPercent,
         benefitAmount: resellerAmount,
       });
-
     }
 
+
     /*
+     * ========================================================
      * CASE 2
-     * Direct ManaGanuga reseller
+     * DIRECT MANAGANUGA RESELLER
+     * ========================================================
+     *
+     * Reseller → 15%
      */
     else {
 
@@ -178,6 +232,7 @@ const processMembershipBenefit = async ({
         resellerPercent /
         100;
 
+
       benefits.push({
         beneficiaryId: reseller.user_id,
         beneficiaryRole: "RESELLER",
@@ -187,13 +242,18 @@ const processMembershipBenefit = async ({
     }
   }
 
+
   /*
-   * Credit wallets + create benefit records
+   * ==========================================================
+   * CREDIT BENEFITS
+   * ==========================================================
    */
   for (const benefit of benefits) {
 
     /*
-     * Make sure wallet exists.
+     * --------------------------------------------------------
+     * Make sure beneficiary wallet exists
+     * --------------------------------------------------------
      */
     await client.query(
       `
@@ -214,8 +274,11 @@ const processMembershipBenefit = async ({
       ]
     );
 
+
     /*
-     * Credit wallet.
+     * --------------------------------------------------------
+     * Credit wallet
+     * --------------------------------------------------------
      */
     await client.query(
       `
@@ -223,7 +286,8 @@ const processMembershipBenefit = async ({
       SET
         balance = balance + $1,
         updated_at = NOW()
-      WHERE user_id = $2
+      WHERE
+        user_id = $2
       `,
       [
         benefit.benefitAmount,
@@ -231,8 +295,11 @@ const processMembershipBenefit = async ({
       ]
     );
 
+
     /*
-     * Record benefit history.
+     * --------------------------------------------------------
+     * Record benefit history
+     * --------------------------------------------------------
      */
     await client.query(
       `
@@ -260,8 +327,10 @@ const processMembershipBenefit = async ({
     );
   }
 
+
   return benefits;
 };
+
 
 module.exports = {
   processMembershipBenefit,

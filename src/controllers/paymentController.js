@@ -400,7 +400,13 @@ const verifyPayment = async (req, res) => {
         });
       }
 
-      const assignedBy =
+      /*
+       * DEFAULT ASSIGNMENT
+       *
+       * If there is no referral code, preserve
+       * the existing assignment logic.
+       */
+      let assignedBy =
         customer.assigned_by ||
         customer.created_by ||
         null;
@@ -439,12 +445,12 @@ const verifyPayment = async (req, res) => {
       );
 
       console.log(
-        "Assigned By:",
+        "Initial Assigned By:",
         assignedBy
       );
 
       console.log(
-        "Assigned Role:",
+        "Initial Assigned Role:",
         assignedRole
       );
 
@@ -465,7 +471,7 @@ const verifyPayment = async (req, res) => {
             `
             SELECT
               ul.id AS referrer_user_id,
-              ul.user_id AS referral_code,
+              ul.user_id AS referral_user_id,
               ul.role
             FROM user_login ul
             WHERE ul.user_id = $1
@@ -486,6 +492,9 @@ const verifyPayment = async (req, res) => {
           });
         }
 
+        /*
+         * Prevent self-referral.
+         */
         if (
           Number(
             referrer.referrer_user_id
@@ -498,9 +507,71 @@ const verifyPayment = async (req, res) => {
           });
         }
 
+        /*
+         * IMPORTANT:
+         *
+         * referral_code stores the PUBLIC user_id
+         * of the person who shared the referral.
+         *
+         * Example:
+         * MGRS260803
+         */
         validatedReferralCode =
-          referrer.referral_code;
+          referrer.referral_user_id;
+
+        /*
+         * IMPORTANT:
+         *
+         * A valid referral becomes the actual
+         * membership assignment.
+         *
+         * Therefore the reseller/vendor who shared
+         * the link becomes the assigned_by person.
+         */
+        assignedBy =
+          referrer.referral_user_id;
+
+        assignedRole =
+          referrer.role;
+
+        console.log(
+          "===== VALID REFERRAL ====="
+        );
+
+        console.log(
+          "Referral Code:",
+          validatedReferralCode
+        );
+
+        console.log(
+          "Referral User:",
+          assignedBy
+        );
+
+        console.log(
+          "Referral Role:",
+          assignedRole
+        );
       }
+
+      console.log(
+        "===== FINAL MEMBERSHIP ASSIGNMENT ====="
+      );
+
+      console.log(
+        "Assigned By:",
+        assignedBy
+      );
+
+      console.log(
+        "Assigned Role:",
+        assignedRole
+      );
+
+      console.log(
+        "Referral Code:",
+        validatedReferralCode
+      );
 
       /* --------------------------------
          CREATE MEMBERSHIP
@@ -508,21 +579,61 @@ const verifyPayment = async (req, res) => {
       const membership =
         await Membership.createMembership({
           userId: resolvedUserId,
+
           planId: plan.id,
+
           paymentId: payment.id,
+
           walletBalance:
             plan.wallet_bonus,
+
           discountPercent:
             plan.discount_percentage,
+
           monthlyClaim:
             plan.monthly_claim,
+
           expiryDate,
+
           termsAndConditions: true,
+
           assignedBy,
+
           assignedRole,
+
+          /*
+           * Stores the public user_id of
+           * the person who shared the link.
+           */
           referralCode:
             validatedReferralCode,
         });
+
+      /* --------------------------------
+         UPDATE CUSTOMER ASSIGNMENT
+      -------------------------------- */
+      if (
+        validatedReferralCode &&
+        assignedBy
+      ) {
+        await pool.query(
+          `
+          UPDATE user_login
+          SET assigned_by = $1
+          WHERE id = $2
+            AND is_active = true
+          `,
+          [
+            assignedBy,
+            resolvedUserId,
+          ]
+        );
+
+        console.log(
+          "Customer assigned to referral user:",
+          assignedBy
+        );
+      }
 
       /* --------------------------------
          PROCESS VENDOR / RESELLER BENEFIT
@@ -565,53 +676,53 @@ const verifyPayment = async (req, res) => {
     -------------------------------- */
     if (buyNow) {
       order =
-         await Order.createBuyNowOrder(
-         "USER",
-         resolvedUserId,
-         address_id,
-         productId,
-         quantity || 1,
-         userId
+        await Order.createBuyNowOrder(
+          "USER",
+          resolvedUserId,
+          address_id,
+          productId,
+          quantity || 1,
+          userId
         );
     } else {
       order =
         await Order.createOrder(
-        "USER",
-        resolvedUserId,
-        address_id,
-        false,
-        null,
-        1,
-         userId
-       );
+          "USER",
+          resolvedUserId,
+          address_id,
+          false,
+          null,
+          1,
+          userId
+        );
     }
 
 
     /* --------------------------------
-   UPDATE PAYMENT + ORDER PAYMENT STATUS
--------------------------------- */
+       UPDATE PAYMENT + ORDER PAYMENT STATUS
+    -------------------------------- */
 
-await pool.query(
-  `
-  UPDATE payments
-  SET order_id = $1
-  WHERE id = $2
-  `,
-  [order.id, payment.id]
-);
+    await pool.query(
+      `
+      UPDATE payments
+      SET order_id = $1
+      WHERE id = $2
+      `,
+      [order.id, payment.id]
+    );
 
-await pool.query(
-  `
-  UPDATE orders
-  SET payment_status = 'PAID'
-  WHERE id = $1
-  `,
-  [order.id]
-);
+    await pool.query(
+      `
+      UPDATE orders
+      SET payment_status = 'PAID'
+      WHERE id = $1
+      `,
+      [order.id]
+    );
 
-console.log(
-  `Payment ${payment.id} linked to order ${order.id} and marked PAID`
-);
+    console.log(
+      `Payment ${payment.id} linked to order ${order.id} and marked PAID`
+    );
 
     if (!order) {
       return res.status(400).json({
@@ -621,53 +732,63 @@ console.log(
     }
 
     /* --------------------------------
-   SAVE ORDER PRICE BREAKDOWN
--------------------------------- */
+       SAVE ORDER PRICE BREAKDOWN
+    -------------------------------- */
 
-const itemsCost = membershipBenefits
-  ? Number(membershipBenefits.subtotal || 0)
-  : Number(order.total_amount || 0);
+    const itemsCost = membershipBenefits
+      ? Number(membershipBenefits.subtotal || 0)
+      : Number(order.total_amount || 0);
 
-const membershipDiscount = membershipBenefits
-  ? Number(membershipBenefits.membershipDiscount || 0)
-  : 0;
+    const membershipDiscount = membershipBenefits
+      ? Number(
+          membershipBenefits.membershipDiscount || 0
+        )
+      : 0;
 
-const walletClaim = membershipBenefits
-  ? Number(membershipBenefits.walletClaim || 0)
-  : 0;
+    const walletClaim = membershipBenefits
+      ? Number(
+          membershipBenefits.walletClaim || 0
+        )
+      : 0;
 
-const deliveryCharge = membershipBenefits
-  ? Number(membershipBenefits.deliveryCharge || 0)
-  : 40;
+    const deliveryCharge = membershipBenefits
+      ? Number(
+          membershipBenefits.deliveryCharge || 0
+        )
+      : 40;
 
-await pool.query(
-  `
-  UPDATE orders
-  SET
-    items_cost = $1,
-    membership_discount = $2,
-    wallet_claim = $3,
-    delivery_charge = $4
-  WHERE id = $5
-  `,
-  [
-    itemsCost,
-    membershipDiscount,
-    walletClaim,
-    deliveryCharge,
-    order.id,
-  ]
-);
+    await pool.query(
+      `
+      UPDATE orders
+      SET
+        items_cost = $1,
+        membership_discount = $2,
+        wallet_claim = $3,
+        delivery_charge = $4
+      WHERE id = $5
+      `,
+      [
+        itemsCost,
+        membershipDiscount,
+        walletClaim,
+        deliveryCharge,
+        order.id,
+      ]
+    );
 
-console.log("===== ORDER PRICE BREAKDOWN =====");
-console.log({
-  orderId: order.id,
-  itemsCost,
-  membershipDiscount,
-  walletClaim,
-  deliveryCharge,
-  totalAmount: order.total_amount,
-});
+    console.log(
+      "===== ORDER PRICE BREAKDOWN ====="
+    );
+
+    console.log({
+      orderId: order.id,
+      itemsCost,
+      membershipDiscount,
+      walletClaim,
+      deliveryCharge,
+      totalAmount:
+        order.total_amount,
+    });
 
     /* --------------------------------
        GET DELIVERY ADDRESS
@@ -710,11 +831,15 @@ console.log({
       const notification =
         await Notification.createNotification({
           userId: resolvedUserId,
+
           title:
             "Order Placed Successfully",
+
           message:
             `Your order #${order.id} has been placed successfully.`,
+
           type: "ORDER_PLACED",
+
           referenceId: order.id,
         });
 
@@ -915,6 +1040,7 @@ console.log({
 
     return res.json({
       success: true,
+
       data: {
         payment,
         order,
