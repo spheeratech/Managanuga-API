@@ -1,6 +1,8 @@
 const pool = require("../../db");
 const AdminUser = require("../models/AdminUser");
 const generateUserId = require("../utils/generatedUserId");
+const clean = (val) =>
+  val && String(val).trim() !== "" ? String(val).trim() : null;
 
 // --------------------------------------------------
 // ROLE PERMISSIONS
@@ -32,6 +34,12 @@ const createUser = async (req, res) => {
       state,
       pincode,
       subscription,
+      bankAccountNumber,
+      ifscCode,
+      bankHolderName,
+      bankName,
+      contactPersonName,
+      contactPersonNumber,
 
       // Creator information sent from frontend
       creatorRole,
@@ -93,14 +101,7 @@ const createUser = async (req, res) => {
 
     // --------------------------------------------------
     // CHECK CREATOR PERMISSION
-    //
-    // Example:
-    // SUPER_ADMIN -> ADMIN       YES
-    // ADMIN       -> VENDOR      YES
-    // VENDOR      -> RESELLER    YES
-    // RESELLER    -> CUSTOMER    YES
-    // CUSTOMER    -> VENDOR      NO
-    // --------------------------------------------------
+
     if (!ROLE_PERMISSIONS[normalizedCreatorRole].includes(targetRole)) {
       return res.status(403).json({
         success: false,
@@ -220,15 +221,39 @@ const createUser = async (req, res) => {
         relationshipType: targetRole,
       },
       {
+        // userId,
+        // firstName,
+        // lastName: lastName || null,
+        // email: email || null,
+        // address: address || null,
+        // city: city || null,
+        // state: state || null,
+        // pincode: pincode || null,
+        // subscription: subscription || null,
+
+        // bankAccountNumber: bankAccountNumber || null,
+        // ifscCode: ifscCode || null,
+        // bankHolderName: bankHolderName || null,
+        // bankName: bankName || null,
+        // contactPersonName: contactPersonName || null,
+        // contactPersonNumber: contactPersonNumber || null,
         userId,
-        firstName,
-        lastName: lastName || null,
-        email: email || null,
-        address: address || null,
-        city: city || null,
-        state: state || null,
-        pincode: pincode || null,
-        subscription: subscription || null,
+        firstName: clean(firstName),
+        lastName: clean(lastName),
+        email: clean(email),
+        address: clean(address),
+        city: clean(city),
+        state: clean(state),
+        pincode: clean(pincode),
+        subscription: clean(subscription),
+
+        // ✅ Add these lines here:
+        bankAccountNumber: clean(bankAccountNumber),
+        ifscCode: clean(ifscCode)?.toUpperCase(),
+        bankHolderName: clean(bankHolderName),
+        bankName: clean(bankName),
+        contactPersonName: clean(contactPersonName),
+        contactPersonNumber: clean(contactPersonNumber),
       },
     );
 
@@ -255,6 +280,14 @@ const createUser = async (req, res) => {
         pincode: user.info.pincode,
 
         subscription: user.info.subscription,
+
+        // Add these lines back into your response object:
+        bankAccountNumber: user.info.bank_account_no,
+        ifscCode: user.info.ifsc_code,
+        bankHolderName: user.info.bank_holder_name,
+        bankName: user.info.bank_name,
+        contactPersonName: user.info.contact_person_name,
+        contactPersonNumber: user.info.contact_person_mobile,
 
         isActive: user.login.is_active,
 
@@ -493,7 +526,21 @@ const updateUser = async (req, res) => {
       pincode,
       subscription,
       isActive,
+      bankAccountNumber,
+      ifscCode,
+      bankHolderName,
+      bankName,
+      contactPersonName,
+      contactPersonNumber,
     } = req.body;
+    console.log("CREATE USER BANK/CONTACT BODY:", {
+      bankAccountNumber,
+      ifscCode,
+      bankHolderName,
+      bankName,
+      contactPersonName,
+      contactPersonNumber,
+    });
 
     if (!userId) {
       return res.status(400).json({
@@ -505,17 +552,23 @@ const updateUser = async (req, res) => {
     await client.query("BEGIN");
 
     const updatedUser = await AdminUser.updateUser(client, userId, {
-      firstName,
-      lastName,
-      email,
-      mobileNo,
-      role,
-      address,
-      city,
-      state,
-      pincode,
-      subscription,
+      firstName: clean(firstName),
+      lastName: clean(lastName),
+      email: clean(email),
+      mobileNo: clean(mobileNo),
+      role: clean(role),
+      address: clean(address),
+      city: clean(city),
+      state: clean(state),
+      pincode: clean(pincode),
+      subscription: clean(subscription),
       isActive,
+      bankAccountNumber: clean(bankAccountNumber),
+      ifscCode: clean(ifscCode)?.toUpperCase(),
+      bankHolderName: clean(bankHolderName),
+      bankName: clean(bankName),
+      contactPersonName: clean(contactPersonName),
+      contactPersonNumber: clean(contactPersonNumber),
     });
 
     if (!updatedUser) {

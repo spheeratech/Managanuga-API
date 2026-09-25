@@ -77,6 +77,14 @@ const AdminUser = {
         loginData.relationshipType || null,
       ],
     );
+    console.log("INFO DATA BEFORE INSERT:", {
+      bankAccountNumber: infoData.bankAccountNumber,
+      ifscCode: infoData.ifscCode,
+      bankHolderName: infoData.bankHolderName,
+      bankName: infoData.bankName,
+      contactPersonName: infoData.contactPersonName,
+      contactPersonNumber: infoData.contactPersonNumber,
+    });
 
     const infoResult = await client.query(
       `
@@ -89,9 +97,16 @@ const AdminUser = {
         city,
         state,
         pincode,
-        subscription
+        subscription,
+          bank_account_no,
+          ifsc_code,
+          bank_holder_name,
+          bank_name,
+          contact_person_name,
+          contact_person_mobile
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,$10,
+    $11, $12, $13, $14, $15)
       RETURNING *
       `,
       [
@@ -104,8 +119,15 @@ const AdminUser = {
         infoData.state || null,
         infoData.pincode || null,
         infoData.subscription || null,
+        infoData.bankAccountNumber || null,
+        infoData.ifscCode || null,
+        infoData.bankHolderName || null,
+        infoData.bankName || null,
+        infoData.contactPersonName || null,
+        infoData.contactPersonNumber || null,
       ],
     );
+    console.log("INSERTED USER_INFO:", infoResult.rows[0]);
 
     return {
       login: loginResult.rows[0],
@@ -137,7 +159,13 @@ const AdminUser = {
         i.city,
         i.state,
         i.pincode,
-        i.subscription
+        i.subscription,
+        i.bank_account_no,
+i.ifsc_code,
+i.bank_holder_name,
+i.bank_name,
+i.contact_person_name,
+i.contact_person_mobile
 
       FROM user_login l
 
@@ -175,7 +203,14 @@ const AdminUser = {
         i.city,
         i.state,
         i.pincode,
-        i.subscription
+       i.subscription,
+i.bank_account_no,
+i.ifsc_code,
+i.bank_holder_name,
+i.bank_name,
+i.contact_person_name,
+i.contact_person_mobile
+
 
       FROM user_login l
 
@@ -229,15 +264,21 @@ const AdminUser = {
       `
       UPDATE user_info
       SET 
-        first_name = COALESCE($1, first_name),
-        last_name = COALESCE($2, last_name),
-        email = COALESCE($3, email),
-        address = COALESCE($4, address),
-        city = COALESCE($5, city),
-        state = COALESCE($6, state),
-        pincode = COALESCE($7, pincode),
-        subscription = COALESCE($8, subscription)
-      WHERE user_id = $9
+        first_name = $1,
+        last_name = $2,
+        email = $3,
+        address = $4,
+        city = $5,
+        state = $6,
+        pincode = $7,
+        subscription = $8,
+        bank_account_no = $9,
+        ifsc_code = $10,
+        bank_holder_name = $11,
+        bank_name = $12,
+        contact_person_name = $13,
+        contact_person_mobile = $14
+      WHERE user_id = $15
       RETURNING *
       `,
       [
@@ -249,6 +290,12 @@ const AdminUser = {
         data.state,
         data.pincode,
         data.subscription,
+        data.bankAccountNumber,
+        data.ifscCode,
+        data.bankHolderName,
+        data.bankName,
+        data.contactPersonName,
+        data.contactPersonNumber,
         userId,
       ],
     );
