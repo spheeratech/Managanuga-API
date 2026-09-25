@@ -1,4 +1,3 @@
-// Vendor membership benefits API
 const express = require("express");
 
 const router = express.Router();
@@ -10,22 +9,16 @@ const {
   getProfile,
 } = require("../controllers/vendorController");
 
-router.get(
-  "/customers",
-  getCustomers
-);
+// Vendor customers
+router.get("/customers", getCustomers);
 
-router.get(
-  "/orders",
-  getOrders
-);
-router.get(
-  "/benefits",
-  getBenefits
-);
-router.get(
-  "/profile",
-  getProfile
-);
+// Vendor orders
+router.get("/orders", getOrders);
+
+// Vendor membership benefits
+router.get("/benefits", getBenefits);
+
+// Vendor profile
+router.get("/profile", getProfile);
 
 module.exports = router;
