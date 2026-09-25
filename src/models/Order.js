@@ -1,9 +1,30 @@
 const pool = require("../../db");
 const Order = require("../models/Order");
 const xpressbeesService = require("../services/xpressbeesService");
+
+/* --------------------------------
+   RESOLVE PUBLIC USER ID
+-------------------------------- */
+
+const getPublicUserId = async (internalUserId) => {
+  const result = await pool.query(
+    `
+    SELECT user_id
+    FROM user_login
+    WHERE id = $1
+      AND is_active = true
+    LIMIT 1
+    `,
+    [internalUserId]
+  );
+
+  return result.rows[0]?.user_id || null;
+};
+
 /* --------------------------------
    CREATE ORDER FROM CART
 -------------------------------- */
+
 const createOrder = async (
   entity_type,
   entity_id,
@@ -11,9 +32,26 @@ const createOrder = async (
   buyNow = false,
   productId = null,
   quantity = 1,
+  publicUserId = null
 ) => {
+  /*
+   * entity_id is still the INTERNAL user_login.id.
+   * publicUserId is the public MGU ID that must be
+   * stored in orders.user_id.
+   */
 
-  // Get cart items
+  if (entity_type === "USER" && !publicUserId) {
+    publicUserId = await getPublicUserId(entity_id);
+
+    if (!publicUserId) {
+      throw new Error("User account not found");
+    }
+  }
+
+  // --------------------------------
+  // GET CART ITEMS
+  // --------------------------------
+
   const cartResult = await pool.query(
     `
     SELECT
@@ -26,67 +64,88 @@ const createOrder = async (
     WHERE c.entity_type = $1
       AND c.entity_id = $2
     `,
-    [entity_type, entity_id],
+    [entity_type, entity_id]
   );
 
   let cartItems = cartResult.rows;
+
   console.log("Cart row count:", cartResult.rowCount);
   console.log("Cart items:", cartResult.rows);
 
-if (buyNow) {
-  const productResult = await pool.query(
-    `
-    SELECT
-      id AS item_id,
-      price
-    FROM products
-    WHERE id = $1
-    `,
-    [productId],
-  );
+  // --------------------------------
+  // BUY NOW
+  // --------------------------------
 
-  if (productResult.rowCount === 0) {
-    return null;
+  if (buyNow) {
+    const productResult = await pool.query(
+      `
+      SELECT
+        id AS item_id,
+        price
+      FROM products
+      WHERE id = $1
+      `,
+      [productId]
+    );
+
+    if (productResult.rowCount === 0) {
+      return null;
+    }
+
+    cartItems = [
+      {
+        item_id: productResult.rows[0].item_id,
+        quantity,
+        price: productResult.rows[0].price,
+      },
+    ];
+  } else {
+    if (cartResult.rowCount === 0) {
+      return null;
+    }
   }
 
-  cartItems = [
-    {
-      item_id: productResult.rows[0].item_id,
-      quantity,
-      price: productResult.rows[0].price,
-    },
-  ];
-} else {
-  if (cartResult.rowCount === 0) {
-    return null;
-  }
+  // --------------------------------
+  // CALCULATE TOTAL
+  // --------------------------------
 
-}
-
-  // Calculate total
   const totalAmount = cartItems.reduce(
-    (sum, item) => sum + item.quantity * item.price,
-    0,
+    (sum, item) =>
+      sum + Number(item.quantity) * Number(item.price),
+    0
   );
 
-  // Create order
+  // --------------------------------
+  // CREATE ORDER
+  // --------------------------------
+
   const orderResult = await pool.query(
     `
     INSERT INTO orders(
+      user_id,
       entity_type,
       entity_id,
       address_id,
       total_amount
     )
-    VALUES($1,$2,$3,$4)
+    VALUES($1, $2, $3, $4, $5)
     RETURNING *
     `,
-    [entity_type, entity_id, address_id, totalAmount],
+    [
+      publicUserId,
+      entity_type,
+      entity_id,
+      address_id,
+      totalAmount,
+    ]
   );
 
   const order = orderResult.rows[0];
 
-  // Copy items into order_items
+  // --------------------------------
+  // COPY ITEMS INTO ORDER ITEMS
+  // --------------------------------
+
   for (const item of cartItems) {
     await pool.query(
       `
@@ -97,38 +156,61 @@ if (buyNow) {
         quantity,
         unit_price
       )
-      VALUES($1,$2,$3,$4,$5)
+      VALUES($1, $2, $3, $4, $5)
       `,
-      [order.id, "PRODUCT", item.item_id, item.quantity, item.price],
+      [
+        order.id,
+        "PRODUCT",
+        item.item_id,
+        item.quantity,
+        item.price,
+      ]
     );
   }
 
-  // Clear cart after successful order creation
-await pool.query(
-  `
-  DELETE FROM cart_items
-  WHERE entity_type = $1
-    AND entity_id = $2
-  `,
-  [entity_type, entity_id],
-);
+  // --------------------------------
+  // CLEAR CART
+  // --------------------------------
 
-return order;
+  await pool.query(
+    `
+    DELETE FROM cart_items
+    WHERE entity_type = $1
+      AND entity_id = $2
+    `,
+    [entity_type, entity_id]
+  );
+
+  return order;
 };
+
+/* --------------------------------
+   CREATE BUY NOW ORDER
+-------------------------------- */
+
 const createBuyNowOrder = async (
   entity_type,
   entity_id,
   address_id,
   productId,
   quantity = 1,
+  publicUserId = null
 ) => {
+  if (entity_type === "USER" && !publicUserId) {
+    publicUserId = await getPublicUserId(entity_id);
+
+    if (!publicUserId) {
+      throw new Error("User account not found");
+    }
+  }
+
   const productResult = await pool.query(
     `
     SELECT id, price
     FROM products
     WHERE id = $1
     `,
-    [productId],
+    [productId]
   );
 
   if (productResult.rowCount === 0) {
@@ -137,20 +219,28 @@ const createBuyNowOrder = async (
 
   const product = productResult.rows[0];
 
-  const totalAmount = product.price * quantity;
+  const totalAmount =
+    Number(product.price) * Number(quantity);
 
   const orderResult = await pool.query(
     `
     INSERT INTO orders(
+      user_id,
       entity_type,
       entity_id,
       address_id,
       total_amount
     )
-    VALUES($1,$2,$3,$4)
+    VALUES($1, $2, $3, $4, $5)
     RETURNING *
     `,
-    [entity_type, entity_id, address_id, totalAmount],
+    [
+      publicUserId,
+      entity_type,
+      entity_id,
+      address_id,
+      totalAmount,
+    ]
   );
 
   const order = orderResult.rows[0];
@@ -164,7 +254,7 @@ const createBuyNowOrder = async (
       quantity,
       unit_price
     )
-    VALUES($1,$2,$3,$4,$5)
+    VALUES($1, $2, $3, $4, $5)
     `,
     [
       order.id,
@@ -172,7 +262,7 @@ const createBuyNowOrder = async (
       product.id,
       quantity,
       product.price,
-    ],
+    ]
   );
 
   return order;
@@ -181,6 +271,7 @@ const createBuyNowOrder = async (
 /* --------------------------------
    GET ALL ORDERS
 -------------------------------- */
+
 const getOrders = async () => {
   const result = await pool.query(`
     SELECT *
@@ -194,6 +285,7 @@ const getOrders = async () => {
 /* --------------------------------
    GET ORDER BY ID
 -------------------------------- */
+
 const getOrderById = async (id) => {
   const result = await pool.query(
     `
@@ -219,15 +311,68 @@ const getOrderById = async (id) => {
 };
 
 /* --------------------------------
-   GET ORDERS BY ENTITY
+   GET ORDERS BY PUBLIC USER ID
 -------------------------------- */
-const getOrdersByEntity = async (entity_type, entity_id) => {
+
+const getOrdersByUserId = async (userId) => {
   const result = await pool.query(
     `
     SELECT
       o.id,
+      o.user_id,
       o.total_amount,
       o.status,
+      o.payment_status,
+      o.created_at,
+      oi.item_id AS product_id,
+      COALESCE(
+        (
+          SELECT ai.url
+          FROM app_images ai
+          WHERE ai.product_id = oi.item_id
+            AND ai.image_type = 'PRODUCT_IMAGE'
+          ORDER BY ai.id ASC
+          LIMIT 1
+        ),
+        p.image
+      ) AS image
+    FROM orders o
+    LEFT JOIN LATERAL (
+      SELECT
+        oi.item_id
+      FROM order_items oi
+      WHERE oi.order_id = o.id
+      ORDER BY oi.id ASC
+      LIMIT 1
+    ) oi ON TRUE
+    LEFT JOIN products p
+      ON p.id = oi.item_id
+    WHERE o.user_id = $1
+    ORDER BY o.id DESC
+    `,
+    [String(userId).trim()]
+  );
+
+  return result.rows;
+};
+
+/* --------------------------------
+   GET ORDERS BY OLD ENTITY
+   LEGACY COMPATIBILITY
+-------------------------------- */
+
+const getOrdersByEntity = async (
+  entity_type,
+  entity_id
+) => {
+  const result = await pool.query(
+    `
+    SELECT
+      o.id,
+      o.user_id,
+      o.total_amount,
+      o.status,
+      o.payment_status,
       o.created_at,
       oi.item_id AS product_id,
       COALESCE(
@@ -265,6 +410,7 @@ const getOrdersByEntity = async (entity_type, entity_id) => {
 /* --------------------------------
    GET ORDER ITEMS
 -------------------------------- */
+
 const getOrderItems = async (orderId) => {
   const result = await pool.query(
     `
@@ -291,7 +437,7 @@ const getOrderItems = async (orderId) => {
       ON p.id = oi.item_id
     WHERE oi.order_id = $1
     `,
-    [orderId],
+    [orderId]
   );
 
   return result.rows;
@@ -300,6 +446,7 @@ const getOrderItems = async (orderId) => {
 /* --------------------------------
    UPDATE ORDER
 -------------------------------- */
+
 const updateOrder = async (id, status) => {
   const result = await pool.query(
     `
@@ -307,9 +454,8 @@ const updateOrder = async (id, status) => {
     SET status = $1
     WHERE id = $2
     RETURNING *
-    
     `,
-    [status, id],
+    [status, id]
   );
 
   return result.rows[0];
@@ -318,13 +464,14 @@ const updateOrder = async (id, status) => {
 /* --------------------------------
    DELETE ORDER
 -------------------------------- */
+
 const deleteOrder = async (id) => {
   await pool.query(
     `
     DELETE FROM order_items
     WHERE order_id = $1
     `,
-    [id],
+    [id]
   );
 
   const result = await pool.query(
@@ -333,12 +480,21 @@ const deleteOrder = async (id) => {
     WHERE id = $1
     RETURNING *
     `,
-    [id],
+    [id]
   );
 
   return result.rows[0];
 };
-const shipOrder = async (orderId, trackingNumber, courierName) => {
+
+/* --------------------------------
+   SHIP ORDER
+-------------------------------- */
+
+const shipOrder = async (
+  orderId,
+  trackingNumber,
+  courierName
+) => {
   const result = await pool.query(
     `
     UPDATE orders
@@ -347,13 +503,18 @@ const shipOrder = async (orderId, trackingNumber, courierName) => {
       courier_name = $3,
       status = 'PROCESSING'
     WHERE id = $1
-    RETURNING *;
+    RETURNING *
     `,
     [orderId, trackingNumber, courierName]
   );
 
   return result.rows[0];
 };
+
+/* --------------------------------
+   TRACK ORDER
+-------------------------------- */
+
 const trackOrder = async (req, res) => {
   try {
     const { id } = req.params;
@@ -374,12 +535,12 @@ const trackOrder = async (req, res) => {
       });
     }
 
-    const tracking = await xpressbeesService.trackShipment(
-      order.tracking_number
-    );
+    const tracking =
+      await xpressbeesService.trackShipment(
+        order.tracking_number
+      );
 
     return res.json(tracking);
-
   } catch (err) {
     console.error(err);
 
@@ -396,6 +557,7 @@ module.exports = {
   getOrders,
   getOrderById,
   getOrdersByEntity,
+  getOrdersByUserId,
   getOrderItems,
   updateOrder,
   deleteOrder,

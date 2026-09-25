@@ -4,8 +4,27 @@ const {
   getPincodeDetails: fetchPincodeDetails,
 } = require("../services/pincodeService");
 
+
 const addAddress = async (req, res) => {
   try {
+    const {
+      user_id,
+      entity_id,
+    } = req.body;
+
+    /*
+     * New API requires public user_id.
+     *
+     * Legacy entity_id is still accepted temporarily
+     * so older frontend versions do not immediately break.
+     */
+    if (!user_id && !entity_id) {
+      return res.status(400).json({
+        success: false,
+        message: "user_id is required",
+      });
+    }
+
     const address = await Address.createAddress(req.body);
 
     res.status(201).json({
@@ -14,7 +33,20 @@ const addAddress = async (req, res) => {
       data: address,
     });
   } catch (error) {
-    console.error(error);
+    console.error("ADD ADDRESS ERROR:", error);
+
+    if (
+      error.message &&
+      (
+        error.message.includes("User not found") ||
+        error.message.includes("user_id is required")
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
 
     res.status(500).json({
       success: false,
@@ -22,6 +54,8 @@ const addAddress = async (req, res) => {
     });
   }
 };
+
+
 const getAddresses = async (req, res) => {
   try {
     const addresses = await Address.getAddresses(req.query);
@@ -32,7 +66,7 @@ const getAddresses = async (req, res) => {
       data: addresses,
     });
   } catch (error) {
-    console.error(error);
+    console.error("GET ADDRESSES ERROR:", error);
 
     res.status(500).json({
       success: false,
@@ -40,6 +74,8 @@ const getAddresses = async (req, res) => {
     });
   }
 };
+
+
 const getPincodeDetails = async (req, res) => {
   try {
     const { pincode } = req.params;
@@ -64,9 +100,8 @@ const getPincodeDetails = async (req, res) => {
       success: true,
       data,
     });
-
   } catch (error) {
-    console.error(error);
+    console.error("PINCODE ERROR:", error);
 
     res.status(500).json({
       success: false,
@@ -74,6 +109,8 @@ const getPincodeDetails = async (req, res) => {
     });
   }
 };
+
+
 const updateAddress = async (req, res) => {
   try {
     const { id } = req.params;
@@ -83,7 +120,7 @@ const updateAddress = async (req, res) => {
     if (!address) {
       return res.status(404).json({
         success: false,
-        message: "Address not found",
+        message: "Address not found or no valid fields supplied",
       });
     }
 
@@ -93,7 +130,7 @@ const updateAddress = async (req, res) => {
       data: address,
     });
   } catch (error) {
-    console.error(error);
+    console.error("UPDATE ADDRESS ERROR:", error);
 
     res.status(500).json({
       success: false,
@@ -101,6 +138,7 @@ const updateAddress = async (req, res) => {
     });
   }
 };
+
 
 const deleteAddress = async (req, res) => {
   try {
@@ -138,6 +176,8 @@ const deleteAddress = async (req, res) => {
     });
   }
 };
+
+
 module.exports = {
   addAddress,
   getAddresses,

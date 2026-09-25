@@ -1,60 +1,108 @@
 const Reseller = require("../models/Reseller");
 
+
 const getCustomers = async (req, res) => {
   try {
+    const { resellerId } = req.query;
 
-    // Temporary reseller ID
-    // Later this will come from JWT
-    const resellerId = "001";
+    if (!resellerId) {
+      return res.status(400).json({
+        success: false,
+        message: "resellerId is required",
+      });
+    }
 
-    const customers = await Reseller.getCustomers(resellerId);
+    const customers = await Reseller.getCustomers(
+      String(resellerId).trim()
+    );
 
-    res.json(customers);
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      message: err.message,
+    return res.status(200).json({
+      success: true,
+      data: customers,
     });
 
+  } catch (err) {
+    console.error("GET RESELLER CUSTOMERS ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
+
+
+const getOrders = async (req, res) => {
+  try {
+    const { resellerId } = req.query;
+
+    if (!resellerId) {
+      return res.status(400).json({
+        success: false,
+        message: "resellerId is required",
+      });
+    }
+
+    const orders = await Reseller.getOrders(
+      String(resellerId).trim()
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: orders.length,
+      data: orders,
+    });
+
+  } catch (err) {
+    console.error("GET RESELLER ORDERS ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+
 const getBenefits = async (req, res) => {
   try {
+    const { resellerId } = req.query;
 
-    // Temporary reseller ID
-    // Later this will come from JWT
-    const resellerId = "001";
+    if (!resellerId) {
+      return res.status(400).json({
+        success: false,
+        message: "resellerId is required",
+      });
+    }
 
-    const benefits = await Reseller.getBenefits(resellerId);
+    const benefits = await Reseller.getBenefits(
+      String(resellerId).trim()
+    );
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: benefits,
     });
 
   } catch (err) {
+    console.error("GET RESELLER BENEFITS ERROR:", err);
 
-    console.log(err);
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: err.message,
     });
-
   }
 };
 
+
 const getProfile = async (req, res) => {
   try {
-    const {userId} = req.query;
+    const { userId } = req.query;
 
     if (!userId) {
       return res.status(400).json({
         success: false,
-        message: 'userId is required',
+        message: "userId is required",
       });
     }
 
@@ -63,26 +111,29 @@ const getProfile = async (req, res) => {
     if (!profile) {
       return res.status(404).json({
         success: false,
-        message: 'Reseller profile not found',
+        message: "Reseller profile not found",
       });
     }
 
-    res.json({
+    return res.status(200).json({
       success: true,
       data: profile,
     });
-  } catch (err) {
-    console.log(err);
 
-    res.status(500).json({
+  } catch (err) {
+    console.error("GET RESELLER PROFILE ERROR:", err);
+
+    return res.status(500).json({
       success: false,
       message: err.message,
     });
   }
 };
 
+
 module.exports = {
   getCustomers,
+  getOrders,
   getBenefits,
-  getProfile
+  getProfile,
 };
