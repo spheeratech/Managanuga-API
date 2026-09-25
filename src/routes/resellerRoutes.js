@@ -6,18 +6,32 @@ const router = express.Router();
 
 const {
   getCustomers,
-  getOrders,
   getBenefits,
   getProfile,
 } = require("../controllers/resellerController");
 
 
+/*
+ * ============================================================
+ * RESELLER CUSTOMERS
+ * ============================================================
+ */
 router.get("/customers", getCustomers);
 
-router.get("/orders", getOrders);
 
+/*
+ * ============================================================
+ * RESELLER BENEFITS
+ * ============================================================
+ */
 router.get("/benefits", getBenefits);
 
+
+/*
+ * ============================================================
+ * RESELLER PROFILE
+ * ============================================================
+ */
 router.get("/profile", getProfile);
 
 
