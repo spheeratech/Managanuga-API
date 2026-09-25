@@ -1,119 +1,66 @@
 const pool = require("../../db");
 
-const getCustomers = async (resellerId) => {
+/*
+ * ============================================================
+ * GET RESELLER CUSTOMERS
+ * ============================================================
+ *
+ * A reseller customer is ONLY a customer who:
+ *
+ * 1. Has an ACTIVE membership
+ * 2. That membership was purchased using this reseller's
+ *    referral code
+ * 3. The referral_code contains the reseller's public user_id
+ *
+ * We intentionally DO NOT use user_login.assigned_by here.
+ *
+ * This prevents users who were manually assigned to a reseller
+ * from appearing in the reseller Customers screen unless they
+ * actually purchased a membership through the reseller referral.
+ */
+const getCustomers = async (userId) => {
   const result = await pool.query(
     `
-    SELECT
-      ul.user_id,
-      ul.username,
-      ul.mobile_no,
-      ul.role,
+    SELECT DISTINCT ON (ul.user_id)
+      ul.user_id AS customer_user_id,
+      ul.username AS customer_name,
+      ul.mobile_no AS customer_mobile,
 
-      COUNT(DISTINCT o.id) AS total_orders,
+      sp.plan_name,
 
-      COALESCE(
-        SUM(
-          CASE
-            WHEN o.id IS NOT NULL
-            THEN o.total_amount
-            ELSE 0
-          END
-        ),
-        0
-      ) AS total_order_amount
+      ums.status
 
-    FROM user_login ul
+    FROM user_memberships ums
 
-    LEFT JOIN orders o
-      ON o.user_id = ul.user_id
+    INNER JOIN user_login ul
+      ON ul.user_id = ums.user_id
+
+    INNER JOIN subscription_plans sp
+      ON sp.id = ums.plan_id
 
     WHERE
-      ul.assigned_by = $1
-      AND ul.role IN ('USER', 'CUSTOMER')
+      ums.referral_code = $1
+      AND ums.status = 'ACTIVE'
+      --AND ul.role IN ('USER', 'CUSTOMER')
       AND ul.is_active = true
 
-    GROUP BY
-      ul.id,
+    ORDER BY
       ul.user_id,
-      ul.username,
-      ul.mobile_no,
-      ul.role
-
-    ORDER BY
-      ul.username ASC;
+      ums.id DESC;
     `,
-    [String(resellerId).trim()]
+    [String(userId).trim()]
   );
 
   return result.rows;
 };
 
 
-const getOrders = async (resellerId) => {
-  const result = await pool.query(
-    `
-    SELECT
-      o.id,
-      o.user_id AS customer_user_id,
-
-      customer.username AS customer_name,
-      customer.mobile_no AS customer_mobile,
-
-      o.total_amount,
-      o.items_cost,
-      o.membership_discount,
-      o.wallet_claim,
-      o.delivery_charge,
-
-      o.status,
-      o.payment_status,
-
-      o.tracking_number,
-      o.courier_name,
-      o.delivery_method,
-
-      o.address_id,
-      o.warehouse_id,
-
-      o.admin_verified,
-      o.admin_accepted,
-
-      o.created_at
-
-    FROM orders o
-
-    INNER JOIN LATERAL (
-      SELECT
-        ul.user_id,
-        ul.username,
-        ul.mobile_no
-
-      FROM user_login ul
-
-      WHERE
-        ul.user_id = o.user_id
-        AND ul.assigned_by = $1
-        AND ul.role IN ('USER', 'CUSTOMER')
-        AND ul.is_active = true
-
-      ORDER BY
-        ul.id DESC
-
-      LIMIT 1
-    ) customer ON true
-
-    ORDER BY
-      o.created_at DESC,
-      o.id DESC;
-    `,
-    [String(resellerId).trim()]
-  );
-
-  return result.rows;
-};
-
-
-const getBenefits = async (resellerId) => {
+/*
+ * ============================================================
+ * GET RESELLER BENEFITS
+ * ============================================================
+ */
+const getBenefits = async (userId) => {
   const result = await pool.query(
     `
     SELECT
@@ -143,6 +90,11 @@ const getBenefits = async (resellerId) => {
 };
 
 
+/*
+ * ============================================================
+ * GET RESELLER PROFILE
+ * ============================================================
+ */
 const getProfile = async (userId) => {
   const result = await pool.query(
     `
@@ -184,7 +136,6 @@ const getProfile = async (userId) => {
 
 module.exports = {
   getCustomers,
-  getOrders,
   getBenefits,
   getProfile,
 };
