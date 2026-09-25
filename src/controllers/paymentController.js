@@ -565,20 +565,25 @@ const verifyPayment = async (req, res) => {
     -------------------------------- */
     if (buyNow) {
       order =
-        await Order.createBuyNowOrder(
-          "USER",
-          resolvedUserId,
-          address_id,
-          productId,
-          quantity || 1
+         await Order.createBuyNowOrder(
+         "USER",
+         resolvedUserId,
+         address_id,
+         productId,
+         quantity || 1,
+         userId
         );
     } else {
       order =
         await Order.createOrder(
-          "USER",
-          resolvedUserId,
-          address_id
-        );
+        "USER",
+        resolvedUserId,
+        address_id,
+        false,
+        null,
+        1,
+         userId
+       );
     }
 
 

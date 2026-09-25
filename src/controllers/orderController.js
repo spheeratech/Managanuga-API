@@ -1,16 +1,23 @@
 const Order = require("../models/Order");
 const pool = require("../../db");
+
 const {
   sendOrderConfirmation,
 } = require("../services/whatsappService");
+
 const xpressbeesService = require("../services/xpressbeesService");
 
-const resolveUserId = async (entityId) => {
+/* --------------------------------
+   RESOLVE PUBLIC MGU ID
+   → INTERNAL user_login.id
+-------------------------------- */
+
+const resolveUserId = async (userId) => {
   if (
-    typeof entityId !== "string" ||
-    !entityId.startsWith("MGU")
+    typeof userId !== "string" ||
+    !userId.startsWith("MGU")
   ) {
-    return entityId;
+    return userId;
   }
 
   const result = await pool.query(
@@ -21,16 +28,15 @@ const resolveUserId = async (entityId) => {
       AND is_active = true
     LIMIT 1
     `,
-    [entityId]
+    [userId]
   );
 
-  if (!result.rows[0]) {
-    return null;
-  }
-
-  return result.rows[0].id;
+  return result.rows[0]?.id || null;
 };
 
+/* --------------------------------
+   CREATE ORDER
+-------------------------------- */
 
 const createOrder = async (req, res) => {
   console.log("ORDER BODY:", req.body);
@@ -43,17 +49,20 @@ const createOrder = async (req, res) => {
       buyNow,
       productId,
       quantity,
-      tracking_number,
     } = req.body;
 
     let resolvedEntityId = entity_id;
+    let publicUserId = entity_id;
 
     if (
       entity_type === "USER" &&
       typeof entity_id === "string" &&
       entity_id.startsWith("MGU")
     ) {
-      resolvedEntityId = await resolveUserId(entity_id);
+      publicUserId = entity_id;
+
+      resolvedEntityId =
+        await resolveUserId(entity_id);
 
       if (!resolvedEntityId) {
         return res.status(404).json({
@@ -61,6 +70,34 @@ const createOrder = async (req, res) => {
           message: "User not found",
         });
       }
+    } else if (entity_type === "USER") {
+      /*
+       * Legacy callers may still send the numeric
+       * internal user_login.id.
+       *
+       * Convert it to the public MGU ID before
+       * creating the order.
+       */
+      const userResult = await pool.query(
+        `
+        SELECT user_id
+        FROM user_login
+        WHERE id = $1
+          AND is_active = true
+        LIMIT 1
+        `,
+        [resolvedEntityId]
+      );
+
+      if (!userResult.rows[0]) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      publicUserId =
+        userResult.rows[0].user_id;
     }
 
     const order = await Order.createOrder(
@@ -69,7 +106,8 @@ const createOrder = async (req, res) => {
       address_id,
       buyNow,
       productId,
-      quantity
+      quantity,
+      publicUserId
     );
 
     if (!order) {
@@ -80,8 +118,9 @@ const createOrder = async (req, res) => {
     }
 
     // --------------------------------
-    // SEND WHATSAPP ORDER CONFIRMATION
+    // WHATSAPP ORDER CONFIRMATION
     // --------------------------------
+
     try {
       const orderDetails =
         await Order.getOrderById(order.id);
@@ -109,7 +148,6 @@ const createOrder = async (req, res) => {
         );
       }
     } catch (whatsappError) {
-      // WhatsApp failure must NOT fail the order.
       console.error(
         "WHATSAPP ORDER CONFIRMATION FAILED:",
         whatsappError.message
@@ -121,9 +159,11 @@ const createOrder = async (req, res) => {
       message: "Order created successfully",
       data: order,
     });
-
   } catch (error) {
-    console.error("CREATE ORDER ERROR:", error);
+    console.error(
+      "CREATE ORDER ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
@@ -132,64 +172,97 @@ const createOrder = async (req, res) => {
   }
 };
 
+/* --------------------------------
+   GET ORDERS
+-------------------------------- */
 
 const getOrders = async (req, res) => {
   try {
     const {
       entity_type,
       entity_id,
+      user_id,
     } = req.query;
 
-    let resolvedEntityId = entity_id;
+    /*
+     * NEW:
+     * Prefer public user_id.
+     */
+    if (user_id) {
+      const orders =
+        await Order.getOrdersByUserId(
+          user_id
+        );
 
+      return res.json({
+        success: true,
+        count: orders.length,
+        data: orders,
+      });
+    }
+
+    /*
+     * Existing frontend compatibility:
+     * entity_id may still contain MGU ID.
+     */
     if (
       entity_type === "USER" &&
       typeof entity_id === "string" &&
       entity_id.startsWith("MGU")
     ) {
-      resolvedEntityId =
-        await resolveUserId(entity_id);
+      const orders =
+        await Order.getOrdersByUserId(
+          entity_id
+        );
 
-      if (!resolvedEntityId) {
-        return res.status(404).json({
-          success: false,
-          message: "User not found",
-        });
-      }
+      return res.json({
+        success: true,
+        count: orders.length,
+        data: orders,
+      });
     }
 
-    let orders;
-
-    if (entity_type && resolvedEntityId) {
-      orders =
+    /*
+     * Legacy numeric entity lookup.
+     */
+    if (entity_type && entity_id) {
+      const orders =
         await Order.getOrdersByEntity(
           entity_type,
-          resolvedEntityId
+          entity_id
         );
-    } else {
-      orders =
-        await Order.getOrders();
+
+      return res.json({
+        success: true,
+        count: orders.length,
+        data: orders,
+      });
     }
 
-    res.json({
+    const orders =
+      await Order.getOrders();
+
+    return res.json({
       success: true,
       count: orders.length,
       data: orders,
     });
-
   } catch (error) {
     console.error(
       "GET ORDERS ERROR:",
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
 
+/* --------------------------------
+   GET ORDER BY ID
+-------------------------------- */
 
 const getOrderById = async (req, res) => {
   try {
@@ -209,7 +282,6 @@ const getOrderById = async (req, res) => {
       success: true,
       data: order,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -218,6 +290,9 @@ const getOrderById = async (req, res) => {
   }
 };
 
+/* --------------------------------
+   GET ORDER ITEMS
+-------------------------------- */
 
 const getOrderItems = async (req, res) => {
   try {
@@ -231,7 +306,6 @@ const getOrderItems = async (req, res) => {
       count: items.length,
       data: items,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -240,6 +314,9 @@ const getOrderItems = async (req, res) => {
   }
 };
 
+/* --------------------------------
+   UPDATE ORDER
+-------------------------------- */
 
 const updateOrder = async (req, res) => {
   try {
@@ -254,7 +331,6 @@ const updateOrder = async (req, res) => {
       message: "Order updated successfully",
       data: order,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -263,6 +339,9 @@ const updateOrder = async (req, res) => {
   }
 };
 
+/* --------------------------------
+   DELETE ORDER
+-------------------------------- */
 
 const deleteOrder = async (req, res) => {
   try {
@@ -276,7 +355,6 @@ const deleteOrder = async (req, res) => {
       message: "Order deleted successfully",
       data: order,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -285,6 +363,9 @@ const deleteOrder = async (req, res) => {
   }
 };
 
+/* --------------------------------
+   TRACK ORDER
+-------------------------------- */
 
 const trackOrder = async (req, res) => {
   try {
@@ -313,7 +394,6 @@ const trackOrder = async (req, res) => {
       );
 
     res.json(tracking);
-
   } catch (err) {
     console.error(
       "Tracking Error:",
@@ -329,7 +409,6 @@ const trackOrder = async (req, res) => {
     });
   }
 };
-
 
 module.exports = {
   createOrder,
