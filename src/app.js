@@ -26,6 +26,7 @@ const userDocumentRoutes = require("./routes/userDocumentRoutes");
 const eventPosterRoutes = require("./routes/eventPosterRoutes");
 const appImageRoutes = require("./routes/appImageRoutes");
 const faqRoutes = require("./routes/faqRoutes");
+const locationRoutes = require("./routes/locationRoutes");
 const app = express();
 
 // mobile App APIS
@@ -34,7 +35,6 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api/categories", categoryRoutes);
-
 
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
@@ -52,6 +52,7 @@ app.use("/api/vendor", vendorRoutes);
 app.use("/api/reseller", resellerRoutes);
 app.use("/api/legal", legalContentRoutes);
 app.use("/api/faqs", faqRoutes);
+app.use("/api/locations", locationRoutes);
 
 // Web APP APIs
 app.use("/api/hubs", hubRoutes);
@@ -60,7 +61,6 @@ app.use("/api/admin/orders", adminOrderRoutes);
 
 //Common APIs
 app.use("/api/subscriptions", subscriptionRoutes);
-
 
 // App-managed images: logo, banners, login background
 app.use("/api/app-images", appImageRoutes);
