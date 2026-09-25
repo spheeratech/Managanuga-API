@@ -8,17 +8,17 @@ const Reseller = require("../models/Reseller");
  */
 const getCustomers = async (req, res) => {
   try {
-    const { resellerId } = req.query;
+    const { userId } = req.query;
 
-    if (!resellerId) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        message: "resellerId is required",
+        message: "userId is required",
       });
     }
 
     const customers = await Reseller.getCustomers(
-      String(resellerId).trim()
+      String(userId).trim()
     );
 
     return res.status(200).json({
