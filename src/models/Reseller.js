@@ -18,7 +18,7 @@ const pool = require("../../db");
  * from appearing in the reseller Customers screen unless they
  * actually purchased a membership through the reseller referral.
  */
-const getCustomers = async (resellerId) => {
+const getCustomers = async (userId) => {
   const result = await pool.query(
     `
     SELECT DISTINCT ON (ul.user_id)
@@ -41,14 +41,14 @@ const getCustomers = async (resellerId) => {
     WHERE
       ums.referral_code = $1
       AND ums.status = 'ACTIVE'
-      AND ul.role IN ('USER', 'CUSTOMER')
+      --AND ul.role IN ('USER', 'CUSTOMER')
       AND ul.is_active = true
 
     ORDER BY
       ul.user_id,
       ums.id DESC;
     `,
-    [String(resellerId).trim()]
+    [String(userId).trim()]
   );
 
   return result.rows;
@@ -60,7 +60,7 @@ const getCustomers = async (resellerId) => {
  * GET RESELLER BENEFITS
  * ============================================================
  */
-const getBenefits = async (resellerId) => {
+const getBenefits = async (userId) => {
   const result = await pool.query(
     `
     SELECT
