@@ -18,7 +18,7 @@ const pool = require("../../db");
  *   user_memberships.referral_code = reseller.user_id
  *
  * VENDOR:
- *   Preserve the existing Vendor customer relationship.
+ *   Customer relationship:
  *
  *   user_login.assigned_by = vendor.user_id
  *
@@ -105,19 +105,21 @@ const getCustomers = async (userId) => {
    * VENDOR CUSTOMERS
    * ============================================================
    *
-   * This is intentionally kept equivalent to the existing
-   * Vendor.getCustomers() query.
+   * Vendor customers are users assigned to this vendor.
    *
-   * Therefore Vendor Customers will continue to show:
+   * Customer relationship:
    *
-   *   user_id
-   *   username
-   *   mobile_no
-   *   role
-   *   total_orders
-   *   total_order_amount
+   *   user_login.assigned_by = vendor.user_id
    *
-   * while using the same common API endpoint.
+   * TOTAL PAID AMOUNT:
+   *
+   *   items_cost
+   *   - membership_discount
+   *   - wallet_claim
+   *   + delivery_charge
+   *
+   * This represents the actual payable/paid amount for each order,
+   * rather than the original item/order total.
    */
   if (currentUser.role === "VENDOR") {
     const result = await pool.query(
@@ -131,9 +133,14 @@ const getCustomers = async (userId) => {
         COUNT(o.id)::INTEGER AS total_orders,
 
         COALESCE(
-          SUM(o.total_amount),
+          SUM(
+            COALESCE(o.items_cost, o.total_amount, 0)
+            - COALESCE(o.membership_discount, 0)
+            - COALESCE(o.wallet_claim, 0)
+            + COALESCE(o.delivery_charge, 0)
+          ),
           0
-        ) AS total_order_amount
+        ) AS total_paid_amount
 
       FROM user_login ul
 

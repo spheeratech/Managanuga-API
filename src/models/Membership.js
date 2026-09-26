@@ -160,7 +160,7 @@ const createMembership = async ({
   termsAndConditions = false,
   assignedBy = null,
   assignedRole = null,
-  referralCode = null,
+  referralCode = null
 }) => {
   const resolvedPublicUserId =
     await resolvePublicUserId(userId);
@@ -204,8 +204,7 @@ const createMembership = async ({
       assigned_role,
       referral_code
     )
-    VALUES
-    ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     RETURNING *;
     `,
     [
@@ -219,7 +218,7 @@ const createMembership = async ({
       termsAndConditions,
       assignedBy,
       assignedRole,
-      referralCode,
+      referralCode
     ]
   );
 
@@ -230,7 +229,16 @@ const createMembership = async ({
 /**
  * Get active membership.
  *
- * user_memberships.user_id is PUBLIC user ID.
+ * IMPORTANT:
+ * Remaining days are calculated using the IST calendar date.
+ *
+ * The count changes at 12:00 AM IST.
+ *
+ * Example:
+ * Purchased Sept 26 at 10:00 PM:
+ *
+ * Sept 26 -> 365 days
+ * Sept 27 12:00 AM -> 364 days
  */
 const getActiveMembership = async (userId) => {
   const resolvedPublicUserId =
@@ -267,7 +275,99 @@ const getActiveMembership = async (userId) => {
     [resolvedPublicUserId]
   );
 
-  return result.rows[0];
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  const membership = result.rows[0];
+
+  /*
+   * =====================================================
+   * CALCULATE REMAINING DAYS USING IST CALENDAR DATE
+   * =====================================================
+   *
+   * We deliberately do NOT compare exact timestamps.
+   *
+   * This means the day changes at:
+   *
+   * 12:00 AM IST
+   *
+   * rather than 24 hours after membership purchase.
+   */
+
+  const todayIST = new Intl.DateTimeFormat(
+    "en-CA",
+    {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }
+  ).format(new Date());
+
+  /*
+   * Convert expiry_date to an IST calendar date.
+   */
+  const expiryIST = new Intl.DateTimeFormat(
+    "en-CA",
+    {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }
+  ).format(new Date(membership.expiry_date));
+
+  /*
+   * Convert YYYY-MM-DD into UTC midnight.
+   *
+   * Since both dates are calendar dates, this avoids
+   * timezone/hour/minute differences affecting the count.
+   */
+  const todayDate = new Date(`${todayIST}T00:00:00Z`);
+  const expiryDate = new Date(`${expiryIST}T00:00:00Z`);
+
+  const millisecondsPerDay =
+    1000 * 60 * 60 * 24;
+
+  let daysRemaining = Math.ceil(
+    (expiryDate.getTime() - todayDate.getTime()) /
+      millisecondsPerDay
+  );
+
+  /*
+   * Never return a negative number.
+   */
+  daysRemaining = Math.max(0, daysRemaining);
+
+  /*
+   * If expiry date has arrived/passed, mark membership expired.
+   */
+  if (daysRemaining <= 0) {
+    await pool.query(
+      `
+      UPDATE user_memberships
+      SET
+        status = 'EXPIRED',
+        updated_at = NOW()
+      WHERE id = $1
+        AND status = 'ACTIVE'
+      `,
+      [membership.id]
+    );
+
+    return null;
+  }
+
+  /*
+   * Add calculated value to the response.
+   *
+   * Database expiry_date remains unchanged.
+   */
+  return {
+    ...membership,
+    days_remaining: daysRemaining
+  };
 };
 
 
@@ -397,7 +497,7 @@ const getMembershipWallet = async (userId) => {
         ),
 
       expiryDate:
-        membership.expiry_date,
+        membership.expiry_date
     },
 
     transactions:
@@ -423,9 +523,9 @@ const getMembershipWallet = async (userId) => {
             transaction.description,
 
           createdAt:
-            transaction.created_at,
+            transaction.created_at
         })
-      ),
+      )
   };
 };
 
@@ -443,7 +543,7 @@ const updateMembershipUsage = async ({
   userId,
   litresUsed,
   walletUsed,
-  orderId,
+  orderId
 }) => {
   const client = await pool.connect();
 
@@ -537,7 +637,7 @@ const updateMembershipUsage = async ({
         [
           litresUsed,
           walletUsed,
-          membership.id,
+          membership.id
         ]
       );
 
@@ -580,7 +680,7 @@ const updateMembershipUsage = async ({
           Number(
             updatedMembership.wallet_balance
           ),
-          `Used for Order #${orderId}`,
+          `Used for Order #${orderId}`
         ]
       );
     }
@@ -699,5 +799,5 @@ module.exports = {
   updateMembershipUsage,
   acceptTerms,
   resetMonthlyBenefits,
-  checkAndResetMonthlyBenefits,
+  checkAndResetMonthlyBenefits
 };
