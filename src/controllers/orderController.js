@@ -116,7 +116,7 @@ const createOrder = async (req, res) => {
         message: "Cart is empty",
       });
     }
-
+  
     // --------------------------------
     // WHATSAPP ORDER CONFIRMATION
     // --------------------------------
@@ -266,7 +266,24 @@ const createOrder = async (req, res) => {
         whatsappError.message
       );
     }
+  
+    return res.status(201).json({
+      success: true,
+      message: "Order created successfully",
+      data: order,
+    });
+  } catch (error) {
+    console.error(
+      "CREATE ORDER ERROR:",
+      error
+    );
 
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 /* --------------------------------
    GET ORDERS
 -------------------------------- */
