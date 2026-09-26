@@ -1,33 +1,41 @@
 const pool = require("../../db");
-
-
-// =====================================================
-// HELPER: RESOLVE PUBLIC MGU ID → INTERNAL USER ID
-// =====================================================
 const resolveEntityId = async (entityId) => {
+  if (entityId === null || entityId === undefined) {
+    throw new Error("User ID is required");
+  }
+
+  const cleanEntityId = String(entityId).trim();
+
+  // Already an internal numeric ID
+  if (/^\d+$/.test(cleanEntityId)) {
+    return Number(cleanEntityId);
+  }
+
+  // Public IDs
   if (
-    typeof entityId !== "string" ||
-    !entityId.startsWith("MGU")
+    cleanEntityId.startsWith("MGU") ||
+    cleanEntityId.startsWith("MGV") ||
+    cleanEntityId.startsWith("MGRS")
   ) {
-    return entityId;
+    const result = await pool.query(
+      `
+      SELECT id
+      FROM user_login
+      WHERE user_id = $1
+        AND is_active = true
+      LIMIT 1
+      `,
+      [cleanEntityId]
+    );
+
+    if (result.rowCount === 0) {
+      throw new Error("User not found");
+    }
+
+    return result.rows[0].id;
   }
 
-  const result = await pool.query(
-    `
-    SELECT id
-    FROM user_login
-    WHERE user_id = $1
-      AND is_active = true
-    LIMIT 1
-    `,
-    [entityId]
-  );
-
-  if (result.rowCount === 0) {
-    throw new Error("User not found");
-  }
-
-  return result.rows[0].id;
+  throw new Error(`Invalid user ID: ${cleanEntityId}`);
 };
 
 
