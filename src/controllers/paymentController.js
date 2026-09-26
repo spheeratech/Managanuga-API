@@ -11,6 +11,8 @@ const User = require("../models/User");
 
 const { sendPushNotification } = require("../services/fcmService");
 
+const { sendOrderConfirmation } = require("../services/whatsappService");
+
 const {
   calculateMembershipBenefits,
 } = require("../services/membershipCheckoutService");
@@ -453,88 +455,98 @@ const verifyPayment = async (req, res) => {
         "Initial Assigned Role:",
         assignedRole
       );
-/* --------------------------------
-   VALIDATE REFERRAL CODE
--------------------------------- */
 
-let validatedReferralCode = null;
+      /* --------------------------------
+         VALIDATE REFERRAL CODE
+      -------------------------------- */
 
-if (
-  typeof referralCode === "string" &&
-  referralCode.trim() !== ""
-) {
-  const cleanReferralCode = referralCode.trim();
+      let validatedReferralCode = null;
 
-  const referralResult = await pool.query(
-    `
-    SELECT
-      ul.id AS referrer_user_id,
-      ul.user_id AS referral_user_id,
-      ul.role
-    FROM user_login ul
-    WHERE ul.user_id = $1
-      AND ul.is_active = true
-      AND ul.role IN ('VENDOR', 'RESELLER')
-    LIMIT 1
-    `,
-    [cleanReferralCode]
-  );
+      if (
+        typeof referralCode === "string" &&
+        referralCode.trim() !== ""
+      ) {
+        const cleanReferralCode =
+          referralCode.trim();
 
-  const referrer = referralResult.rows[0];
+        const referralResult =
+          await pool.query(
+            `
+            SELECT
+              ul.id AS referrer_user_id,
+              ul.user_id AS referral_user_id,
+              ul.role
+            FROM user_login ul
+            WHERE ul.user_id = $1
+              AND ul.is_active = true
+              AND ul.role IN ('VENDOR', 'RESELLER')
+            LIMIT 1
+            `,
+            [cleanReferralCode]
+          );
 
-  if (!referrer) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid referral code",
-    });
-  }
+        const referrer =
+          referralResult.rows[0];
 
-  /*
-   * Prevent self-referral.
-   */
-  if (
-    String(referrer.referrer_user_id) ===
-    String(resolvedUserId)
-  ) {
-    return res.status(400).json({
-      success: false,
-      message: "You cannot use your own referral code",
-    });
-  }
+        if (!referrer) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid referral code",
+          });
+        }
 
-  /*
-   * IMPORTANT:
-   *
-   * The referral owner becomes the customer's
-   * assigned_by relationship.
-   *
-   * Example:
-   *
-   * Vendor MGV260803
-   *       ↓ referral link
-   * Customer MGU26092601
-   *
-   * user_login.assigned_by
-   *       =
-   * MGV260803
-   *
-   * This makes the customer appear in the
-   * Vendor Customers and Vendor Orders APIs.
-   */
-  assignedBy = referrer.referral_user_id;
-  assignedRole = referrer.role;
+        /*
+         * Prevent self-referral.
+         */
+        if (
+          String(referrer.referrer_user_id) ===
+          String(resolvedUserId)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "You cannot use your own referral code",
+          });
+        }
 
-  /*
-   * user_memberships.referral_code stores
-   * the public user_id of the referrer.
-   */
-  validatedReferralCode = referrer.referral_user_id;
+        /*
+         * IMPORTANT:
+         *
+         * The referral owner becomes the customer's
+         * assigned_by relationship.
+         */
+        assignedBy =
+          referrer.referral_user_id;
 
-  console.log("===== REFERRAL ASSIGNMENT =====");
-  console.log("Referral Code:", validatedReferralCode);
-  console.log("Referrer User ID:", assignedBy);
-  console.log("Referrer Role:", assignedRole);
-}
+        assignedRole =
+          referrer.role;
+
+        /*
+         * user_memberships.referral_code stores
+         * the public user_id of the referrer.
+         */
+        validatedReferralCode =
+          referrer.referral_user_id;
+
+        console.log(
+          "===== REFERRAL ASSIGNMENT ====="
+        );
+
+        console.log(
+          "Referral Code:",
+          validatedReferralCode
+        );
+
+        console.log(
+          "Referrer User ID:",
+          assignedBy
+        );
+
+        console.log(
+          "Referrer Role:",
+          assignedRole
+        );
+      }
 
       /* --------------------------------
          CREATE MEMBERSHIP
@@ -598,31 +610,48 @@ if (
         );
       }
 
-
       /* --------------------------------
-   SAVE REFERRAL ASSIGNMENT
--------------------------------- */
+         SAVE REFERRAL ASSIGNMENT
+      -------------------------------- */
 
-if (validatedReferralCode && assignedBy && assignedRole) {
-  await pool.query(
-    `
-    UPDATE user_login
-    SET
-      assigned_by = $1
-    WHERE id = $2
-      AND is_active = true
-    `,
-    [
-      assignedBy,
-      resolvedUserId,
-    ]
-  );
+      if (
+        validatedReferralCode &&
+        assignedBy &&
+        assignedRole
+      ) {
+        await pool.query(
+          `
+          UPDATE user_login
+          SET
+            assigned_by = $1
+          WHERE id = $2
+            AND is_active = true
+          `,
+          [
+            assignedBy,
+            resolvedUserId,
+          ]
+        );
 
-  console.log("===== USER REFERRAL ASSIGNED =====");
-  console.log("Customer:", customer.login_user_id);
-  console.log("Assigned By:", assignedBy);
-  console.log("Assigned Role:", assignedRole);
-}
+        console.log(
+          "===== USER REFERRAL ASSIGNED ====="
+        );
+
+        console.log(
+          "Customer:",
+          customer.login_user_id
+        );
+
+        console.log(
+          "Assigned By:",
+          assignedBy
+        );
+
+        console.log(
+          "Assigned Role:",
+          assignedRole
+        );
+      }
 
       /* --------------------------------
          PROCESS VENDOR / RESELLER BENEFIT
@@ -685,7 +714,6 @@ if (validatedReferralCode && assignedBy && assignedRole) {
           userId
         );
     }
-
 
     /* --------------------------------
        UPDATE PAYMENT + ORDER PAYMENT STATUS
@@ -811,6 +839,47 @@ if (validatedReferralCode && assignedBy && assignedRole) {
         message:
           "Delivery address not found",
       });
+    }
+
+    /* --------------------------------
+       WHATSAPP ORDER CONFIRMATION
+    -------------------------------- */
+    try {
+      const orderDetails =
+        await Order.getOrderById(order.id);
+
+      const orderItems =
+        await Order.getOrderItems(order.id);
+
+      const productNames =
+        orderItems
+          .map(
+            (item) =>
+              `${item.product_name} x${item.quantity}`
+          )
+          .join(", ");
+
+      if (orderDetails?.phone) {
+        await sendOrderConfirmation({
+          mobile: orderDetails.phone,
+          orderId: order.id,
+          products: productNames,
+          amount: order.total_amount,
+        });
+
+        console.log(
+          `WHATSAPP ORDER CONFIRMATION SENT FOR ORDER ${order.id}`
+        );
+      } else {
+        console.log(
+          "WhatsApp skipped: customer mobile number not found."
+        );
+      }
+    } catch (whatsappError) {
+      console.error(
+        "WHATSAPP ORDER CONFIRMATION FAILED:",
+        whatsappError.message
+      );
     }
 
     /* --------------------------------
