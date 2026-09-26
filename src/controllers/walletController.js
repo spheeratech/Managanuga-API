@@ -1,6 +1,5 @@
 const Wallet = require("../models/Wallet");
 
-
 /*
  * ============================================================
  * GET WALLET
@@ -9,7 +8,7 @@ const Wallet = require("../models/Wallet");
  */
 const getWallet = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const {userId} = req.params;
 
     if (!userId) {
       return res.status(400).json({
@@ -49,11 +48,17 @@ const getWallet = async (req, res) => {
  * ============================================================
  * CREATE REDEEM REQUEST
  * POST /api/wallet/redeem
+ *
+ * Body:
+ * {
+ *   "userId": "MGV260803",
+ *   "amount": 1500
+ * }
  * ============================================================
  */
 const createRedeemRequest = async (req, res) => {
   try {
-    const { userId } = req.body;
+    const {userId, amount} = req.body;
 
     if (!userId) {
       return res.status(400).json({
@@ -62,8 +67,20 @@ const createRedeemRequest = async (req, res) => {
       });
     }
 
+    if (
+      amount === undefined ||
+      amount === null ||
+      String(amount).trim() === ""
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Redeem amount is required",
+      });
+    }
+
     const result = await Wallet.createRedeemRequest(
-      String(userId).trim()
+      String(userId).trim(),
+      amount
     );
 
     return res.status(201).json({
@@ -74,14 +91,14 @@ const createRedeemRequest = async (req, res) => {
 
   } catch (error) {
 
-    /*
-     * Expected business validation errors.
-     */
     if (
       error.message === "Wallet not found" ||
       error.message ===
         "Redeem is available only for Vendor or Reseller wallets" ||
-      error.message.includes("Minimum wallet balance")
+      error.message.includes("Minimum redeem amount") ||
+      error.message.includes("Minimum wallet balance") ||
+      error.message.includes("Redeem amount cannot exceed") ||
+      error.message.includes("Redeem amount must be a valid number")
     ) {
       return res.status(400).json({
         success: false,
@@ -110,7 +127,7 @@ const createRedeemRequest = async (req, res) => {
  */
 const getRedeemStatus = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const {userId} = req.params;
 
     if (!userId) {
       return res.status(400).json({
@@ -150,7 +167,7 @@ const getRedeemStatus = async (req, res) => {
  */
 const getRedeemTransactions = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const {userId} = req.params;
 
     if (!userId) {
       return res.status(400).json({
