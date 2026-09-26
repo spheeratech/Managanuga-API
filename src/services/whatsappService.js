@@ -1,31 +1,49 @@
 const PINBOT_PHONE_NUMBER_ID =
   process.env.PINBOT_PHONE_NUMBER_ID;
+
 const PINBOT_API_URL =
   `https://partnersv1.pinbot.ai/v3/${PINBOT_PHONE_NUMBER_ID}/messages`;
+
+
+/* =========================================================
+   SEND ORDER CONFIRMATION WHATSAPP
+========================================================= */
 
 const sendOrderConfirmation = async ({
   mobile,
   orderId,
   products,
-  amount,
+  orderSummary,
 }) => {
   if (!process.env.PINBOT_API_KEY) {
     throw new Error("PINBOT_API_KEY is not configured");
   }
 
-  // WhatsApp number should contain country code.
-  // Example: 9848283838 -> 919848283838
+  /* --------------------------------
+     NORMALIZE PHONE NUMBER
+  -------------------------------- */
+
   let phone = String(mobile).replace(/\D/g, "");
 
+  // Indian 10 digit number
   if (phone.length === 10) {
     phone = `91${phone}`;
   }
 
+
+  /* --------------------------------
+     WHATSAPP TEMPLATE PAYLOAD
+  -------------------------------- */
+
   const payload = {
     messaging_product: "whatsapp",
+
     recipient_type: "individual",
+
     to: phone,
+
     type: "template",
+
     template: {
       name:
         process.env.PINBOT_TEMPLATE_NAME ||
@@ -40,24 +58,32 @@ const sendOrderConfirmation = async ({
       components: [
         {
           type: "body",
+
           parameters: [
             {
               type: "text",
               text: String(orderId),
             },
+
             {
               type: "text",
               text: String(products),
             },
+
             {
               type: "text",
-              text: String(amount),
+              text: String(orderSummary),
             },
           ],
         },
       ],
     },
   };
+
+
+  /* --------------------------------
+     SEND REQUEST
+  -------------------------------- */
 
   const response = await fetch(
     PINBOT_API_URL,
@@ -73,7 +99,13 @@ const sendOrderConfirmation = async ({
     }
   );
 
-  const responseText = await response.text();
+
+  /* --------------------------------
+     READ RESPONSE
+  -------------------------------- */
+
+  const responseText =
+    await response.text();
 
   let data;
 
@@ -84,6 +116,11 @@ const sendOrderConfirmation = async ({
       raw: responseText,
     };
   }
+
+
+  /* --------------------------------
+     HANDLE ERROR
+  -------------------------------- */
 
   if (!response.ok) {
     console.error(
@@ -99,6 +136,11 @@ const sendOrderConfirmation = async ({
     );
   }
 
+
+  /* --------------------------------
+     SUCCESS
+  -------------------------------- */
+
   console.log(
     "WHATSAPP ORDER CONFIRMATION SENT:",
     data
@@ -106,6 +148,7 @@ const sendOrderConfirmation = async ({
 
   return data;
 };
+
 
 module.exports = {
   sendOrderConfirmation,

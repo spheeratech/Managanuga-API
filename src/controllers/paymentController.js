@@ -808,6 +808,216 @@ const verifyPayment = async (req, res) => {
     });
 
     /* --------------------------------
+   SEND WHATSAPP ORDER CONFIRMATION
+-------------------------------- */
+
+try {
+  const orderDetails =
+    await Order.getOrderById(order.id);
+
+  const orderItems =
+    await Order.getOrderItems(order.id);
+
+
+  /* --------------------------------
+     PRODUCT LIST
+  -------------------------------- */
+
+  const productNames =
+    orderItems
+      .map(
+        (item) =>
+          `${item.product_name} x${item.quantity}`
+      )
+      .join(", ");
+
+
+  /* --------------------------------
+     TOTAL ITEM COUNT
+     SAME LOGIC AS APP
+  -------------------------------- */
+
+  const totalItemCount =
+    orderItems.reduce(
+      (sum, item) =>
+        sum + Number(item.quantity || 1),
+      0
+    );
+
+
+  /* --------------------------------
+     ORDER SUMMARY VALUES
+     SAME LOGIC AS APP
+  -------------------------------- */
+
+  const itemsCost =
+    Number(
+      orderDetails?.items_cost ??
+      orderDetails?.total_amount ??
+      0
+    );
+
+
+  const membershipDiscount =
+    Number(
+      orderDetails?.membership_discount || 0
+    );
+
+
+  const walletClaim =
+    Number(
+      orderDetails?.wallet_claim || 0
+    );
+
+
+  const deliveryCharge =
+    Number(
+      orderDetails?.delivery_charge || 0
+    );
+
+
+  const paymentStatus =
+    orderDetails?.payment_status || "PAID";
+
+
+  /* --------------------------------
+     DETERMINE MEMBERSHIP ORDER
+     SAME LOGIC AS APP
+  -------------------------------- */
+
+  const hasMembershipDetails =
+    membershipDiscount > 0 ||
+    walletClaim > 0;
+
+
+  /* --------------------------------
+     FINAL AMOUNT
+     SAME LOGIC AS APP
+  -------------------------------- */
+
+  const finalAmount =
+    (
+      itemsCost -
+      membershipDiscount -
+      walletClaim +
+      deliveryCharge
+    ).toFixed(2);
+
+
+  /* --------------------------------
+     BUILD WHATSAPP SUMMARY
+  -------------------------------- */
+
+  let orderSummary = "";
+
+
+  /* TOTAL ITEMS */
+
+  orderSummary +=
+    `Total Items          ${totalItemCount} ${
+      totalItemCount === 1
+        ? "Item"
+        : "Items"
+    }`;
+
+
+  /* ITEMS COST */
+
+  orderSummary +=
+    `\nItems Cost           ₹${itemsCost.toFixed(2)}`;
+
+
+  /* --------------------------------
+     MEMBERSHIP ORDER
+  -------------------------------- */
+
+  if (hasMembershipDetails) {
+
+    orderSummary +=
+      `\nMembership Discount -₹${membershipDiscount.toFixed(2)}`;
+
+    orderSummary +=
+      `\nWallet Claim         -₹${walletClaim.toFixed(2)}`;
+
+    orderSummary +=
+      `\nDelivery             ${
+        deliveryCharge === 0
+          ? "FREE"
+          : `₹${deliveryCharge.toFixed(2)}`
+      }`;
+
+  }
+
+  /* --------------------------------
+     NORMAL ORDER
+  -------------------------------- */
+
+  else {
+
+    orderSummary +=
+      `\nDelivery Charges     ₹${deliveryCharge.toFixed(2)}`;
+
+  }
+
+
+  /* PAYMENT STATUS */
+
+  orderSummary +=
+    `\nPayment Status       ${paymentStatus}`;
+
+
+  /* FINAL AMOUNT */
+
+  orderSummary +=
+    `\n\n${
+      hasMembershipDetails
+        ? "Payable Amount"
+        : "Total Amount"
+    }       ₹${finalAmount}`;
+
+
+  /* --------------------------------
+     SEND WHATSAPP
+  -------------------------------- */
+
+  if (orderDetails?.phone) {
+
+    await sendOrderConfirmation({
+      mobile: orderDetails.phone,
+
+      orderId: order.id,
+
+      products: productNames,
+
+      orderSummary,
+    });
+
+    console.log(
+      `WHATSAPP ORDER CONFIRMATION SENT FOR ORDER ${order.id}`
+    );
+
+  } else {
+
+    console.log(
+      `WhatsApp skipped: customer mobile number not found for order ${order.id}`
+    );
+
+  }
+
+} catch (whatsappError) {
+
+  /*
+   * WhatsApp failure must NEVER
+   * cancel a successful order.
+   */
+
+  console.error(
+    "WHATSAPP ORDER CONFIRMATION FAILED:",
+    whatsappError.message
+  );
+}
+
+    /* --------------------------------
        GET DELIVERY ADDRESS
     -------------------------------- */
     const addressResult =
