@@ -128,6 +128,10 @@ const createOrder = async (req, res) => {
       const orderItems =
         await Order.getOrderItems(order.id);
 
+      /* --------------------------------
+         PRODUCT SUMMARY
+      -------------------------------- */
+
       const productNames = orderItems
         .map(
           (item) =>
@@ -135,42 +139,133 @@ const createOrder = async (req, res) => {
         )
         .join(", ");
 
+      /* --------------------------------
+         TOTAL ITEMS
+      -------------------------------- */
+
+      const totalItems = orderItems.reduce(
+        (sum, item) =>
+          sum + Number(item.quantity || 0),
+        0
+      );
+
+      const itemLabel =
+        totalItems === 1 ? "Item" : "Items";
+
+      /* --------------------------------
+         EXISTING ORDER PRICE BREAKDOWN
+
+         These values come from the same
+         fields used by the Order Summary.
+      -------------------------------- */
+
+      const itemsCost = Number(
+        orderDetails?.items_cost ??
+        orderDetails?.total_amount ??
+        0
+      );
+
+      const membershipDiscount = Number(
+        orderDetails?.membership_discount || 0
+      );
+
+      const walletClaim = Number(
+        orderDetails?.wallet_claim || 0
+      );
+
+      const deliveryCharge = Number(
+        orderDetails?.delivery_charge || 0
+      );
+
+      const paymentStatus =
+        orderDetails?.payment_status ||
+        "PAID";
+
+      /* --------------------------------
+         MEMBERSHIP ORDER
+
+         Membership fields are shown only
+         when membership discount or wallet
+         claim exists.
+      -------------------------------- */
+
+      const isMembershipOrder =
+        membershipDiscount > 0 ||
+        walletClaim > 0;
+
+      let orderSummary;
+
+      if (isMembershipOrder) {
+        const deliveryText =
+          deliveryCharge > 0
+            ? `₹${deliveryCharge.toFixed(2)}`
+            : "FREE";
+
+        const payableAmount =
+          itemsCost -
+          membershipDiscount -
+          walletClaim +
+          deliveryCharge;
+
+        orderSummary =
+          `Total Items: ${totalItems} ${itemLabel} | ` +
+          `Items Cost: ₹${itemsCost.toFixed(2)} | ` +
+          `Membership Discount: -₹${membershipDiscount.toFixed(2)} | ` +
+          `Wallet Claim: -₹${walletClaim.toFixed(2)} | ` +
+          `Delivery: ${deliveryText} | ` +
+          `Payment Status: ${paymentStatus} | ` +
+          `Payable Amount: ₹${payableAmount.toFixed(2)}`;
+      } else {
+        /* --------------------------------
+           NORMAL / NON-MEMBERSHIP ORDER
+
+           Do NOT show membership discount
+           or wallet claim.
+        -------------------------------- */
+
+        const totalAmount =
+          itemsCost + deliveryCharge;
+
+        orderSummary =
+          `Total Items: ${totalItems} ${itemLabel} | ` +
+          `Items Cost: ₹${itemsCost.toFixed(2)} | ` +
+          `Delivery Charges: ₹${deliveryCharge.toFixed(2)} | ` +
+          `Payment Status: ${paymentStatus} | ` +
+          `Total Amount: ₹${totalAmount.toFixed(2)}`;
+      }
+
+      /* --------------------------------
+         SEND WHATSAPP
+      -------------------------------- */
+
       if (orderDetails?.phone) {
         await sendOrderConfirmation({
           mobile: orderDetails.phone,
           orderId: order.id,
           products: productNames,
-          amount: order.total_amount,
+          orderSummary,
         });
+
+        console.log(
+          "WHATSAPP ORDER CONFIRMATION SENT FOR ORDER:",
+          order.id
+        );
       } else {
         console.log(
           "WhatsApp skipped: customer mobile number not found."
         );
       }
     } catch (whatsappError) {
+      /* --------------------------------
+         WhatsApp failure must NOT fail
+         the order itself.
+      -------------------------------- */
+
       console.error(
         "WHATSAPP ORDER CONFIRMATION FAILED:",
         whatsappError.message
       );
     }
-
-    return res.status(201).json({
-      success: true,
-      message: "Order created successfully",
-      data: order,
-    });
-  } catch (error) {
-    console.error(
-      "CREATE ORDER ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
 
 /* --------------------------------
    GET ORDERS

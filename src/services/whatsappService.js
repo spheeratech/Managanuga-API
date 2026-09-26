@@ -47,7 +47,7 @@ const sendOrderConfirmation = async ({
     template: {
       name:
         process.env.PINBOT_TEMPLATE_NAME ||
-        "order_confirmation",
+        "order_placed",
 
       language: {
         code:
