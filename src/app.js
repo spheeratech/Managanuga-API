@@ -30,12 +30,9 @@ const locationRoutes = require("./routes/locationRoutes");
 const app = express();
 
 // mobile App APIS
-
 app.use(cors());
 app.use(express.json());
-
 app.use("/api/categories", categoryRoutes);
-
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/event-posters", eventPosterRoutes);
@@ -70,5 +67,4 @@ app.get("/test", (req, res) => {
     message: "Main app working",
   });
 });
-
 module.exports = app;
