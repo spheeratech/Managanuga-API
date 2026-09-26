@@ -65,33 +65,7 @@ const getCustomers = async (userId) => {
   if (currentUser.role === "RESELLER") {
     const result = await pool.query(
       `
-      SELECT DISTINCT ON (ul.user_id)
-
-        ul.user_id AS customer_user_id,
-        ul.username AS customer_name,
-        ul.mobile_no AS customer_mobile,
-
-        sp.plan_name,
-
-        ums.status
-
-      FROM user_memberships ums
-
-      INNER JOIN user_login ul
-        ON ul.user_id = ums.user_id
-
-      INNER JOIN subscription_plans sp
-        ON sp.id = ums.plan_id
-
-      WHERE
-        ums.referral_code = $1
-        AND ums.status = 'ACTIVE'
-        AND ul.role IN ('USER', 'CUSTOMER')
-        AND ul.is_active = true
-
-      ORDER BY
-        ul.user_id,
-        ums.id DESC;
+      SELECT * FROM get_customers_by_referalid($1)
       `,
       [cleanUserId]
     );
