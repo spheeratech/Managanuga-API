@@ -695,19 +695,23 @@ exports.login = async (req, res) => {
       message: "Login successful",
 
       user: {
-        id: user.id,
-        userId: user.user_id,
-        username: user.username,
-        email: user.email,
-        name: fullName || user.username,
-        role: user.role,
-        mobile: user.mobile_no,
+  // Public ManaGanuga ID — this is what the app should use everywhere
+  id: user.user_id,
+  user_id: user.user_id,
+  userId: user.user_id,
 
-        // IMPORTANT
-        createdBy: user.created_by,
-        assignedBy: user.assigned_by,
-        relationshipType: user.relationship_type,
-      },
+  // Keep internal DB ID available separately for legacy/internal use
+  login_id: user.id,
+
+  username: user.username,
+  email: user.email,
+  name: fullName || user.username,
+  role: user.role,
+  mobile: user.mobile_no,
+  createdBy: user.created_by,
+  assignedBy: user.assigned_by,
+  relationshipType: user.relationship_type,
+},
     });
   } catch (error) {
     console.error("COMMON LOGIN ERROR:", error);

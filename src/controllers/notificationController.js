@@ -7,38 +7,48 @@ const { sendPushNotification } = require("../services/fcmService");
 // =====================================================
 
 const resolveUserId = async (userId) => {
-  // If already numeric, use it directly
-  if (
-    typeof userId === "number" ||
-    (typeof userId === "string" && /^\d+$/.test(userId))
-  ) {
-    return Number(userId);
+  const cleanUserId = String(userId || "").trim();
+
+  if (!cleanUserId) {
+    throw new Error("userId is required");
   }
 
-  // Resolve public MGU ID to user_login.id
-  if (
-    typeof userId === "string" &&
-    userId.startsWith("MGU")
-  ) {
+  if (/^\d+$/.test(cleanUserId)) {
+    const numericId = Number(cleanUserId);
+
     const result = await pool.query(
       `
       SELECT id
       FROM user_login
-      WHERE user_id = $1
+      WHERE id = $1
         AND is_active = true
       LIMIT 1
       `,
-      [userId]
+      [numericId]
     );
 
-    if (!result.rows[0]) {
-      return null;
+    if (result.rowCount === 0) {
+      throw new Error("User not found");
     }
 
     return result.rows[0].id;
   }
+  const result = await pool.query(
+    `
+    SELECT id
+    FROM user_login
+    WHERE user_id = $1
+      AND is_active = true
+    LIMIT 1
+    `,
+    [cleanUserId]
+  );
 
-  return null;
+  if (result.rowCount === 0) {
+    throw new Error("User not found");
+  }
+
+  return result.rows[0].id;
 };
 
 // =====================================================
