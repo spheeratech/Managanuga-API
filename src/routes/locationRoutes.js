@@ -9,7 +9,6 @@ const GOOGLE_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
 router.get("/search", async (req, res) => {
   try {
     const input = String(req.query.input || "").trim();
-
     if (!input) {
       return res.json([]);
     }
@@ -19,7 +18,6 @@ router.get("/search", async (req, res) => {
         message: "Google Places API key is not configured on backend.",
       });
     }
-
     const response = await axios.get(
       "https://maps.googleapis.com/maps/api/place/autocomplete/json",
       {
