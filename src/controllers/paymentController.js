@@ -453,125 +453,88 @@ const verifyPayment = async (req, res) => {
         "Initial Assigned Role:",
         assignedRole
       );
+/* --------------------------------
+   VALIDATE REFERRAL CODE
+-------------------------------- */
 
-      /* --------------------------------
-         VALIDATE REFERRAL CODE
-      -------------------------------- */
-      let validatedReferralCode = null;
+let validatedReferralCode = null;
 
-      if (
-        typeof referralCode === "string" &&
-        referralCode.trim() !== ""
-      ) {
-        const cleanReferralCode =
-          referralCode.trim();
+if (
+  typeof referralCode === "string" &&
+  referralCode.trim() !== ""
+) {
+  const cleanReferralCode = referralCode.trim();
 
-        const referralResult =
-          await pool.query(
-            `
-            SELECT
-              ul.id AS referrer_user_id,
-              ul.user_id AS referral_user_id,
-              ul.role
-            FROM user_login ul
-            WHERE ul.user_id = $1
-              AND ul.is_active = true
-            LIMIT 1
-            `,
-            [cleanReferralCode]
-          );
+  const referralResult = await pool.query(
+    `
+    SELECT
+      ul.id AS referrer_user_id,
+      ul.user_id AS referral_user_id,
+      ul.role
+    FROM user_login ul
+    WHERE ul.user_id = $1
+      AND ul.is_active = true
+      AND ul.role IN ('VENDOR', 'RESELLER')
+    LIMIT 1
+    `,
+    [cleanReferralCode]
+  );
 
-        const referrer =
-          referralResult.rows[0];
+  const referrer = referralResult.rows[0];
 
-        if (!referrer) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Invalid referral code",
-          });
-        }
+  if (!referrer) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid referral code",
+    });
+  }
 
-        /*
-         * Prevent self-referral.
-         */
-        if (
-          Number(
-            referrer.referrer_user_id
-          ) === Number(resolvedUserId)
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "You cannot use your own referral code",
-          });
-        }
+  /*
+   * Prevent self-referral.
+   */
+  if (
+    String(referrer.referrer_user_id) ===
+    String(resolvedUserId)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "You cannot use your own referral code",
+    });
+  }
 
-        /*
-         * IMPORTANT:
-         *
-         * referral_code stores the PUBLIC user_id
-         * of the person who shared the referral.
-         *
-         * Example:
-         * MGRS260803
-         */
-        validatedReferralCode =
-          referrer.referral_user_id;
+  /*
+   * IMPORTANT:
+   *
+   * The referral owner becomes the customer's
+   * assigned_by relationship.
+   *
+   * Example:
+   *
+   * Vendor MGV260803
+   *       ↓ referral link
+   * Customer MGU26092601
+   *
+   * user_login.assigned_by
+   *       =
+   * MGV260803
+   *
+   * This makes the customer appear in the
+   * Vendor Customers and Vendor Orders APIs.
+   */
+  assignedBy = referrer.referral_user_id;
+  assignedRole = referrer.role;
 
-        /*
-         * IMPORTANT:
-         *
-         * A valid referral becomes the actual
-         * membership assignment.
-         *
-         * Therefore the reseller/vendor who shared
-         * the link becomes the assigned_by person.
-         */
-        assignedBy =
-          referrer.referral_user_id;
+  /*
+   * user_memberships.referral_code stores
+   * the public user_id of the referrer.
+   */
+  validatedReferralCode = referrer.referral_user_id;
 
-        assignedRole =
-          referrer.role;
-
-        console.log(
-          "===== VALID REFERRAL ====="
-        );
-
-        console.log(
-          "Referral Code:",
-          validatedReferralCode
-        );
-
-        console.log(
-          "Referral User:",
-          assignedBy
-        );
-
-        console.log(
-          "Referral Role:",
-          assignedRole
-        );
-      }
-
-      console.log(
-        "===== FINAL MEMBERSHIP ASSIGNMENT ====="
-      );
-
-      console.log(
-        "Assigned By:",
-        assignedBy
-      );
-
-      console.log(
-        "Assigned Role:",
-        assignedRole
-      );
-
-      console.log(
-        "Referral Code:",
-        validatedReferralCode
-      );
+  console.log("===== REFERRAL ASSIGNMENT =====");
+  console.log("Referral Code:", validatedReferralCode);
+  console.log("Referrer User ID:", assignedBy);
+  console.log("Referrer Role:", assignedRole);
+}
 
       /* --------------------------------
          CREATE MEMBERSHIP
@@ -634,6 +597,32 @@ const verifyPayment = async (req, res) => {
           assignedBy
         );
       }
+
+
+      /* --------------------------------
+   SAVE REFERRAL ASSIGNMENT
+-------------------------------- */
+
+if (validatedReferralCode && assignedBy && assignedRole) {
+  await pool.query(
+    `
+    UPDATE user_login
+    SET
+      assigned_by = $1
+    WHERE id = $2
+      AND is_active = true
+    `,
+    [
+      assignedBy,
+      resolvedUserId,
+    ]
+  );
+
+  console.log("===== USER REFERRAL ASSIGNED =====");
+  console.log("Customer:", customer.login_user_id);
+  console.log("Assigned By:", assignedBy);
+  console.log("Assigned Role:", assignedRole);
+}
 
       /* --------------------------------
          PROCESS VENDOR / RESELLER BENEFIT
