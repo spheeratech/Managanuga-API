@@ -3,6 +3,15 @@ const AdminUser = require("../models/AdminUser");
 const generateUserId = require("../utils/generatedUserId");
 const clean = (val) =>
   val && String(val).trim() !== "" ? String(val).trim() : null;
+const { sendSMS } = require("../services/smsService");
+const crypto = require("crypto");
+const generatePassword = (length = 8) => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+
+  const bytes = crypto.randomBytes(length);
+
+  return Array.from(bytes, (byte) => chars[byte % chars.length]).join("");
+};
 
 // --------------------------------------------------
 // ROLE PERMISSIONS
@@ -162,7 +171,16 @@ const createUser = async (req, res) => {
     // --------------------------------------------------
     // CHECK USERNAME
     // --------------------------------------------------
-    const existingUsername = await AdminUser.findByUsername(username);
+    // const existingUsername = await AdminUser.findByUsername(username);
+    // --------------------------------------------------
+    // CHECK USERNAME
+    // --------------------------------------------------
+    const loginUsername = [firstName, lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    const existingUsername = await AdminUser.findByUsername(loginUsername);
 
     if (existingUsername) {
       return res.status(409).json({
@@ -202,8 +220,8 @@ const createUser = async (req, res) => {
     // --------------------------------------------------
     const userId = await generateUserId(targetRole);
 
-    const generatedPassword = "123456";
-
+    // const generatedPassword = "123456";
+    const generatedPassword = generatePassword();
     await client.query("BEGIN");
 
     // --------------------------------------------------
@@ -213,7 +231,9 @@ const createUser = async (req, res) => {
       client,
       {
         userId,
-        username,
+        // username,
+        // username: [firstName, lastName].filter(Boolean).join(" ").trim(),
+        username: loginUsername,
         mobileNo: clean(mobileNo),
         password: generatedPassword,
         role: targetRole,
@@ -273,10 +293,51 @@ const createUser = async (req, res) => {
     );
     console.log("========================================");
     await client.query("COMMIT");
+    let smsSent = false;
 
+    try {
+      const passwordMessage =
+        `We are delighted to have you with us. Your account for managanuga has been created successfully.\n` +
+        `User ID: ${clean(mobileNo)}\n` +
+        `Password: ${generatedPassword}\n` +
+        `For your peace of mind, we recommend updating your password after your first login.\n` +
+        `managanuga`;
+
+      console.log(
+        "PASSWORD SMS TEMPLATE:",
+        process.env.SMS_PASSWORD_TEMPLATE_ID,
+      );
+
+      console.log("PASSWORD SMS MOBILE:", clean(mobileNo));
+
+      console.log("PASSWORD SMS USER ID:", clean(mobileNo));
+
+      console.log("PASSWORD SMS PASSWORD:", generatedPassword);
+
+      await sendSMS(
+        clean(mobileNo),
+        passwordMessage,
+        process.env.SMS_PASSWORD_TEMPLATE_ID,
+      );
+
+      smsSent = true;
+
+      console.log("✅ Registration SMS sent successfully");
+    } catch (smsError) {
+      console.error(
+        "⚠️ User created, but registration SMS failed:",
+        smsError.message,
+      );
+    }
+    // return res.status(201).json({
+    //   success: true,
+    //   message: `${targetRole} created successfully`,
+
+    //   data: {
     return res.status(201).json({
       success: true,
       message: `${targetRole} created successfully`,
+      smsSent,
 
       data: {
         userId: user.login.user_id,
