@@ -39,9 +39,34 @@ const updateByGatewayOrderId = async (gateway_order_id, data) => {
   return result.rows[0];
 };
 
+const createPaymentLog = async (data) => {
+  const result = await pool.query(
+    `INSERT INTO payments_log
+      (
+        user_id,
+        order_id,
+        order_type,
+        payment_request,
+        payment_response
+      )
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [
+      data.user_id,
+      data.order_id,
+      data.order_type,
+      data.payment_request || null,
+      data.payment_response || null,
+    ],
+  );
+
+  return result.rows[0];
+};
+
 module.exports = {
   createPayment,
   getPayments,
   getPaymentById,
   updateByGatewayOrderId,
+  createPaymentLog
 };

@@ -11,8 +11,6 @@ const User = require("../models/User");
 
 const { sendPushNotification } = require("../services/fcmService");
 
-const { sendOrderConfirmation } = require("../services/whatsappService");
-
 const {
   calculateMembershipBenefits,
 } = require("../services/membershipCheckoutService");
@@ -21,6 +19,10 @@ const {
   processMembershipBenefit,
 } = require("../services/membershipBenefitService");
 
+const {
+  sendOrderConfirmation,
+  sendSubscriptionWhatsApp,
+} = require("../services/whatsappService");
 
 /* --------------------------------
    CREATE ORDER
@@ -276,6 +278,11 @@ const verifyPayment = async (req, res) => {
           message: "Invalid signature",
         });
     }
+
+    const razorpayPayment =
+  await razorpayService.fetchRazorpayPayment(
+    razorpay_payment_id
+  );
 
     /* --------------------------------
        UPDATE PAYMENT
@@ -554,35 +561,77 @@ const verifyPayment = async (req, res) => {
       const membership =
         await Membership.createMembership({
           userId: resolvedUserId,
-
           planId: plan.id,
-
           paymentId: payment.id,
-
           walletBalance:
             plan.wallet_bonus,
-
           discountPercent:
             plan.discount_percentage,
-
           monthlyClaim:
             plan.monthly_claim,
-
           expiryDate,
-
           termsAndConditions: true,
-
           assignedBy,
-
           assignedRole,
-
-          /*
-           * Stores the public user_id of
-           * the person who shared the link.
-           */
           referralCode:
             validatedReferralCode,
         });
+
+        try {
+  await Payment.createPaymentLog({
+    user_id: customer.login_user_id,
+    order_id: membership.id,
+    order_type: "MEMBERSHIP",
+
+    payment_request: {
+      razorpay_order_id,
+      razorpay_payment_id,
+      amount: razorpayPayment.amount,
+      currency: razorpayPayment.currency,
+    },
+
+    payment_response: razorpayPayment,
+  });
+
+  console.log(
+    `Payment log created for membership ${membership.id}`
+  );
+} catch (paymentLogError) {
+  console.error(
+    "MEMBERSHIP PAYMENT LOG ERROR:",
+    paymentLogError.message
+  );
+}
+        /* --------------------------------
+   SEND SUBSCRIPTION WHATSAPP
+-------------------------------- */
+
+try {
+  if (customer?.mobile) {
+    const validity = "1 Year";
+
+    await sendSubscriptionWhatsApp({
+      mobile: customer.mobile,
+      customerName: customer.full_name || "Customer",
+      planName: plan.plan_name || plan.name || "Subscription",
+      walletAmount: Number(plan.wallet_bonus || 0).toFixed(2),
+      validity,
+    });
+
+    console.log(
+      `WHATSAPP SUBSCRIPTION SENT FOR MEMBERSHIP ${membership.id}`
+    );
+  } else {
+    console.log(
+      "WhatsApp subscription skipped: customer mobile number not found"
+    );
+  }
+} catch (whatsappError) {
+  console.error(
+    "WHATSAPP SUBSCRIPTION FAILED:",
+    whatsappError.message
+  );
+}
 
       /* --------------------------------
          UPDATE CUSTOMER ASSIGNMENT
@@ -727,6 +776,32 @@ const verifyPayment = async (req, res) => {
       `,
       [order.id, payment.id]
     );
+
+    try {
+  await Payment.createPaymentLog({
+    user_id: userId,
+    order_id: order.id,
+    order_type: "ORDER",
+
+    payment_request: {
+      razorpay_order_id,
+      razorpay_payment_id,
+      amount: razorpayPayment.amount,
+      currency: razorpayPayment.currency,
+    },
+
+    payment_response: razorpayPayment,
+  });
+
+  console.log(
+    `Payment log created for order ${order.id}`
+  );
+} catch (paymentLogError) {
+  console.error(
+    "ORDER PAYMENT LOG ERROR:",
+    paymentLogError.message
+  );
+}
 
     await pool.query(
       `
@@ -908,72 +983,35 @@ try {
      BUILD WHATSAPP SUMMARY
   -------------------------------- */
 
-  let orderSummary = "";
+let orderSummary = "";
 
+orderSummary += `Total Items: ${totalItemCount} ${
+  totalItemCount === 1 ? "Item" : "Items"
+}`;
 
-  /* TOTAL ITEMS */
+orderSummary += ` | Items Cost: ₹${itemsCost.toFixed(2)}`;
 
-  orderSummary +=
-    `Total Items          ${totalItemCount} ${
-      totalItemCount === 1
-        ? "Item"
-        : "Items"
-    }`;
+if (hasMembershipDetails) {
+  orderSummary += ` | Membership Discount: -₹${membershipDiscount.toFixed(2)}`;
 
+  orderSummary += ` | Wallet Claim: -₹${walletClaim.toFixed(2)}`;
 
-  /* ITEMS COST */
+  orderSummary += ` | Delivery: ${
+    deliveryCharge === 0
+      ? "FREE"
+      : `₹${deliveryCharge.toFixed(2)}`
+  }`;
+} else {
+  orderSummary += ` | Delivery Charges: ₹${deliveryCharge.toFixed(2)}`;
+}
 
-  orderSummary +=
-    `\nItems Cost           ₹${itemsCost.toFixed(2)}`;
+orderSummary += ` | Payment Status: ${paymentStatus}`;
 
-
-  /* --------------------------------
-     MEMBERSHIP ORDER
-  -------------------------------- */
-
-  if (hasMembershipDetails) {
-
-    orderSummary +=
-      `\nMembership Discount -₹${membershipDiscount.toFixed(2)}`;
-
-    orderSummary +=
-      `\nWallet Claim         -₹${walletClaim.toFixed(2)}`;
-
-    orderSummary +=
-      `\nDelivery             ${
-        deliveryCharge === 0
-          ? "FREE"
-          : `₹${deliveryCharge.toFixed(2)}`
-      }`;
-
-  }
-
-  /* --------------------------------
-     NORMAL ORDER
-  -------------------------------- */
-
-  else {
-
-    orderSummary +=
-      `\nDelivery Charges     ₹${deliveryCharge.toFixed(2)}`;
-
-  }
-
-
-  /* PAYMENT STATUS */
-
-  orderSummary +=
-    `\nPayment Status       ${paymentStatus}`;
-
-
-  /* FINAL AMOUNT */
-
-  orderSummary +=
-    `\n\n${
-      hasMembershipDetails
-        ? "Payable Amount"
-        : "Total Amount"
-    }       ₹${finalAmount}`;
+orderSummary += ` | ${
+  hasMembershipDetails
+    ? "Payable Amount"
+    : "Total Amount"
+}: ₹${finalAmount}`;
 
 
   /* --------------------------------
@@ -982,15 +1020,18 @@ try {
 
   if (orderDetails?.phone) {
 
-    await sendOrderConfirmation({
-      mobile: orderDetails.phone,
+     console.log(
+    "WHATSAPP ORDER SUMMARY:",
+    orderSummary
+  );
 
-      orderId: order.id,
-
-      products: productNames,
-
-      orderSummary,
-    });
+  await sendOrderConfirmation({
+  mobile: orderDetails.phone,
+  customerName: orderDetails.full_name,
+  orderId: order.id,
+  amount: finalAmount,
+  orderSummary,
+});
 
     console.log(
       `WHATSAPP ORDER CONFIRMATION SENT FOR ORDER ${order.id}`
@@ -1050,48 +1091,6 @@ try {
           "Delivery address not found",
       });
     }
-
-    /* --------------------------------
-       WHATSAPP ORDER CONFIRMATION
-    -------------------------------- */
-    try {
-      const orderDetails =
-        await Order.getOrderById(order.id);
-
-      const orderItems =
-        await Order.getOrderItems(order.id);
-
-      const productNames =
-        orderItems
-          .map(
-            (item) =>
-              `${item.product_name} x${item.quantity}`
-          )
-          .join(", ");
-
-      if (orderDetails?.phone) {
-        await sendOrderConfirmation({
-          mobile: orderDetails.phone,
-          orderId: order.id,
-          products: productNames,
-          amount: order.total_amount,
-        });
-
-        console.log(
-          `WHATSAPP ORDER CONFIRMATION SENT FOR ORDER ${order.id}`
-        );
-      } else {
-        console.log(
-          "WhatsApp skipped: customer mobile number not found."
-        );
-      }
-    } catch (whatsappError) {
-      console.error(
-        "WHATSAPP ORDER CONFIRMATION FAILED:",
-        whatsappError.message
-      );
-    }
-
     /* --------------------------------
        ORDER NOTIFICATION
     -------------------------------- */
@@ -1115,11 +1114,6 @@ try {
         `Notification created for order ${order.id}`
       );
 
-      /*
-       * User model will be migrated separately
-       * to user_login. Keeping this call here
-       * preserves the existing FCM flow.
-       */
       const user =
         await User.findById(
           resolvedUserId
@@ -1363,10 +1357,6 @@ const checkoutSummary = async (req, res) => {
     let resolvedEntityId =
       entity_id;
 
-    /*
-     * Resolve public MGU ID directly
-     * through user_login.
-     */
     if (
       typeof entity_id === "string" &&
       entity_id.startsWith("MGU")
