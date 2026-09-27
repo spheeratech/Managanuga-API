@@ -34,7 +34,12 @@ console.log(
   process.env.RAZORPAY_KEY_SECRET ? "LOADED" : "MISSING",
 );
 
+const fetchRazorpayPayment = async (paymentId) => {
+  return await razorpay.payments.fetch(paymentId);
+};
+
 module.exports = {
   createRazorpayOrder,
   verifyPaymentSignature,
+  fetchRazorpayPayment
 };
