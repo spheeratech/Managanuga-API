@@ -151,7 +151,7 @@ const calculateMembershipBenefits = async (
     SELECT
       COALESCE(
         SUM(
-          oi.quantity *
+          item_data.quantity *
           COALESCE(p.weight, 0)
         ),
         0
@@ -159,11 +159,18 @@ const calculateMembershipBenefits = async (
 
     FROM orders o
 
-    INNER JOIN order_items oi
-      ON oi.order_id = o.id
+    CROSS JOIN LATERAL unnest(
+      o.item_id,
+      o.quantity,
+      o.unit_price
+    ) AS item_data(
+      item_id,
+      quantity,
+      unit_price
+    )
 
     INNER JOIN products p
-      ON p.id = oi.item_id
+      ON p.id = item_data.item_id
 
     WHERE o.entity_type = 'USER'
       AND o.entity_id = $1

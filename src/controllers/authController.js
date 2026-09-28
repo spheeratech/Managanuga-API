@@ -10,6 +10,12 @@ const User = require("../models/User");
 const UserLogin = require("../models/UserLogin");
 const generateToken = require("../utils/generateToken");
 const { sendSMS } = require("../services/smsService");
+const Notification = require("../models/Notification");
+
+const {
+  sendUserRegistrationWhatsApp,
+} = require("../services/whatsappService");
+
 
 // SEND OTP
 exports.sendOtp = async (req, res) => {
@@ -249,6 +255,54 @@ exports.verifyOtp = async (req, res) => {
         message: "Failed to create user account",
       });
     }
+
+    /* --------------------------------
+   SEND USER REGISTRATION WHATSAPP
+-------------------------------- */
+
+try {
+  await sendUserRegistrationWhatsApp({
+    mobile: createdLoginUser.mobile_no || mobile,
+    password: randomPassword,
+  });
+
+  console.log(
+    "USER REGISTRATION WHATSAPP SENT:",
+    mobile
+  );
+} catch (whatsappError) {
+  console.error(
+    "USER REGISTRATION WHATSAPP FAILED:",
+    whatsappError.message
+  );
+}
+
+/* --------------------------------
+   CREATE IN-APP WELCOME NOTIFICATION
+-------------------------------- */
+
+try {
+  await Notification.createNotification({
+    userId: createdLoginUser.user_id,
+    title: "🎉 Welcome to ManaGanuga!",
+    message:
+      `Your account has been created successfully.\n` +
+      `User ID: ${createdLoginUser.mobile_no || mobile}\n` +
+      `For your security, please use the password sent to your registered mobile/WhatsApp and change it after your first login.`,
+    type: "WELCOME",
+    referenceId: null,
+  });
+
+  console.log(
+    "WELCOME NOTIFICATION CREATED:",
+    createdLoginUser.user_id
+  );
+} catch (notificationError) {
+  console.error(
+    "WELCOME NOTIFICATION FAILED:",
+    notificationError.message
+  );
+}
 
     // Send initial password SMS
     const passwordMessage =
