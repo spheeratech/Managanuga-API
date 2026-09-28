@@ -23,7 +23,6 @@ const createReview = async (
 
   return result.rows[0];
 };
-
 /* --------------------------------
    CREATE / UPDATE ORDER REVIEW
 
@@ -48,7 +47,7 @@ const createOrderReview = async (
     -------------------------------- */
     const userResult = await client.query(
       `
-      SELECT id
+      SELECT id, user_id
       FROM user_login
       WHERE user_id = $1
       LIMIT 1
@@ -60,7 +59,7 @@ const createOrderReview = async (
       throw new Error("User not found");
     }
 
-    const internalUserId = userResult.rows[0].id;
+    const publicUserId = userResult.rows[0].user_id;
 
     /* --------------------------------
        VERIFY ORDER BELONGS TO USER
@@ -71,10 +70,13 @@ const createOrderReview = async (
       FROM orders
       WHERE id = $1
         AND entity_type = 'USER'
-        AND entity_id = $2
+        AND user_id = $2
       LIMIT 1
       `,
-      [Number(orderId), internalUserId]
+      [
+        Number(orderId),
+        String(publicUserId).trim(),
+      ]
     );
 
     if (orderResult.rows.length === 0) {
@@ -85,12 +87,31 @@ const createOrderReview = async (
 
     /* --------------------------------
        GET ALL PRODUCTS IN ORDER
+
+       order_items table is no longer used.
+
+       Products come from:
+       item_id[]
+       quantity[]
+       unit_price[]
     -------------------------------- */
     const productsResult = await client.query(
       `
-      SELECT DISTINCT item_id AS product_id
-      FROM order_items
-      WHERE order_id = $1
+      SELECT DISTINCT
+        x.item_id AS product_id
+      FROM orders o
+      CROSS JOIN LATERAL
+        unnest(
+          o.item_id,
+          o.quantity,
+          o.unit_price
+        )
+        AS x(
+          item_id,
+          quantity,
+          unit_price
+        )
+      WHERE o.id = $1
       `,
       [Number(orderId)]
     );
@@ -121,7 +142,7 @@ const createOrderReview = async (
         [
           Number(orderId),
           Number(productId),
-          String(userId).trim(),
+          String(publicUserId).trim(),
         ]
       );
 
@@ -167,7 +188,7 @@ const createOrderReview = async (
           `,
           [
             Number(productId),
-            String(userId).trim(),
+            String(publicUserId).trim(),
             Number(rating),
             review || null,
             Number(orderId),

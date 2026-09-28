@@ -160,9 +160,7 @@ const createOrder = async (req, res) => {
       -------------------------------- */
 
       const itemsCost = Number(
-        orderDetails?.items_cost ??
-        orderDetails?.total_amount ??
-        0
+        orderDetails?.actual_amount ?? 0
       );
 
       const membershipDiscount = Number(
@@ -201,11 +199,15 @@ const createOrder = async (req, res) => {
             ? `₹${deliveryCharge.toFixed(2)}`
             : "FREE";
 
-        const payableAmount =
-          itemsCost -
-          membershipDiscount -
-          walletClaim +
-          deliveryCharge;
+        const payableAmount = Number(
+          orderDetails?.payable_amount ??
+          (
+            itemsCost -
+            membershipDiscount -
+            walletClaim +
+            deliveryCharge
+          )
+        );
 
         orderSummary =
           `Total Items: ${totalItems} ${itemLabel} | ` +
@@ -223,8 +225,10 @@ const createOrder = async (req, res) => {
            or wallet claim.
         -------------------------------- */
 
-        const totalAmount =
-          itemsCost + deliveryCharge;
+        const totalAmount = Number(
+          orderDetails?.payable_amount ??
+          (itemsCost + deliveryCharge)
+        );
 
         orderSummary =
           `Total Items: ${totalItems} ${itemLabel} | ` +

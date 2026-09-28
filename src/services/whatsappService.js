@@ -46,7 +46,7 @@ const sendOrderConfirmation = async ({
     type: "template",
 
     template: {
-      name: "order_confirmation",
+      name: "order_placed",
 
       language: {
         code:
@@ -146,7 +146,7 @@ const sendOrderConfirmation = async ({
   -------------------------------- */
 
   console.log(
-    "WHATSAPP ORDER CONFIRMATION SENT:",
+    "WHATSAPP ORDER Placed SENT:",
     data
   );
 
@@ -295,8 +295,138 @@ const sendSubscriptionWhatsApp = async ({
 
   return data;
 };
+/* =========================================================
+   SEND USER REGISTRATION WHATSAPP
+========================================================= */
+
+const sendUserRegistrationWhatsApp = async ({
+  mobile,
+  password,
+}) => {
+  if (!process.env.PINBOT_API_KEY) {
+    throw new Error("PINBOT_API_KEY is not configured");
+  }
+
+  /* --------------------------------
+     NORMALIZE PHONE NUMBER
+  -------------------------------- */
+
+  let phone = String(mobile).replace(/\D/g, "");
+
+  // Indian 10 digit number
+  if (phone.length === 10) {
+    phone = `91${phone}`;
+  }
+
+  /* --------------------------------
+     WHATSAPP TEMPLATE PAYLOAD
+  -------------------------------- */
+
+  const payload = {
+    messaging_product: "whatsapp",
+
+    recipient_type: "individual",
+
+    to: phone,
+
+    type: "template",
+
+    template: {
+      name: "User-register",
+
+      language: {
+        code:
+          process.env.PINBOT_TEMPLATE_LANGUAGE ||
+          "en",
+      },
+
+      components: [
+        {
+          type: "body",
+
+          parameters: [
+            {
+              type: "text",
+              text: String(mobile),
+            },
+
+            {
+              type: "text",
+              text: String(password),
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  /* --------------------------------
+     SEND REQUEST
+  -------------------------------- */
+
+  const response = await fetch(
+    PINBOT_API_URL,
+    {
+      method: "POST",
+
+      headers: {
+        apikey: process.env.PINBOT_API_KEY,
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify(payload),
+    }
+  );
+
+  /* --------------------------------
+     READ RESPONSE
+  -------------------------------- */
+
+  const responseText =
+    await response.text();
+
+  let data;
+
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    data = {
+      raw: responseText,
+    };
+  }
+
+  /* --------------------------------
+     HANDLE ERROR
+  -------------------------------- */
+
+  if (!response.ok) {
+    console.error(
+      "PINBOT USER REGISTRATION WHATSAPP ERROR:",
+      response.status,
+      data
+    );
+
+    throw new Error(
+      data?.message ||
+        data?.error ||
+        `WhatsApp API failed (${response.status})`
+    );
+  }
+
+  /* --------------------------------
+     SUCCESS
+  -------------------------------- */
+
+  console.log(
+    "WHATSAPP USER REGISTRATION SENT:",
+    data
+  );
+
+  return data;
+};
 
 module.exports = {
   sendOrderConfirmation,
   sendSubscriptionWhatsApp,
+  sendUserRegistrationWhatsApp
 };
