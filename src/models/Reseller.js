@@ -1,30 +1,5 @@
 const pool = require("../../db");
 
-/*
- * ============================================================
- * GET CUSTOMERS - COMMON VENDOR / RESELLER API
- * ============================================================
- *
- * Endpoint:
- *
- *   /reseller/customers?userId=...
- *
- * The user's role determines which customer relationship is used.
- *
- * RESELLER:
- *   Customer must have an ACTIVE membership purchased through
- *   this reseller's referral link.
- *
- *   user_memberships.referral_code = reseller.user_id
- *
- * VENDOR:
- *   Customer relationship:
- *
- *   user_login.assigned_by = vendor.user_id
- *
- * IMPORTANT:
- *   The frontend API does NOT need to change.
- */
 const getCustomers = async (userId) => {
   const cleanUserId = String(userId).trim();
 

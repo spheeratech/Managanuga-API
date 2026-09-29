@@ -2171,17 +2171,68 @@ const publicUserId = user_id;
       );
 
 
-    /* =====================================================
-       DELIVERY CHARGE
-    ===================================================== */
+/* =====================================================
+   DELIVERY CHARGE
+===================================================== */
 
-    const deliveryCharge =
-      Number(
-        membershipBenefits
-          ?.deliveryCharge ??
-        40
-      );
+const totalLitres =
+  cartItems.reduce(
+    (total, item) =>
+      total +
+      Number(item.weight || 0) *
+      Number(item.quantity || 0),
+    0
+  );
 
+const deliveryRuleResult =
+  await pool.query(
+    `
+ SELECT
+  delivery_cart_count,
+  delivery_charges,
+  expected_delivery_days
+FROM delivery_charges
+    WHERE is_active = 1
+    ORDER BY id DESC
+    LIMIT 1
+    `
+  );
+
+if (
+  !deliveryRuleResult.rows.length
+) {
+  return res.status(500).json({
+    success: false,
+    message:
+      "Delivery charge configuration not found",
+  });
+}
+
+const deliveryCartCount =
+  Number(
+    deliveryRuleResult.rows[0]
+      .delivery_cart_count
+  );
+
+const configuredDeliveryCharge =
+  Number(
+    deliveryRuleResult.rows[0]
+      .delivery_charges
+  );
+
+  const expectedDeliveryDays =
+  deliveryRuleResult.rows[0]
+    .expected_delivery_days;
+
+const deliveryCharge =
+  totalLitres >= deliveryCartCount
+    ? 0
+    : configuredDeliveryCharge;
+
+const deliverySavings =
+  deliveryCharge === 0
+    ? configuredDeliveryCharge
+    : 0;
 
     /* =====================================================
        ACTUAL AMOUNT
@@ -2199,15 +2250,11 @@ const publicUserId = user_id;
        PAYABLE AMOUNT
     ===================================================== */
 
-    const payableAmount =
-      Number(
-        membershipBenefits
-          ?.payableAmount ??
-        (
-          actualAmount +
-          deliveryCharge
-        )
-      );
+   const payableAmount =
+  Number(actualAmount) -
+  Number(membershipDiscount) -
+  Number(walletClaim) +
+  Number(deliveryCharge);
 
 
     console.log(
@@ -2238,6 +2285,8 @@ const publicUserId = user_id;
 
       deliveryCharge,
 
+      expectedDeliveryDays,
+
       payableAmount,
     });
 
@@ -2262,6 +2311,10 @@ const publicUserId = user_id;
       walletClaim,
 
       deliveryCharge,
+
+      deliverySavings,
+
+      expectedDeliveryDays,
 
       payableAmount,
     });
