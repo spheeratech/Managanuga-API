@@ -62,6 +62,13 @@ app.use("/api/subscriptions", subscriptionRoutes);
 // App-managed images: logo, banners, login background
 app.use("/api/app-images", appImageRoutes);
 
+app.get("/join", (req, res) => {
+  const appStoreUrl =
+    "https://apps.apple.com/in/app/mana-ganuga/id6796354317";
+
+  res.redirect(302, appStoreUrl);
+});
+
 app.get("/test", (req, res) => {
   res.json({
     message: "Main app working",
