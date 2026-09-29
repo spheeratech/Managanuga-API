@@ -103,7 +103,7 @@ const FAQ = {
       FROM faqs
       WHERE role = $1
         AND document_type = 'FAQS'
-        AND is_active = true
+        AND is_active = 1
       ORDER BY id ASC
       LIMIT 1
       `,

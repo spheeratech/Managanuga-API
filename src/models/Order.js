@@ -1,24 +1,7 @@
 const pool = require("../../db");
 const xpressbeesService = require("../services/xpressbeesService");
 
-/* =========================================================
-   RESOLVE PUBLIC USER ID
-========================================================= */
 
-const getPublicUserId = async (internalUserId) => {
-  const result = await pool.query(
-    `
-    SELECT user_id
-    FROM user_login
-    WHERE id = $1
-      AND is_active = true
-    LIMIT 1
-    `,
-    [internalUserId]
-  );
-
-  return result.rows[0]?.user_id || null;
-};
 
 /* =========================================================
    GENERATE MGO ORDER ID
@@ -95,31 +78,21 @@ const generateMgoOrderId = async (client = pool) => {
 ========================================================= */
 
 const createOrder = async (
-  entity_type,
-  entity_id,
+  user_id,
   address_id,
   buyNow = false,
   productId = null,
-  quantity = 1,
-  publicUserId = null
+  quantity = 1
 ) => {
   let client;
 
   try {
-    /* -----------------------------------------------------
-       RESOLVE PUBLIC USER ID
-    ----------------------------------------------------- */
+    const userId = String(user_id).trim();
 
-    if (entity_type === "USER" && !publicUserId) {
-      publicUserId =
-        await getPublicUserId(entity_id);
+if (!userId) {
+  throw new Error("User ID is required");
+}
 
-      if (!publicUserId) {
-        throw new Error(
-          "User account not found"
-        );
-      }
-    }
 
     /* -----------------------------------------------------
        GET CART ITEMS
@@ -134,13 +107,10 @@ const createOrder = async (
       FROM cart_items c
       JOIN products p
         ON p.id = c.item_id
-      WHERE c.entity_type = $1
-        AND c.entity_id = $2
+      WHERE c.user_id = $1
+        AND c.is_active = 1
       `,
-      [
-        entity_type,
-        entity_id,
-      ]
+      [userId]
     );
 
     let cartItems = cartResult.rows;
@@ -262,8 +232,6 @@ const createOrder = async (
         INSERT INTO orders
         (
           user_id,
-          entity_id,
-          entity_type,
           order_id,
           tnx_order_id,
           actual_amount,
@@ -282,27 +250,23 @@ const createOrder = async (
         (
           $1,
           $2,
-          $3,
-          $4,
           NULL,
+          $3,
+          0,
+          0,
+          0,
+          $4,
           $5,
-          0,
-          0,
-          0,
           $6,
           $7,
-          $8,
-          $9,
           'PLACED',
           'PENDING',
-          $10
+          $8
         )
         RETURNING *
         `,
         [
-          publicUserId,
-          entity_id,
-          entity_type,
+          userId,
           mgoOrderId,
           actualAmount,
           itemIds,
@@ -325,13 +289,9 @@ const createOrder = async (
     await client.query(
       `
       DELETE FROM cart_items
-      WHERE entity_type = $1
-        AND entity_id = $2
+      WHERE user_id = $1
       `,
-      [
-        entity_type,
-        entity_id,
-      ]
+      [userId]
     );
 
     await client.query("COMMIT");
@@ -367,33 +327,19 @@ const createOrder = async (
 ========================================================= */
 
 const createBuyNowOrder = async (
-  entity_type,
-  entity_id,
+  user_id,
   address_id,
   productId,
-  quantity = 1,
-  publicUserId = null
+  quantity = 1
 ) => {
   let client;
 
   try {
-    /* -----------------------------------------------------
-       RESOLVE PUBLIC USER ID
-    ----------------------------------------------------- */
+    const userId = String(user_id).trim();
 
-    if (
-      entity_type === "USER" &&
-      !publicUserId
-    ) {
-      publicUserId =
-        await getPublicUserId(entity_id);
-
-      if (!publicUserId) {
-        throw new Error(
-          "User account not found"
-        );
-      }
-    }
+if (!userId) {
+  throw new Error("User ID is required");
+}
 
     /* -----------------------------------------------------
        GET PRODUCT
@@ -472,8 +418,6 @@ const createBuyNowOrder = async (
         INSERT INTO orders
         (
           user_id,
-          entity_id,
-          entity_type,
           order_id,
           tnx_order_id,
           actual_amount,
@@ -492,27 +436,23 @@ const createBuyNowOrder = async (
         (
           $1,
           $2,
-          $3,
-          $4,
           NULL,
+          $3,
+          0,
+          0,
+          0,
+          $4,
           $5,
-          0,
-          0,
-          0,
           $6,
           $7,
-          $8,
-          $9,
           'PLACED',
           'PENDING',
-          $10
+          $8
         )
         RETURNING *
         `,
         [
-          publicUserId,
-          entity_id,
-          entity_type,
+          userId,
           mgoOrderId,
           actualAmount,
           itemIds,
@@ -629,9 +569,6 @@ const getOrdersByUserId = async (
       SELECT
         o.id,
         o.user_id,
-        o.entity_id,
-        o.entity_type,
-
         o.order_id,
         o.tnx_order_id,
 
@@ -683,80 +620,6 @@ const getOrdersByUserId = async (
 
   return result.rows;
 };
-
-/* =========================================================
-   GET ORDERS BY ENTITY
-========================================================= */
-
-const getOrdersByEntity = async (
-  entity_type,
-  entity_id
-) => {
-  const result =
-    await pool.query(
-      `
-      SELECT
-        o.id,
-        o.user_id,
-        o.entity_id,
-        o.entity_type,
-
-        o.order_id,
-        o.tnx_order_id,
-
-        o.actual_amount,
-        o.membership_discount,
-        o.wallet_claim,
-        o.delivery_charge,
-        o.payable_amount,
-
-        o.status,
-        o.payment_status,
-
-        o.warehouse_id,
-        o.tracking_number,
-        o.courier_name,
-        o.address_id,
-
-        o.admin_verified,
-        o.admin_accepted,
-        o.delivery_method,
-
-        o.created_at,
-
-        o.item_id[1] AS product_id,
-
-        COALESCE(
-          (
-            SELECT ai.url
-            FROM app_images ai
-            WHERE ai.product_id = o.item_id[1]
-              AND ai.image_type = 'PRODUCT_IMAGE'
-            ORDER BY ai.id ASC
-            LIMIT 1
-          ),
-          p.image
-        ) AS image
-
-      FROM orders o
-
-      LEFT JOIN products p
-        ON p.id = o.item_id[1]
-
-      WHERE o.entity_type = $1
-        AND o.entity_id = $2
-
-      ORDER BY o.id DESC
-      `,
-      [
-        entity_type,
-        entity_id,
-      ]
-    );
-
-  return result.rows;
-};
-
 /* =========================================================
    GET ORDER ITEMS
 
@@ -974,7 +837,6 @@ module.exports = {
   createBuyNowOrder,
   getOrders,
   getOrderById,
-  getOrdersByEntity,
   getOrdersByUserId,
   getOrderItems,
   updateOrder,

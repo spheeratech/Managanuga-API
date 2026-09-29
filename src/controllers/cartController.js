@@ -1,38 +1,4 @@
 const Cart = require("../models/Cart");
-const pool = require("../../db");
-
-
-// =====================================================
-// HELPER: RESOLVE PUBLIC MGU ID → INTERNAL USER ID
-// =====================================================
-const resolveUserEntityId = async (entity_type, entity_id) => {
-  let resolvedEntityId = entity_id;
-
-  if (
-    entity_type === "USER" &&
-    typeof entity_id === "string" &&
-    entity_id.startsWith("MGU")
-  ) {
-    const userResult = await pool.query(
-      `
-      SELECT id
-      FROM user_login
-      WHERE user_id = $1
-        AND is_active = true
-      LIMIT 1
-      `,
-      [entity_id]
-    );
-
-    if (!userResult.rows[0]) {
-      return null;
-    }
-
-    resolvedEntityId = userResult.rows[0].id;
-  }
-
-  return resolvedEntityId;
-};
 
 
 // =====================================================
@@ -41,32 +7,33 @@ const resolveUserEntityId = async (entity_type, entity_id) => {
 const addItem = async (req, res) => {
   try {
     const {
-      entity_type,
-      entity_id,
+      user_id,
+      item_id,
+      quantity,
     } = req.body;
 
-    if (!entity_type || !entity_id) {
+    if (!user_id || !item_id) {
       return res.status(400).json({
         success: false,
-        message: "entity_type and entity_id are required",
+        message: "user_id and item_id are required",
       });
     }
 
-    const resolvedEntityId = await resolveUserEntityId(
-      entity_type,
-      entity_id
-    );
-
-    if (resolvedEntityId === null) {
-      return res.status(404).json({
+    if (
+      quantity === undefined ||
+      quantity === null ||
+      Number(quantity) <= 0
+    ) {
+      return res.status(400).json({
         success: false,
-        message: "User not found",
+        message: "A valid quantity greater than 0 is required",
       });
     }
 
     const item = await Cart.addItem({
-      ...req.body,
-      entity_id: resolvedEntityId,
+      user_id,
+      item_id,
+      quantity,
     });
 
     res.status(201).json({
@@ -91,35 +58,16 @@ const addItem = async (req, res) => {
 // =====================================================
 const getItems = async (req, res) => {
   try {
-    const {
-      entity_type,
-      entity_id,
-    } = req.query;
+    const { user_id } = req.query;
 
-    // USER CART MUST ALWAYS BE SCOPED
-    if (!entity_type || !entity_id) {
+    if (!user_id) {
       return res.status(400).json({
         success: false,
-        message: "entity_type and entity_id are required",
+        message: "user_id is required",
       });
     }
 
-    const resolvedEntityId = await resolveUserEntityId(
-      entity_type,
-      entity_id
-    );
-
-    if (resolvedEntityId === null) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const items = await Cart.getItems(
-      entity_type,
-      resolvedEntityId
-    );
+    const items = await Cart.getItems(user_id);
 
     res.json({
       success: true,
@@ -143,34 +91,18 @@ const getItems = async (req, res) => {
 // =====================================================
 const getItemById = async (req, res) => {
   try {
-    const {
-      entity_type,
-      entity_id,
-    } = req.query;
+    const { user_id } = req.query;
 
-    if (!entity_type || !entity_id) {
+    if (!user_id) {
       return res.status(400).json({
         success: false,
-        message: "entity_type and entity_id are required",
-      });
-    }
-
-    const resolvedEntityId = await resolveUserEntityId(
-      entity_type,
-      entity_id
-    );
-
-    if (resolvedEntityId === null) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
+        message: "user_id is required",
       });
     }
 
     const item = await Cart.getItemById(
       req.params.id,
-      entity_type,
-      resolvedEntityId
+      user_id
     );
 
     if (!item) {
@@ -202,15 +134,14 @@ const getItemById = async (req, res) => {
 const updateItem = async (req, res) => {
   try {
     const {
-      entity_type,
-      entity_id,
+      user_id,
       quantity,
     } = req.body;
 
-    if (!entity_type || !entity_id) {
+    if (!user_id) {
       return res.status(400).json({
         success: false,
-        message: "entity_type and entity_id are required",
+        message: "user_id is required",
       });
     }
 
@@ -225,22 +156,9 @@ const updateItem = async (req, res) => {
       });
     }
 
-    const resolvedEntityId = await resolveUserEntityId(
-      entity_type,
-      entity_id
-    );
-
-    if (resolvedEntityId === null) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
     const item = await Cart.updateItem(
       req.params.id,
-      entity_type,
-      resolvedEntityId,
+      user_id,
       quantity
     );
 
@@ -273,34 +191,18 @@ const updateItem = async (req, res) => {
 // =====================================================
 const deleteItem = async (req, res) => {
   try {
-    const {
-      entity_type,
-      entity_id,
-    } = req.body;
+    const { user_id } = req.body;
 
-    if (!entity_type || !entity_id) {
+    if (!user_id) {
       return res.status(400).json({
         success: false,
-        message: "entity_type and entity_id are required",
-      });
-    }
-
-    const resolvedEntityId = await resolveUserEntityId(
-      entity_type,
-      entity_id
-    );
-
-    if (resolvedEntityId === null) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
+        message: "user_id is required",
       });
     }
 
     const item = await Cart.deleteItem(
       req.params.id,
-      entity_type,
-      resolvedEntityId
+      user_id
     );
 
     if (!item) {
@@ -328,6 +230,38 @@ const deleteItem = async (req, res) => {
 
 
 // =====================================================
+// GET CART COUNT
+// =====================================================
+const getCartCount = async (req, res) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        message: "user_id is required",
+      });
+    }
+
+    const count = await Cart.getCartCount(user_id);
+
+    res.json({
+      success: true,
+      count,
+    });
+
+  } catch (error) {
+    console.error("GET CART COUNT ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
+// =====================================================
 // EXPORTS
 // =====================================================
 module.exports = {
@@ -336,4 +270,5 @@ module.exports = {
   getItemById,
   updateItem,
   deleteItem,
+  getCartCount,
 };

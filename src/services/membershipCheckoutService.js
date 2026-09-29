@@ -31,7 +31,7 @@ const resolveUserIdentifiers = async (userId, client = pool) => {
       user_id
     FROM user_login
     WHERE user_id = $1
-      AND is_active = true
+      AND is_active = 1
     LIMIT 1
     `,
     [value]
@@ -53,7 +53,7 @@ const resolveUserIdentifiers = async (userId, client = pool) => {
         user_id
       FROM user_login
       WHERE id = $1
-        AND is_active = true
+        AND is_active = 1
       LIMIT 1
       `,
       [Number(value)]
@@ -172,8 +172,7 @@ const calculateMembershipBenefits = async (
     INNER JOIN products p
       ON p.id = item_data.item_id
 
-    WHERE o.entity_type = 'USER'
-      AND o.entity_id = $1
+       WHERE o.user_id = $1
 
       AND o.status IN (
         'PLACED',
@@ -185,7 +184,7 @@ const calculateMembershipBenefits = async (
       AND o.created_at >= $2
     `,
     [
-      internalUserId,
+            publicUserId,
       membership.start_date,
     ]
   );

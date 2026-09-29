@@ -23,7 +23,7 @@ const getFAQs = async (req, res) => {
         user_id = $1
         OR id::text = $1
       )
-      AND is_active = true
+      AND is_active = 1
       LIMIT 1
       `,
       [String(userId).trim()]

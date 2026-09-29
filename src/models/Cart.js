@@ -1,234 +1,13 @@
 const pool = require("../../db");
-const resolveEntityId = async (entityId) => {
-  if (entityId === null || entityId === undefined) {
-    throw new Error("User ID is required");
-  }
-
-  const cleanEntityId = String(entityId).trim();
-
-  // Already an internal numeric ID
-  if (/^\d+$/.test(cleanEntityId)) {
-    return Number(cleanEntityId);
-  }
-
-  // Public IDs
-  if (
-    cleanEntityId.startsWith("MGU") ||
-    cleanEntityId.startsWith("MGV") ||
-    cleanEntityId.startsWith("MGRS")
-  ) {
-    const result = await pool.query(
-      `
-      SELECT id
-      FROM user_login
-      WHERE user_id = $1
-        AND is_active = true
-      LIMIT 1
-      `,
-      [cleanEntityId]
-    );
-
-    if (result.rowCount === 0) {
-      throw new Error("User not found");
-    }
-
-    return result.rows[0].id;
-  }
-
-  throw new Error(`Invalid user ID: ${cleanEntityId}`);
-};
-
 
 // =====================================================
 // HELPER: GET CART ITEM DETAILS
 // =====================================================
-const getCartItemDetails = async (
-  cartId,
-  entity_type = null,
-  entity_id = null
-) => {
-
+const getCartItemDetails = async (cartId, user_id = null) => {
   let query = `
     SELECT
-        c.id AS cart_id,
-        c.entity_type,
-        c.entity_id,
-        c.item_type,
-        c.item_id AS product_id,
-        p.name AS product_name,
-        p.price,
-        p.weight,
-        p.stock,
-
-        COALESCE(
-          (
-            SELECT json_agg(
-              json_build_object(
-                'id', ai.id,
-                'image_name', ai.image_name,
-                'url', ai.url,
-                'format', ai.format
-              )
-              ORDER BY ai.id
-            )
-            FROM app_images ai
-            WHERE ai.product_id = p.id
-              AND ai.image_type = 'PRODUCT_IMAGE'
-              AND ai.is_active = true
-          ),
-          '[]'
-        ) AS images,
-
-        c.quantity,
-        (p.price * c.quantity) AS total_price,
-        c.created_at
-
-    FROM cart_items c
-
-    JOIN products p
-      ON p.id = c.item_id
-
-    WHERE c.id = $1
-  `;
-
-  const values = [cartId];
-
-  // IMPORTANT:
-  // If user information is supplied,
-  // the cart item MUST belong to that user.
-  if (entity_type !== null && entity_id !== null) {
-    query += `
-      AND c.entity_type = $2
-      AND c.entity_id = $3
-    `;
-
-    values.push(entity_type, entity_id);
-  }
-
-  const result = await pool.query(
-    query,
-    values
-  );
-
-  return result.rows[0] || null;
-};
-
-
-// =====================================================
-// ADD ITEM
-// =====================================================
-const addItem = async (data) => {
-
-  const {
-    entity_type,
-    entity_id,
-    item_type,
-    item_id,
-    quantity,
-  } = data;
-
-  const resolvedEntityId = await resolveEntityId(
-    entity_id
-  );
-
-  // Check if this SAME USER already has this product
-  const existing = await pool.query(
-    `
-    SELECT *
-    FROM cart_items
-    WHERE entity_type = $1
-      AND entity_id = $2
-      AND item_type = $3
-      AND item_id = $4
-    `,
-    [
-      entity_type,
-      resolvedEntityId,
-      item_type,
-      item_id,
-    ]
-  );
-
-
-  // ===================================================
-  // ITEM ALREADY EXISTS
-  // ===================================================
-  if (existing.rowCount > 0) {
-
-    const updated = await pool.query(
-      `
-      UPDATE cart_items
-      SET quantity = quantity + $1
-      WHERE entity_type = $2
-        AND entity_id = $3
-        AND item_type = $4
-        AND item_id = $5
-      RETURNING *
-      `,
-      [
-        quantity,
-        entity_type,
-        resolvedEntityId,
-        item_type,
-        item_id,
-      ]
-    );
-
-    return await getCartItemDetails(
-      updated.rows[0].id
-    );
-  }
-
-
-  // ===================================================
-  // NEW ITEM
-  // ===================================================
-  const result = await pool.query(
-    `
-    INSERT INTO cart_items (
-      entity_type,
-      entity_id,
-      item_type,
-      item_id,
-      quantity
-    )
-    VALUES ($1, $2, $3, $4, $5)
-    RETURNING *
-    `,
-    [
-      entity_type,
-      resolvedEntityId,
-      item_type,
-      item_id,
-      quantity,
-    ]
-  );
-
-  return await getCartItemDetails(
-    result.rows[0].id
-  );
-};
-
-
-// =====================================================
-// GET ALL ITEMS FOR SPECIFIC USER
-// =====================================================
-const getItems = async (
-  entity_type,
-  entity_id
-) => {
-
-  const resolvedEntityId = await resolveEntityId(
-    entity_id
-  );
-
-  const result = await pool.query(
-    `
-    SELECT
       c.id AS cart_id,
-      c.entity_type,
-      c.entity_id,
-      c.item_type,
+      c.user_id,
       c.item_id AS product_id,
       p.name AS product_name,
       p.price,
@@ -249,7 +28,7 @@ const getItems = async (
           FROM app_images ai
           WHERE ai.product_id = p.id
             AND ai.image_type = 'PRODUCT_IMAGE'
-            AND ai.is_active = true
+            AND ai.is_active = 1
         ),
         '[]'
       ) AS images,
@@ -263,15 +42,162 @@ const getItems = async (
     JOIN products p
       ON p.id = c.item_id
 
-    WHERE c.entity_type = $1
-      AND c.entity_id = $2
+    WHERE c.id = $1
+  `;
+
+  const values = [cartId];
+
+  if (user_id !== null && user_id !== undefined) {
+    query += ` AND c.user_id = $2`;
+    values.push(String(user_id).trim());
+  }
+
+  const result = await pool.query(query, values);
+
+  return result.rows[0] || null;
+};
+
+
+// =====================================================
+// ADD ITEM
+// =====================================================
+const addItem = async (data) => {
+  const {
+    user_id,
+    item_id,
+    quantity,
+  } = data;
+
+  if (!user_id) {
+    throw new Error("User ID is required");
+  }
+
+  if (!item_id) {
+    throw new Error("Product ID is required");
+  }
+
+  const cleanUserId = String(user_id).trim();
+
+  // Check if this user already has this product
+  const existing = await pool.query(
+    `
+    SELECT *
+    FROM cart_items
+    WHERE user_id = $1
+      AND item_id = $2
+    `,
+    [
+      cleanUserId,
+      item_id,
+    ]
+  );
+
+  // ===================================================
+  // ITEM ALREADY EXISTS
+  // ===================================================
+  if (existing.rowCount > 0) {
+    const updated = await pool.query(
+      `
+      UPDATE cart_items
+      SET quantity = quantity + $1
+      WHERE user_id = $2
+        AND item_id = $3
+      RETURNING *
+      `,
+      [
+        quantity,
+        cleanUserId,
+        item_id,
+      ]
+    );
+
+    return await getCartItemDetails(
+      updated.rows[0].id,
+      cleanUserId
+    );
+  }
+
+  // ===================================================
+  // NEW ITEM
+  // ===================================================
+  const result = await pool.query(
+    `
+    INSERT INTO cart_items (
+      user_id,
+      item_id,
+      quantity
+    )
+    VALUES ($1, $2, $3)
+    RETURNING *
+    `,
+    [
+      cleanUserId,
+      item_id,
+      quantity,
+    ]
+  );
+
+  return await getCartItemDetails(
+    result.rows[0].id,
+    cleanUserId
+  );
+};
+
+
+// =====================================================
+// GET ALL ITEMS FOR SPECIFIC USER
+// =====================================================
+const getItems = async (user_id) => {
+  if (!user_id) {
+    throw new Error("User ID is required");
+  }
+
+  const cleanUserId = String(user_id).trim();
+
+  const result = await pool.query(
+    `
+    SELECT
+      c.id AS cart_id,
+      c.user_id,
+      c.item_id AS product_id,
+      p.name AS product_name,
+      p.price,
+      p.weight,
+      p.stock,
+
+      COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', ai.id,
+              'image_name', ai.image_name,
+              'url', ai.url,
+              'format', ai.format
+            )
+            ORDER BY ai.id
+          )
+          FROM app_images ai
+          WHERE ai.product_id = p.id
+            AND ai.image_type = 'PRODUCT_IMAGE'
+            AND ai.is_active = 1
+        ),
+        '[]'
+      ) AS images,
+
+      c.quantity,
+      (p.price * c.quantity) AS total_price,
+      c.created_at
+
+    FROM cart_items c
+
+    JOIN products p
+      ON p.id = c.item_id
+
+    WHERE c.user_id = $1
 
     ORDER BY c.id DESC
     `,
-    [
-      entity_type,
-      resolvedEntityId,
-    ]
+    [cleanUserId]
   );
 
   return result.rows;
@@ -281,20 +207,14 @@ const getItems = async (
 // =====================================================
 // GET ONE ITEM FOR SPECIFIC USER
 // =====================================================
-const getItemById = async (
-  id,
-  entity_type,
-  entity_id
-) => {
-
-  const resolvedEntityId = await resolveEntityId(
-    entity_id
-  );
+const getItemById = async (id, user_id) => {
+  if (!user_id) {
+    throw new Error("User ID is required");
+  }
 
   return await getCartItemDetails(
     id,
-    entity_type,
-    resolvedEntityId
+    String(user_id).trim()
   );
 };
 
@@ -304,32 +224,27 @@ const getItemById = async (
 // =====================================================
 const updateItem = async (
   id,
-  entity_type,
-  entity_id,
+  user_id,
   quantity
 ) => {
+  if (!user_id) {
+    throw new Error("User ID is required");
+  }
 
-  const resolvedEntityId = await resolveEntityId(
-    entity_id
-  );
+  const cleanUserId = String(user_id).trim();
 
   const result = await pool.query(
     `
     UPDATE cart_items
-
     SET quantity = $1
-
     WHERE id = $2
-      AND entity_type = $3
-      AND entity_id = $4
-
+      AND user_id = $3
     RETURNING *
     `,
     [
       quantity,
       id,
-      entity_type,
-      resolvedEntityId,
+      cleanUserId,
     ]
   );
 
@@ -339,8 +254,7 @@ const updateItem = async (
 
   return await getCartItemDetails(
     id,
-    entity_type,
-    resolvedEntityId
+    cleanUserId
   );
 };
 
@@ -350,28 +264,24 @@ const updateItem = async (
 // =====================================================
 const deleteItem = async (
   id,
-  entity_type,
-  entity_id
+  user_id
 ) => {
+  if (!user_id) {
+    throw new Error("User ID is required");
+  }
 
-  const resolvedEntityId = await resolveEntityId(
-    entity_id
-  );
+  const cleanUserId = String(user_id).trim();
 
   const result = await pool.query(
     `
     DELETE FROM cart_items
-
     WHERE id = $1
-      AND entity_type = $2
-      AND entity_id = $3
-
+      AND user_id = $2
     RETURNING *
     `,
     [
       id,
-      entity_type,
-      resolvedEntityId,
+      cleanUserId,
     ]
   );
 
@@ -384,14 +294,11 @@ const deleteItem = async (
 // ADMIN / INTERNAL USE ONLY
 // =====================================================
 const getAllItems = async () => {
-
   const result = await pool.query(
     `
     SELECT
       c.id AS cart_id,
-      c.entity_type,
-      c.entity_id,
-      c.item_type,
+      c.user_id,
       c.item_id AS product_id,
       p.name AS product_name,
       p.price,
@@ -412,7 +319,7 @@ const getAllItems = async () => {
           FROM app_images ai
           WHERE ai.product_id = p.id
             AND ai.image_type = 'PRODUCT_IMAGE'
-            AND ai.is_active = true
+            AND ai.is_active = 1
         ),
         '[]'
       ) AS images,
@@ -431,6 +338,28 @@ const getAllItems = async () => {
   );
 
   return result.rows;
+};
+
+
+// =====================================================
+// GET CART COUNT
+// =====================================================
+const getCartCount = async (user_id) => {
+  if (!user_id) {
+    throw new Error("User ID is required");
+  }
+
+  const result = await pool.query(
+    `
+    SELECT COUNT(*)::INTEGER AS count
+    FROM cart_items
+    WHERE user_id = $1
+      AND is_active = 1
+    `,
+    [String(user_id).trim()]
+  );
+
+  return result.rows[0].count;
 };
 
 
@@ -444,4 +373,5 @@ module.exports = {
   updateItem,
   deleteItem,
   getAllItems,
+  getCartCount,
 };

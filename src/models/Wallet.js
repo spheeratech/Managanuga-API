@@ -19,7 +19,7 @@ const Wallet = {
       SELECT user_id
       FROM user_login
       WHERE user_id = $1
-        AND is_active = true
+        AND is_active = 1
       LIMIT 1
       `,
       [cleanIdentifier]
@@ -36,7 +36,7 @@ const Wallet = {
         SELECT user_id
         FROM user_login
         WHERE id = $1
-          AND is_active = true
+          AND is_active = 1
         LIMIT 1
         `,
         [Number(cleanIdentifier)]
@@ -72,7 +72,7 @@ const Wallet = {
         ON ul.user_id = w.user_id
       WHERE
         w.user_id = $1
-        AND ul.is_active = true
+        AND ul.is_active = 1
         AND ul.role = w.wallet_type
       LIMIT 1
       `,
@@ -145,7 +145,7 @@ const Wallet = {
           ON ul.user_id = w.user_id
         WHERE
           w.user_id = $1
-          AND ul.is_active = true
+          AND ul.is_active = 1
           AND ul.role = w.wallet_type
         FOR UPDATE
         `,

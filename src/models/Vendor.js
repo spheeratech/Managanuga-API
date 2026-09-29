@@ -28,7 +28,7 @@ const getCustomers = async (vendorId) => {
 
     WHERE ul.assigned_by = $1
       AND ul.role IN ('USER', 'CUSTOMER')
-      AND ul.is_active = true
+      AND ul.is_active = 1
 
     GROUP BY
       ul.user_id,
@@ -86,7 +86,7 @@ const getOrders = async (vendorId) => {
 
     WHERE ul.assigned_by = $1
       AND ul.role IN ('USER', 'CUSTOMER')
-      AND ul.is_active = true
+      AND ul.is_active = 1
 
     ORDER BY o.created_at DESC;
     `,
@@ -152,7 +152,7 @@ const getProfile = async (userId) => {
 
     WHERE ul.user_id = $1
       AND ul.role = 'VENDOR'
-      AND ul.is_active = true
+      AND ul.is_active = 1
 
     LIMIT 1;
     `,

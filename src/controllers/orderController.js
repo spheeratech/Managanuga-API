@@ -1,38 +1,10 @@
 const Order = require("../models/Order");
-const pool = require("../../db");
 
 const {
   sendOrderConfirmation,
 } = require("../services/whatsappService");
 
 const xpressbeesService = require("../services/xpressbeesService");
-
-/* --------------------------------
-   RESOLVE PUBLIC MGU ID
-   → INTERNAL user_login.id
--------------------------------- */
-
-const resolveUserId = async (userId) => {
-  if (
-    typeof userId !== "string" ||
-    !userId.startsWith("MGU")
-  ) {
-    return userId;
-  }
-
-  const result = await pool.query(
-    `
-    SELECT id
-    FROM user_login
-    WHERE user_id = $1
-      AND is_active = true
-    LIMIT 1
-    `,
-    [userId]
-  );
-
-  return result.rows[0]?.id || null;
-};
 
 /* --------------------------------
    CREATE ORDER
@@ -42,73 +14,27 @@ const createOrder = async (req, res) => {
   console.log("ORDER BODY:", req.body);
 
   try {
-    const {
-      entity_type,
-      entity_id,
-      address_id,
-      buyNow,
-      productId,
-      quantity,
-    } = req.body;
+   const {
+  user_id,
+  address_id,
+  buyNow = false,
+  productId = null,
+  quantity = 1,
+} = req.body;
 
-    let resolvedEntityId = entity_id;
-    let publicUserId = entity_id;
-
-    if (
-      entity_type === "USER" &&
-      typeof entity_id === "string" &&
-      entity_id.startsWith("MGU")
-    ) {
-      publicUserId = entity_id;
-
-      resolvedEntityId =
-        await resolveUserId(entity_id);
-
-      if (!resolvedEntityId) {
-        return res.status(404).json({
-          success: false,
-          message: "User not found",
-        });
-      }
-    } else if (entity_type === "USER") {
-      /*
-       * Legacy callers may still send the numeric
-       * internal user_login.id.
-       *
-       * Convert it to the public MGU ID before
-       * creating the order.
-       */
-      const userResult = await pool.query(
-        `
-        SELECT user_id
-        FROM user_login
-        WHERE id = $1
-          AND is_active = true
-        LIMIT 1
-        `,
-        [resolvedEntityId]
-      );
-
-      if (!userResult.rows[0]) {
-        return res.status(404).json({
-          success: false,
-          message: "User not found",
-        });
-      }
-
-      publicUserId =
-        userResult.rows[0].user_id;
-    }
-
-    const order = await Order.createOrder(
-      entity_type,
-      resolvedEntityId,
-      address_id,
-      buyNow,
-      productId,
-      quantity,
-      publicUserId
-    );
+if (!user_id) {
+  return res.status(400).json({
+    success: false,
+    message: "User ID is required",
+  });
+}
+ const order = await Order.createOrder(
+  user_id,
+  address_id,
+  buyNow,
+  productId,
+  quantity
+);
 
     if (!order) {
       return res.status(404).json({
@@ -294,21 +220,10 @@ const createOrder = async (req, res) => {
 
 const getOrders = async (req, res) => {
   try {
-    const {
-      entity_type,
-      entity_id,
-      user_id,
-    } = req.query;
+    const { user_id } = req.query;
 
-    /*
-     * NEW:
-     * Prefer public user_id.
-     */
     if (user_id) {
-      const orders =
-        await Order.getOrdersByUserId(
-          user_id
-        );
+      const orders = await Order.getOrdersByUserId(user_id);
 
       return res.json({
         success: true,
@@ -317,46 +232,7 @@ const getOrders = async (req, res) => {
       });
     }
 
-    /*
-     * Existing frontend compatibility:
-     * entity_id may still contain MGU ID.
-     */
-    if (
-      entity_type === "USER" &&
-      typeof entity_id === "string" &&
-      entity_id.startsWith("MGU")
-    ) {
-      const orders =
-        await Order.getOrdersByUserId(
-          entity_id
-        );
-
-      return res.json({
-        success: true,
-        count: orders.length,
-        data: orders,
-      });
-    }
-
-    /*
-     * Legacy numeric entity lookup.
-     */
-    if (entity_type && entity_id) {
-      const orders =
-        await Order.getOrdersByEntity(
-          entity_type,
-          entity_id
-        );
-
-      return res.json({
-        success: true,
-        count: orders.length,
-        data: orders,
-      });
-    }
-
-    const orders =
-      await Order.getOrders();
+    const orders = await Order.getOrders();
 
     return res.json({
       success: true,
@@ -364,10 +240,7 @@ const getOrders = async (req, res) => {
       data: orders,
     });
   } catch (error) {
-    console.error(
-      "GET ORDERS ERROR:",
-      error
-    );
+    console.error("GET ORDERS ERROR:", error);
 
     return res.status(500).json({
       success: false,

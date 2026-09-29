@@ -38,7 +38,7 @@ const resolvePublicUserId = async (userId, client = pool) => {
       user_id
     FROM user_login
     WHERE user_id = $1
-      AND is_active = true
+      AND is_active = 1
     LIMIT 1
     `,
     [value]
@@ -61,7 +61,7 @@ const resolvePublicUserId = async (userId, client = pool) => {
         user_id
       FROM user_login
       WHERE id = $1
-        AND is_active = true
+        AND is_active = 1
       LIMIT 1
       `,
       [Number(value)]
@@ -109,7 +109,7 @@ const resolveInternalUserId = async (
     SELECT id
     FROM user_login
     WHERE user_id = $1
-      AND is_active = true
+      AND is_active = 1
     LIMIT 1
     `,
     [value]
@@ -129,7 +129,7 @@ const resolveInternalUserId = async (
       SELECT id
       FROM user_login
       WHERE id = $1
-        AND is_active = true
+        AND is_active = 1
       LIMIT 1
       `,
       [Number(value)]
@@ -774,7 +774,7 @@ const acceptTerms = async (userId) => {
     `
     UPDATE user_memberships
     SET
-      terms_and_conditions = TRUE
+      terms_and_conditions = 1
     WHERE
       user_id = $1
     RETURNING *

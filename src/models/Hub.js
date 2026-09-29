@@ -188,7 +188,7 @@ const createHub = async (hubData) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const { hubName, pincodes, isActive = true } = hubData;
+    const { hubName, pincodes, isActive = 1 } = hubData;
 
     if (!hubName || !hubName.trim()) throw new Error("Hub name is required");
     if (!pincodes || !Array.isArray(pincodes) || pincodes.length === 0) {
@@ -281,7 +281,7 @@ const updateHub = async (hubId, hubData) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const { hubName, pincodes, isActive = true } = hubData;
+    const { hubName, pincodes, isActive = 1 } = hubData;
 
     if (!hubName || !hubName.trim()) throw new Error("Hub name is required");
     if (!pincodes || !Array.isArray(pincodes) || pincodes.length === 0) {

@@ -7,18 +7,9 @@ const {
 
 const addAddress = async (req, res) => {
   try {
-    const {
-      user_id,
-      entity_id,
-    } = req.body;
+    const { user_id } = req.body;
 
-    /*
-     * New API requires public user_id.
-     *
-     * Legacy entity_id is still accepted temporarily
-     * so older frontend versions do not immediately break.
-     */
-    if (!user_id && !entity_id) {
+    if (!user_id) {
       return res.status(400).json({
         success: false,
         message: "user_id is required",

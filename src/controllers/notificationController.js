@@ -21,7 +21,7 @@ const resolveUserId = async (userId) => {
       SELECT id
       FROM user_login
       WHERE id = $1
-        AND is_active = true
+        AND is_active = 1
       LIMIT 1
       `,
       [numericId]
@@ -38,7 +38,7 @@ const resolveUserId = async (userId) => {
     SELECT id
     FROM user_login
     WHERE user_id = $1
-      AND is_active = true
+      AND is_active = 1
     LIMIT 1
     `,
     [cleanUserId]

@@ -4,7 +4,7 @@ const getPlans = async () => {
   const result = await pool.query(`
     SELECT *
     FROM subscription_plans
-    WHERE is_active = TRUE
+    WHERE is_active = 1
     ORDER BY display_order ASC
   `);
 
@@ -16,7 +16,7 @@ const acceptTerms = async (userId) => {
   const result = await pool.query(
     `
     UPDATE membership
-    SET terms_conditions = TRUE
+    SET terms_conditions = 1
     WHERE user_id = $1
     RETURNING *
     `,
@@ -65,7 +65,7 @@ const createPlan = async ({
       display_order,
       is_active
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1)
     RETURNING *
     `,
     [
@@ -145,7 +145,7 @@ const activatePlan = async (planId) => {
     `
     UPDATE subscription_plans
     SET
-      is_active = true,
+      is_active = 1,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = $1
     RETURNING *
@@ -169,7 +169,7 @@ const deactivatePlan = async (planId) => {
     `
     UPDATE subscription_plans
     SET
-      is_active = false,
+      is_active = 0,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = $1
     RETURNING *
