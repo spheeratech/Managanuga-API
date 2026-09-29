@@ -12,12 +12,7 @@ const getCustomers = async (vendorId) => {
       COUNT(o.id)::INTEGER AS total_orders,
 
       COALESCE(
-        SUM(
-          COALESCE(o.items_cost, o.total_amount, 0)
-          - COALESCE(o.membership_discount, 0)
-          - COALESCE(o.wallet_claim, 0)
-          + COALESCE(o.delivery_charge, 0)
-        ),
+        SUM(COALESCE(o.payable_amount, 0)),
         0
       ) AS total_paid_amount
 
@@ -55,18 +50,13 @@ const getOrders = async (vendorId) => {
       ul.username AS customer_name,
       ul.mobile_no AS customer_mobile,
 
-      o.total_amount,
-      o.items_cost,
+      o.actual_amount,
       o.membership_discount,
       o.wallet_claim,
       o.delivery_charge,
+      o.payable_amount,
 
-      (
-        COALESCE(o.items_cost, o.total_amount, 0)
-        - COALESCE(o.membership_discount, 0)
-        - COALESCE(o.wallet_claim, 0)
-        + COALESCE(o.delivery_charge, 0)
-      ) AS paid_amount,
+      COALESCE(o.payable_amount, 0) AS paid_amount,
 
       o.status,
       o.payment_status,
