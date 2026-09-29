@@ -4,9 +4,9 @@ const getActiveEventPoster = async () => {
   // Permanently deactivate expired posters
   await pool.query(`
     UPDATE event_posters
-    SET is_active = false
+    SET is_active = 0
     WHERE ended_at <= NOW()
-      AND is_active = true
+      AND is_active = 1
   `);
 
   // Get the latest active poster
@@ -18,7 +18,7 @@ const getActiveEventPoster = async () => {
       ended_at,
       is_active
     FROM event_posters
-    WHERE is_active = true
+    WHERE is_active = 1
       AND created_at <= NOW()
       AND ended_at > NOW()
     ORDER BY created_at DESC
@@ -36,7 +36,7 @@ const createEventPoster = async (imageUrl, endedAt) => {
       ended_at,
       is_active
     )
-    VALUES ($1, $2, true)
+    VALUES ($1, $2, 1)
     RETURNING
       id,
       image_url,

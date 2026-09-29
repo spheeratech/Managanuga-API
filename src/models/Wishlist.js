@@ -1,41 +1,16 @@
 const pool = require("../../db");
 
 /*
- * Resolve public MGU user ID to user_login.id
- */
-const resolveUserId = async (userId) => {
-  if (
-    typeof userId === "number" ||
-    (typeof userId === "string" && /^\d+$/.test(userId))
-  ) {
-    return Number(userId);
-  }
-
-  const result = await pool.query(
-    `
-    SELECT id
-    FROM user_login
-    WHERE user_id = $1
-      AND is_active = true
-    LIMIT 1
-    `,
-    [userId]
-  );
-
-  if (result.rowCount === 0) {
-    throw new Error("User not found");
-  }
-
-  return result.rows[0].id;
-};
-
-/*
  * ============================================================
  * GET USER WISHLIST
  * ============================================================
  */
 const getWishlist = async (userId) => {
-  const numericUserId = await resolveUserId(userId);
+  const publicUserId = String(userId).trim();
+
+  if (!publicUserId) {
+    throw new Error("User ID is required");
+  }
 
   const result = await pool.query(
     `
@@ -87,7 +62,7 @@ const getWishlist = async (userId) => {
           FROM app_images ai
           WHERE ai.product_id = p.id
             AND ai.image_type = 'PRODUCT_IMAGE'
-            AND ai.is_active = true
+            AND ai.is_active = 1
         ),
         '[]'
       ) AS images
@@ -101,11 +76,12 @@ const getWishlist = async (userId) => {
 
     ORDER BY w.created_at DESC
     `,
-    [numericUserId]
+    [publicUserId]
   );
 
   return result.rows;
 };
+
 
 /*
  * ============================================================
@@ -113,8 +89,15 @@ const getWishlist = async (userId) => {
  * ============================================================
  */
 const addToWishlist = async (userId, productId) => {
-  const numericUserId = await resolveUserId(userId);
+  const publicUserId = String(userId).trim();
 
+  if (!publicUserId) {
+    throw new Error("User ID is required");
+  }
+
+  /*
+   * Verify product exists and is active.
+   */
   const productResult = await pool.query(
     `
     SELECT id
@@ -130,6 +113,46 @@ const addToWishlist = async (userId, productId) => {
     throw new Error("Product not found");
   }
 
+  /*
+   * Check whether product is already in wishlist.
+   *
+   * We do this manually because the database currently
+   * does not have a UNIQUE constraint on
+   * (user_id, product_id).
+   */
+  const existingResult = await pool.query(
+    `
+    SELECT *
+    FROM wishlist_items
+    WHERE user_id = $1
+      AND product_id = $2
+    LIMIT 1
+    `,
+    [publicUserId, productId]
+  );
+
+  /*
+   * Product already exists.
+   * Refresh created_at and return the existing item.
+   */
+  if (existingResult.rowCount > 0) {
+    const updateResult = await pool.query(
+      `
+      UPDATE wishlist_items
+      SET created_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+      `,
+      [existingResult.rows[0].id]
+    );
+
+    return updateResult.rows[0];
+  }
+
+  /*
+   * Product does not exist.
+   * Add it to wishlist.
+   */
   const result = await pool.query(
     `
     INSERT INTO wishlist_items (
@@ -137,17 +160,14 @@ const addToWishlist = async (userId, productId) => {
       product_id
     )
     VALUES ($1, $2)
-
-    ON CONFLICT (user_id, product_id)
-    DO UPDATE SET created_at = CURRENT_TIMESTAMP
-
     RETURNING *
     `,
-    [numericUserId, productId]
+    [publicUserId, productId]
   );
 
   return result.rows[0];
 };
+
 
 /*
  * ============================================================
@@ -155,21 +175,25 @@ const addToWishlist = async (userId, productId) => {
  * ============================================================
  */
 const removeFromWishlist = async (userId, productId) => {
-  const numericUserId = await resolveUserId(userId);
+  const publicUserId = String(userId).trim();
+
+  if (!publicUserId) {
+    throw new Error("User ID is required");
+  }
 
   const result = await pool.query(
     `
     DELETE FROM wishlist_items
     WHERE user_id = $1
       AND product_id = $2
-
     RETURNING *
     `,
-    [numericUserId, productId]
+    [publicUserId, productId]
   );
 
   return result.rows[0] || null;
 };
+
 
 /*
  * ============================================================
@@ -180,11 +204,15 @@ const removeFromWishlist = async (userId, productId) => {
  * 3. Delete that cart item
  *
  * Everything happens inside one transaction.
- * If anything fails, nothing is changed.
+ * If anything fails, everything is rolled back.
  * ============================================================
  */
 const saveForLater = async (userId, cartId) => {
-  const numericUserId = await resolveUserId(userId);
+  const publicUserId = String(userId).trim();
+
+  if (!publicUserId) {
+    throw new Error("User ID is required");
+  }
 
   const client = await pool.connect();
 
@@ -192,8 +220,11 @@ const saveForLater = async (userId, cartId) => {
     await client.query("BEGIN");
 
     /*
-     * Find the cart item and make sure it belongs
-     * to the logged-in user.
+     * ========================================================
+     * 1. FIND CART ITEM
+     * ========================================================
+     *
+     * cart_items.user_id = public MGU user ID
      */
     const cartResult = await client.query(
       `
@@ -202,11 +233,10 @@ const saveForLater = async (userId, cartId) => {
         c.item_id AS product_id
       FROM cart_items c
       WHERE c.id = $1
-        AND c.entity_type = 'USER'
-        AND c.entity_id = $2
+        AND c.user_id = $2
       LIMIT 1
       `,
-      [cartId, numericUserId]
+      [cartId, publicUserId]
     );
 
     if (cartResult.rowCount === 0) {
@@ -216,41 +246,80 @@ const saveForLater = async (userId, cartId) => {
     const productId = cartResult.rows[0].product_id;
 
     /*
-     * Add product to wishlist.
+     * ========================================================
+     * 2. ADD PRODUCT TO WISHLIST
+     * ========================================================
+     *
+     * wishlist_items.user_id = public MGU user ID
      */
-    await client.query(
+    const existingWishlistResult = await client.query(
       `
-      INSERT INTO wishlist_items (
-        user_id,
-        product_id
-      )
-      VALUES ($1, $2)
-
-      ON CONFLICT (user_id, product_id)
-      DO UPDATE SET created_at = CURRENT_TIMESTAMP
+      SELECT id
+      FROM wishlist_items
+      WHERE user_id = $1
+        AND product_id = $2
+      LIMIT 1
       `,
-      [numericUserId, productId]
+      [publicUserId, productId]
     );
 
+    if (existingWishlistResult.rowCount > 0) {
+      /*
+       * Product already exists in wishlist.
+       * Refresh timestamp.
+       */
+      await client.query(
+        `
+        UPDATE wishlist_items
+        SET created_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [existingWishlistResult.rows[0].id]
+      );
+    } else {
+      /*
+       * Add new wishlist item.
+       */
+      await client.query(
+        `
+        INSERT INTO wishlist_items (
+          user_id,
+          product_id
+        )
+        VALUES ($1, $2)
+        `,
+        [publicUserId, productId]
+      );
+    }
+
     /*
-     * Remove the item from cart.
+     * ========================================================
+     * 3. REMOVE ITEM FROM CART
+     * ========================================================
+     *
+     * cart_items.user_id = public MGU user ID
      */
     const deleteResult = await client.query(
       `
       DELETE FROM cart_items
       WHERE id = $1
-        AND entity_type = 'USER'
-        AND entity_id = $2
-
+        AND user_id = $2
       RETURNING id
       `,
-      [cartId, numericUserId]
+      [cartId, publicUserId]
     );
 
     if (deleteResult.rowCount === 0) {
-      throw new Error("Failed to remove item from cart");
+      throw new Error(
+        "Failed to remove item from cart"
+      );
     }
 
+    /*
+     * ========================================================
+     * 4. COMMIT TRANSACTION
+     * ========================================================
+     */
     await client.query("COMMIT");
 
     return {
@@ -258,6 +327,10 @@ const saveForLater = async (userId, cartId) => {
       cart_id: Number(cartId),
     };
   } catch (error) {
+    /*
+     * Roll back both wishlist and cart changes
+     * if anything fails.
+     */
     await client.query("ROLLBACK");
     throw error;
   } finally {
@@ -265,6 +338,12 @@ const saveForLater = async (userId, cartId) => {
   }
 };
 
+
+/*
+ * ============================================================
+ * EXPORTS
+ * ============================================================
+ */
 module.exports = {
   getWishlist,
   addToWishlist,

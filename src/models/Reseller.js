@@ -41,7 +41,7 @@ const getCustomers = async (userId) => {
     FROM user_login
     WHERE
       user_id = $1
-      AND is_active = true
+      AND is_active = 1
     LIMIT 1;
     `,
     [cleanUserId]
@@ -124,7 +124,7 @@ const getCustomers = async (userId) => {
       WHERE
         ul.assigned_by = $1
         AND ul.role IN ('USER', 'CUSTOMER')
-        AND ul.is_active = true
+        AND ul.is_active = 1
 
       GROUP BY
         ul.user_id,
@@ -219,7 +219,7 @@ const getProfile = async (userId) => {
     WHERE
       ul.user_id = $1
       AND ul.role = 'RESELLER'
-      AND ul.is_active = true
+      AND ul.is_active = 1
 
     LIMIT 1;
     `,

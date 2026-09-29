@@ -23,6 +23,7 @@ const createReview = async (
 
   return result.rows[0];
 };
+
 /* --------------------------------
    CREATE / UPDATE ORDER REVIEW
 
@@ -69,7 +70,6 @@ const createOrderReview = async (
       SELECT id
       FROM orders
       WHERE id = $1
-        AND entity_type = 'USER'
         AND user_id = $2
       LIMIT 1
       `,
@@ -131,20 +131,18 @@ const createOrderReview = async (
       /* Check whether this product was
          already reviewed for this order */
       const existingReview = await client.query(
-        `
-        SELECT id
-        FROM product_reviews
-        WHERE order_id = $1
-          AND product_id = $2
-          AND user_id = $3
-        LIMIT 1
-        `,
-        [
-          Number(orderId),
-          Number(productId),
-          String(publicUserId).trim(),
-        ]
-      );
+  `
+  SELECT id
+  FROM product_reviews
+  WHERE product_id = $1
+    AND user_id = $2
+  LIMIT 1
+  `,
+  [
+    Number(productId),
+    String(publicUserId).trim(),
+  ]
+);
 
       let result;
 

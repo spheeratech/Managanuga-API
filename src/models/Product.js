@@ -30,7 +30,7 @@ const getProducts = async () => {
           FROM app_images ai
           WHERE ai.product_id = p.id
             AND ai.image_type = 'PRODUCT_IMAGE'
-            AND ai.is_active = true
+            AND ai.is_active = 1
         ),
         '[]'
       ) AS images,
@@ -49,7 +49,7 @@ const getProducts = async () => {
           FROM app_images ai
           WHERE ai.product_id = p.id
             AND ai.image_type = 'PRODUCT_VIEW'
-            AND ai.is_active = true
+            AND ai.is_active = 1
         ),
         '[]'
       ) AS product_views
@@ -80,7 +80,7 @@ const getProductById = async (id) => {
           FROM app_images ai
           WHERE ai.product_id = p.id
             AND ai.image_type = 'PRODUCT_IMAGE'
-            AND ai.is_active = true
+            AND ai.is_active = 1
         ),
         '[]'
       ) AS images,
@@ -98,7 +98,7 @@ const getProductById = async (id) => {
           FROM app_images ai
           WHERE ai.product_id = p.id
             AND ai.image_type = 'PRODUCT_VIEW'
-            AND ai.is_active = true
+            AND ai.is_active = 1
         ),
         '[]'
       ) AS product_views

@@ -111,7 +111,7 @@ const updateByTnxOrderId = async (
 const linkPaymentToOrder = async ({
   paymentId,
   orderId,
-  transOrderId,
+  tnxOrderId,
   status,
 }) => {
   const result = await pool.query(
@@ -124,12 +124,12 @@ const linkPaymentToOrder = async ({
     WHERE id = $4
     RETURNING *
     `,
-    [
-      orderId || null,
-      transOrderId || null,
-      status || null,
-      paymentId,
-    ]
+   [
+  orderId || null,
+  tnxOrderId || null,
+  status || null,
+  paymentId,
+]
   );
 
   return result.rows[0];

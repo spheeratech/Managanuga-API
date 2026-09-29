@@ -76,7 +76,7 @@ const processMembershipBenefit = async ({
       WHERE
         user_id = $1
         AND role = 'VENDOR'
-        AND is_active = true
+        AND is_active = 1
       LIMIT 1
       `,
       [String(assignedBy).trim()]
@@ -124,7 +124,7 @@ const processMembershipBenefit = async ({
       WHERE
         user_id = $1
         AND role = 'RESELLER'
-        AND is_active = true
+        AND is_active = 1
       LIMIT 1
       `,
       [String(assignedBy).trim()]
@@ -163,7 +163,7 @@ const processMembershipBenefit = async ({
         WHERE
           user_id = $1
           AND role = 'VENDOR'
-          AND is_active = true
+          AND is_active = 1
         LIMIT 1
         `,
         [String(reseller.created_by).trim()]

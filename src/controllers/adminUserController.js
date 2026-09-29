@@ -237,7 +237,7 @@ const createUser = async (req, res) => {
         mobileNo: clean(mobileNo),
         password: generatedPassword,
         role: targetRole,
-        isActive: true,
+        isActive: 1,
 
         createdBy: normalizedCreatorRole,
 

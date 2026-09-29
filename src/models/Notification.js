@@ -10,7 +10,7 @@ const createNotification = async ({
 }) => {
   const result = await pool.query(
     `
-    INSERT INTO notifications
+    INSERT INTO inapp_notifications
     (
       user_id,
       title,
@@ -38,7 +38,7 @@ const getUserNotifications = async (userId) => {
   const result = await pool.query(
     `
     SELECT *
-    FROM notifications
+    FROM inapp_notifications
     WHERE user_id = $1
     ORDER BY created_at DESC
     `,
@@ -53,7 +53,7 @@ const getUnreadCount = async (userId) => {
   const result = await pool.query(
     `
     SELECT COUNT(*)::INTEGER AS count
-    FROM notifications
+    FROM inapp_notifications
     WHERE user_id = $1
       AND is_read = FALSE
     `,
@@ -67,7 +67,7 @@ const getUnreadCount = async (userId) => {
 const markAsRead = async (notificationId, userId) => {
   const result = await pool.query(
     `
-    UPDATE notifications
+    UPDATE inapp_notifications
     SET is_read = TRUE
     WHERE id = $1
       AND user_id = $2
@@ -83,7 +83,7 @@ const markAsRead = async (notificationId, userId) => {
 const markAllAsRead = async (userId) => {
   const result = await pool.query(
     `
-    UPDATE notifications
+    UPDATE inapp_notifications
     SET is_read = TRUE
     WHERE user_id = $1
       AND is_read = FALSE

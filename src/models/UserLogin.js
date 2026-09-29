@@ -20,7 +20,7 @@ const UserLogin = {
       SELECT *
       FROM user_login
       WHERE mobile_no = $1
-        AND is_active = true
+        AND is_active = 1
       LIMIT 1
       `,
       [mobile]
@@ -62,7 +62,7 @@ const UserLogin = {
         SELECT id, user_id, username, mobile_no, role, is_active
         FROM user_login
         WHERE mobile_no = $1
-          AND is_active = true
+          AND is_active = 1
         LIMIT 1
         `,
         [mobile]
@@ -125,7 +125,7 @@ const UserLogin = {
           is_active
         )
         VALUES
-        ($1, $2, $3, $4, $5, $6, true)
+        ($1, $2, $3, $4, $5, $6, 1)
         RETURNING *
         `,
         [
@@ -199,7 +199,7 @@ const UserLogin = {
         SELECT id
         FROM user_login
         WHERE user_id = $1
-          AND is_active = true
+          AND is_active = 1
         LIMIT 1
         `,
         [userId]
@@ -230,12 +230,12 @@ const UserLogin = {
         `
         UPDATE user_login
         SET
-          is_active = false,
+          is_active = 0,
           deleted_at = CURRENT_TIMESTAMP,
           deleted_by = $1,
           fcm_token = NULL
         WHERE user_id = $1
-          AND is_active = true
+          AND is_active = 1
         RETURNING
           user_id,
           mobile_no,

@@ -1,7 +1,7 @@
 const pool = require("../../db");
 
 /**
- * Resolve a public user_id (MGU...) to the internal user_login.id.
+ * Resolve a public user_id (MGU...) and verify that the user exists.
  */
 const resolvePublicUserId = async (publicUserId) => {
   if (!publicUserId) return null;
@@ -18,86 +18,29 @@ const resolvePublicUserId = async (publicUserId) => {
   return result.rows[0] || null;
 };
 
+
 /**
- * Resolve legacy entity_id.
+ * Create address
  *
- * Old system:
- *   entity_id = user_login.id
- *
- * New system:
- *   user_id = user_login.user_id
+ * New structure:
+ *   user_id = public MGU user ID
  */
-const resolveLegacyEntityId = async (entityId) => {
-  if (entityId === undefined || entityId === null || entityId === "") {
-    return null;
-  }
-
-  const value = String(entityId);
-
-  // If it is numeric, treat it as the old internal user_login.id.
-  if (/^\d+$/.test(value)) {
-    const query = `
-      SELECT id, user_id
-      FROM user_login
-      WHERE id = $1
-      LIMIT 1;
-    `;
-
-    const result = await pool.query(query, [Number(value)]);
-
-    return result.rows[0] || null;
-  }
-
-  // Otherwise it may already be a public user_id such as MGU260...
-  return resolvePublicUserId(value);
-};
-
-
 const createAddress = async (addressData) => {
-  /*
-   * New API:
-   *   user_id = public MGU ID
-   *
-   * Legacy API:
-   *   entity_id = internal numeric user_login.id
-   *
-   * We support both during migration.
-   */
-
-  let publicUserId = addressData.user_id || null;
-  let internalUserId = null;
-
-  if (publicUserId) {
-    const user = await resolvePublicUserId(publicUserId);
-
-    if (!user) {
-      throw new Error(`User not found for user_id: ${publicUserId}`);
-    }
-
-    publicUserId = user.user_id;
-    internalUserId = user.id;
-  } else if (addressData.entity_id) {
-    const user = await resolveLegacyEntityId(addressData.entity_id);
-
-    if (!user) {
-      throw new Error(
-        `User not found for entity_id: ${addressData.entity_id}`
-      );
-    }
-
-    publicUserId = user.user_id;
-    internalUserId = user.id;
-  }
+  const publicUserId = addressData.user_id;
 
   if (!publicUserId) {
     throw new Error("user_id is required");
   }
 
+  const user = await resolvePublicUserId(publicUserId);
+
+  if (!user) {
+    throw new Error(`User not found for user_id: ${publicUserId}`);
+  }
+
   const query = `
     INSERT INTO addresses (
       user_id,
-      entity_type,
-      entity_id,
       address_type,
       full_name,
       phone,
@@ -111,7 +54,6 @@ const createAddress = async (addressData) => {
     )
     VALUES (
       $1,
-      'USER',
       $2,
       $3,
       $4,
@@ -121,15 +63,13 @@ const createAddress = async (addressData) => {
       $8,
       $9,
       $10,
-      $11,
-      $12
+      $11
     )
     RETURNING *;
   `;
 
   const values = [
-    publicUserId,
-    internalUserId,
+    user.user_id,
     addressData.address_type || "HOME",
     addressData.full_name,
     addressData.phone,
@@ -139,7 +79,7 @@ const createAddress = async (addressData) => {
     addressData.state,
     addressData.country || "India",
     addressData.postal_code,
-    addressData.is_default || false,
+    addressData.is_default || 0,
   ];
 
   const result = await pool.query(query, values);
@@ -148,6 +88,12 @@ const createAddress = async (addressData) => {
 };
 
 
+/**
+ * Get addresses
+ *
+ * New usage:
+ *   GET /addresses?user_id=MGU260...
+ */
 const getAddresses = async (filters = {}) => {
   let query = `
     SELECT *
@@ -158,33 +104,9 @@ const getAddresses = async (filters = {}) => {
   const values = [];
   let count = 1;
 
-  /*
-   * NEW:
-   * GET /addresses?user_id=MGU260...
-   */
   if (filters.user_id) {
     query += ` AND user_id = $${count++}`;
     values.push(String(filters.user_id));
-  }
-
-  /*
-   * Legacy support.
-   */
-  if (!filters.user_id && filters.entity_type) {
-    query += ` AND entity_type = $${count++}`;
-    values.push(filters.entity_type);
-  }
-
-  if (!filters.user_id && filters.entity_id) {
-    const legacyUser = await resolveLegacyEntityId(filters.entity_id);
-
-    if (legacyUser) {
-      query += ` AND user_id = $${count++}`;
-      values.push(legacyUser.user_id);
-    } else {
-      query += ` AND entity_id = $${count++}`;
-      values.push(Number(filters.entity_id));
-    }
   }
 
   if (filters.city) {
@@ -203,7 +125,7 @@ const getAddresses = async (filters = {}) => {
 /**
  * Update only actual address fields.
  *
- * Ownership/user_id cannot be changed through this function.
+ * user_id cannot be changed through this function.
  */
 const updateAddress = async (id, data) => {
   const allowedFields = [
@@ -252,6 +174,9 @@ const updateAddress = async (id, data) => {
 };
 
 
+/**
+ * Delete address
+ */
 const deleteAddress = async (id) => {
   const query = `
     DELETE FROM addresses
@@ -266,59 +191,23 @@ const deleteAddress = async (id) => {
 
 
 /**
- * New usage:
- *   getDefaultAddress(userId)
- *
- * Legacy usage still supported:
- *   getDefaultAddress(entity_type, entity_id)
+ * Get default address by public user_id.
  */
-const getDefaultAddress = async (userIdOrEntityType, entityId = null) => {
-  let query;
-  let values;
-
-  // New usage: getDefaultAddress("MGU260...")
-  if (entityId === null) {
-    query = `
-      SELECT *
-      FROM addresses
-      WHERE user_id = $1
-        AND is_default = true
-      ORDER BY id DESC
-      LIMIT 1;
-    `;
-
-    values = [String(userIdOrEntityType)];
-  } else {
-    // Legacy usage
-    const legacyUser = await resolveLegacyEntityId(entityId);
-
-    if (legacyUser) {
-      query = `
-        SELECT *
-        FROM addresses
-        WHERE user_id = $1
-          AND is_default = true
-        ORDER BY id DESC
-        LIMIT 1;
-      `;
-
-      values = [legacyUser.user_id];
-    } else {
-      query = `
-        SELECT *
-        FROM addresses
-        WHERE entity_type = $1
-          AND entity_id = $2
-          AND is_default = true
-        ORDER BY id DESC
-        LIMIT 1;
-      `;
-
-      values = [userIdOrEntityType, entityId];
-    }
+const getDefaultAddress = async (userId) => {
+  if (!userId) {
+    throw new Error("user_id is required");
   }
 
-  const result = await pool.query(query, values);
+  const query = `
+    SELECT *
+    FROM addresses
+    WHERE user_id = $1
+      AND is_default = 1
+    ORDER BY id DESC
+    LIMIT 1;
+  `;
+
+  const result = await pool.query(query, [String(userId)]);
 
   return result.rows[0];
 };

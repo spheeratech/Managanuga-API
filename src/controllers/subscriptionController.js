@@ -271,7 +271,7 @@ const verifySubscriptionPayment = async (req, res) => {
         UPDATE user_login
         SET
           role = 'CUSTOMER',
-          is_active = true
+          is_active = 1
         WHERE user_id = $1
         `,
         [userId],
@@ -430,7 +430,7 @@ const verifySubscriptionPayment = async (req, res) => {
           $3,
           $4,
           'CUSTOMER',
-          true,
+          1,
           'SUPER_ADMIN',
           NULL,
           'CUSTOMER'
@@ -703,7 +703,7 @@ const validateReferralCode = async (req, res) => {
     ul.user_id AS referral_code
   FROM user_login ul
   WHERE ul.user_id = $1
-    AND ul.is_active = true
+    AND ul.is_active = 1
   LIMIT 1
   `,
   [referralCode.trim()]
@@ -725,7 +725,7 @@ const validateReferralCode = async (req, res) => {
   SELECT user_id
   FROM user_login
   WHERE user_id = $1
-    AND is_active = true
+    AND is_active = 1
   LIMIT 1
   `,
   [String(userId).trim()]

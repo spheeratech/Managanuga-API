@@ -8,7 +8,7 @@ const findOne = async ({ mobile }) => {
     SELECT *
     FROM user_login
     WHERE mobile_no = $1
-      AND is_active = true
+      AND is_active = 1
     LIMIT 1
     `,
     [mobile]
@@ -25,7 +25,7 @@ const findById = async (userId) => {
     SELECT *
     FROM user_login
     WHERE id = $1
-      AND is_active = true
+      AND is_active = 1
     LIMIT 1
     `,
     [userId]
@@ -49,7 +49,7 @@ const create = async ({ mobile }) => {
       mobile_no,
       is_active
     )
-    VALUES ($1, true)
+    VALUES ($1, 1)
     RETURNING *
     `,
     [mobile]
@@ -66,7 +66,7 @@ const updateFcmToken = async (userId, fcmToken) => {
     UPDATE user_login
     SET fcm_token = $1
     WHERE id = $2
-      AND is_active = true
+      AND is_active = 1
     RETURNING
       id,
       user_id,

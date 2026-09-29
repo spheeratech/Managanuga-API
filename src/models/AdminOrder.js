@@ -102,8 +102,6 @@ const createAdminOrder = async ({
       INSERT INTO orders
       (
         user_id,
-        entity_type,
-        entity_id,
         total_amount,
         warehouse_id,
         status,
@@ -112,8 +110,6 @@ const createAdminOrder = async ({
       VALUES
       (
         $1::varchar,
-        'USER',
-        0,
         $2::numeric,
         $3::integer,
         'PENDING',
@@ -224,8 +220,6 @@ const getAdminOrders = async () => {
     SELECT
       o.id,
       o.user_id,
-      o.entity_type,
-      o.entity_id,
       o.total_amount,
       o.warehouse_id,
       o.status,
@@ -476,6 +470,7 @@ const deleteAdminOrder = async (id) => {
     client.release();
   }
 };
+
 /* --------------------------------
    DELETE ALL ADMIN ORDERS
 -------------------------------- */
@@ -557,8 +552,8 @@ const verifyAdminOrder = async (
     UPDATE orders
     SET
       status = $1,
-      admin_verified = TRUE,
-      admin_accepted = TRUE,
+      admin_verified = 1,
+      admin_accepted = 1,
       delivery_method = $2
     WHERE id = $3::integer
     RETURNING *
@@ -568,6 +563,7 @@ const verifyAdminOrder = async (
 
   return result.rows[0] || null;
 };
+
 /* --------------------------------
    UPDATE SHIPMENT DETAILS
 -------------------------------- */
@@ -579,14 +575,15 @@ const updateShipmentDetails = async (id, { tracking_number, courier_name }) => {
     SET
       tracking_number = $1,
       courier_name = $2
-    WHERE id = $3::integer
+    WHERE id = $3
     RETURNING *
     `,
     [tracking_number ?? null, courier_name ?? null, Number(id)],
   );
 
-  return result.rows[0] || null;
+  return result.rows[0];
 };
+
 /* --------------------------------
    EXPORTS
 -------------------------------- */

@@ -13,7 +13,7 @@ const getUserDocument = async (userId) => {
       is_active
     FROM user_documents
     WHERE user_id = $1
-      AND is_active = true
+      AND is_active = 1
     LIMIT 1;
   `;
 
@@ -74,7 +74,7 @@ const createOrUpdateProfileImage = async (
       $3,
       CURRENT_TIMESTAMP,
       $4,
-      true
+      1
     )
     RETURNING
       id,
@@ -101,7 +101,7 @@ const getProfileImage = async (userId) => {
     SELECT profile_image
     FROM user_documents
     WHERE user_id = $1
-      AND is_active = true
+      AND is_active = 1
       AND profile_image IS NOT NULL
     LIMIT 1;
   `;
@@ -118,7 +118,7 @@ const deleteProfileImage = async (userId) => {
       updated_at = CURRENT_TIMESTAMP,
       updated_by = $2
     WHERE user_id = $1
-      AND is_active = true
+      AND is_active = 1
       AND profile_image IS NOT NULL
     RETURNING
       id,
