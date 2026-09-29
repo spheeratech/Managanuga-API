@@ -63,10 +63,21 @@ app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/app-images", appImageRoutes);
 
 app.get("/join", (req, res) => {
-  const appStoreUrl =
-    "https://apps.apple.com/in/app/mana-ganuga/id6796354317";
+  const userAgent = req.get("user-agent") || "";
 
-  res.redirect(302, appStoreUrl);
+  const isAndroid = /Android/i.test(userAgent);
+
+  if (isAndroid) {
+    return res.redirect(
+      302,
+      "https://play.google.com/store/apps/details?id=com.apfdcllp.managanuga"
+    );
+  }
+
+  return res.redirect(
+    302,
+    "https://apps.apple.com/in/app/mana-ganuga/id6796354317"
+  );
 });
 
 app.get("/test", (req, res) => {
