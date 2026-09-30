@@ -3,60 +3,15 @@ const pool = require("../../db");
 const Wallet = {
   /**
    * ============================================================
-   * RESOLVE WALLET USER
-   * ============================================================
-   */
-  async resolveWalletUserId(identifier) {
-    const cleanIdentifier = String(identifier || "").trim();
-
-    if (!cleanIdentifier) {
-      return cleanIdentifier;
-    }
-
-    // First try public user_id.
-    const publicResult = await pool.query(
-      `
-      SELECT user_id
-      FROM user_login
-      WHERE user_id = $1
-        AND is_active = 1
-      LIMIT 1
-      `,
-      [cleanIdentifier]
-    );
-
-    if (publicResult.rows.length > 0) {
-      return String(publicResult.rows[0].user_id).trim();
-    }
-
-    // Backward compatibility for numeric internal ID.
-    if (/^\d+$/.test(cleanIdentifier)) {
-      const numericResult = await pool.query(
-        `
-        SELECT user_id
-        FROM user_login
-        WHERE id = $1
-          AND is_active = 1
-        LIMIT 1
-        `,
-        [Number(cleanIdentifier)]
-      );
-
-      if (numericResult.rows.length > 0) {
-        return String(numericResult.rows[0].user_id).trim();
-      }
-    }
-
-    return cleanIdentifier;
-  },
-
-  /**
-   * ============================================================
    * GET WALLET
    * ============================================================
    */
   async getByUserId(userId) {
-    const walletUserId = await this.resolveWalletUserId(userId);
+    const walletUserId = String(userId || "").trim();
+
+    if (!walletUserId) {
+      return null;
+    }
 
     const result = await pool.query(
       `
@@ -104,10 +59,14 @@ const Wallet = {
       await client.query("BEGIN");
 
       /*
-       * Resolve public wallet user ID.
+       * Public MGU user_id is used directly.
        */
       const walletUserId =
-        await this.resolveWalletUserId(userId);
+        String(userId || "").trim();
+
+      if (!walletUserId) {
+        throw new Error("User ID is required");
+      }
 
       /*
        * Validate requested amount.
@@ -115,7 +74,9 @@ const Wallet = {
       const redeemAmount = Number(requestedAmount);
 
       if (!Number.isFinite(redeemAmount)) {
-        throw new Error("Redeem amount must be a valid number");
+        throw new Error(
+          "Redeem amount must be a valid number"
+        );
       }
 
       if (redeemAmount < 1000) {
@@ -269,12 +230,59 @@ const Wallet = {
 
   /**
    * ============================================================
+   * UPDATE REDEEM STATUS
+   * ============================================================
+   */
+  async updateRedeemStatus(redeemId, redeemStatus) {
+    const cleanStatus =
+      String(redeemStatus || "").trim().toUpperCase();
+
+    if (
+  !["IN_PROGRESS", "COMPLETED", "REJECTED"].includes(
+    cleanStatus
+  )
+) {
+      throw new Error(
+        "Invalid redeem status"
+      );
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE redeem
+      SET
+        redeem_status = $1,
+        updated_at = NOW()
+      WHERE id = $2
+        AND is_active = 1
+      RETURNING
+        id,
+        user_id,
+        user_type,
+        wallet_amount,
+        redeem_status,
+        redeem_created_date,
+        created_by,
+        updated_at
+      `,
+      [cleanStatus, redeemId]
+    );
+
+    if (!result.rows[0]) {
+      throw new Error("Redeem request not found");
+    }
+
+    return result.rows[0];
+  },
+
+  /**
+   * ============================================================
    * GET LATEST REDEEM
    * ============================================================
    */
   async getLatestRedeem(userId) {
     const walletUserId =
-      await this.resolveWalletUserId(userId);
+      String(userId || "").trim();
 
     const result = await pool.query(
       `
@@ -304,7 +312,7 @@ const Wallet = {
    */
   async getRedeemTransactions(userId) {
     const walletUserId =
-      await this.resolveWalletUserId(userId);
+      String(userId || "").trim();
 
     const result = await pool.query(
       `

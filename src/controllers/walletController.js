@@ -1,4 +1,6 @@
 const Wallet = require("../models/Wallet");
+const Notification = require("../models/Notification");
+
 
 /*
  * ============================================================
@@ -83,6 +85,40 @@ const createRedeemRequest = async (req, res) => {
       amount
     );
 
+    /*
+     * ========================================================
+     * CREATE IN-APP NOTIFICATION
+     * ========================================================
+     *
+     * Every newly created redeem request starts as
+     * IN_PROGRESS.
+     */
+    try {
+      await Notification.createNotification({
+        userId: result.redeem.user_id,
+        title: "💰 Redemption Request",
+        message:
+          `Your redemption request of ₹${Number(
+            result.redeem.wallet_amount
+          ).toFixed(2)} is now in progress.`,
+        type: "REDEEM_IN_PROGRESS",
+        referenceId: result.redeem.id,
+      });
+
+      console.log(
+        `REDEEM IN_PROGRESS NOTIFICATION CREATED FOR USER ${result.redeem.user_id}`
+      );
+    } catch (notificationError) {
+      /*
+       * Notification failure must NOT break the successful
+       * redeem request.
+       */
+      console.error(
+        "REDEEM IN_PROGRESS NOTIFICATION FAILED:",
+        notificationError.message
+      );
+    }
+
     return res.status(201).json({
       success: true,
       message: "Redeem request created successfully",
@@ -108,6 +144,120 @@ const createRedeemRequest = async (req, res) => {
 
     console.error(
       "Create Redeem Request Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
+/*
+ * ============================================================
+ * UPDATE REDEEM STATUS
+ * PATCH /api/wallet/redeem/:redeemId/status
+ *
+ * Body:
+ * {
+ *   "status": "COMPLETED"
+ * }
+ * ============================================================
+ */
+const updateRedeemStatus = async (req, res) => {
+  try {
+    const {redeemId} = req.params;
+    const {status} = req.body;
+
+    if (!redeemId) {
+      return res.status(400).json({
+        success: false,
+        message: "Redeem ID is required",
+      });
+    }
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Redeem status is required",
+      });
+    }
+
+    const redeem =
+      await Wallet.updateRedeemStatus(
+        redeemId,
+        status
+      );
+
+    /*
+     * Only create the completion notification when the
+     * status becomes COMPLETED.
+     */
+    if (
+  redeem.redeem_status === "COMPLETED" ||
+  redeem.redeem_status === "REJECTED"
+) {
+  try {
+    let title;
+    let message;
+    let type;
+
+    if (redeem.redeem_status === "COMPLETED") {
+      title = "✅ Redemption Completed";
+      message =
+        `Your redemption of ₹${Number(
+          redeem.wallet_amount
+        ).toFixed(2)} has been completed successfully.`;
+      type = "REDEEM_COMPLETED";
+    } else {
+      title = "❌ Redemption Rejected";
+      message =
+        `Your redemption request of ₹${Number(
+          redeem.wallet_amount
+        ).toFixed(2)} has been rejected.`;
+      type = "REDEEM_REJECTED";
+    }
+
+    await Notification.createNotification({
+      userId: redeem.user_id,
+      title,
+      message,
+      type,
+      referenceId: redeem.id,
+    });
+
+    console.log(
+      `${type} NOTIFICATION CREATED FOR USER ${redeem.user_id}`
+    );
+  } catch (notificationError) {
+    console.error(
+      `${redeem.redeem_status} NOTIFICATION FAILED:`,
+      notificationError.message
+    );
+  }
+}
+
+    return res.status(200).json({
+      success: true,
+      message: "Redeem status updated successfully",
+      redeem,
+    });
+
+  } catch (error) {
+    if (
+      error.message === "Redeem request not found" ||
+      error.message === "Invalid redeem status"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    console.error(
+      "Update Redeem Status Error:",
       error
     );
 
@@ -203,6 +353,7 @@ const getRedeemTransactions = async (req, res) => {
 module.exports = {
   getWallet,
   createRedeemRequest,
+  updateRedeemStatus,
   getRedeemStatus,
   getRedeemTransactions,
 };

@@ -1,99 +1,9 @@
 const pool = require("../../db");
 
-/**
- * Resolve any supported user identifier into both:
- * - publicUserId  -> user_login.user_id
- * - internalUserId -> user_login.id
- *
- * Supported inputs:
- * - MGU26092503
- * - "19", "20", "23" (public IDs that happen to be numeric)
- * - 170 (legacy internal user_login.id)
- */
-const resolveUserIdentifiers = async (userId, client = pool) => {
-  if (
-    userId === null ||
-    userId === undefined ||
-    userId === ""
-  ) {
-    throw new Error("User ID is required");
-  }
-
-  const value = String(userId).trim();
-
-  // First: treat the value as the PUBLIC user_id.
-  // This is important because some older public IDs are numeric
-  // such as "19", "20", "23".
-  const publicResult = await client.query(
-    `
-    SELECT
-      id,
-      user_id
-    FROM user_login
-    WHERE user_id = $1
-      AND is_active = 1
-    LIMIT 1
-    `,
-    [value]
-  );
-
-  if (publicResult.rows.length > 0) {
-    return {
-      publicUserId: publicResult.rows[0].user_id,
-      internalUserId: publicResult.rows[0].id,
-    };
-  }
-
-  // Second: support legacy/internal numeric user_login.id.
-  if (/^\d+$/.test(value)) {
-    const internalResult = await client.query(
-      `
-      SELECT
-        id,
-        user_id
-      FROM user_login
-      WHERE id = $1
-        AND is_active = 1
-      LIMIT 1
-      `,
-      [Number(value)]
-    );
-
-    if (internalResult.rows.length > 0) {
-      return {
-        publicUserId: internalResult.rows[0].user_id,
-        internalUserId: internalResult.rows[0].id,
-      };
-    }
-  }
-
-  throw new Error(`User not found: ${userId}`);
-};
-
-
 const calculateMembershipBenefits = async (
   userId,
   cartItems,
 ) => {
-
-  /*
-   * IMPORTANT
-   *
-   * user_memberships.user_id now stores:
-   *
-   *     user_login.user_id
-   *
-   * while old orders.entity_id still stores:
-   *
-   *     user_login.id
-   *
-   * Therefore we resolve BOTH identifiers here.
-   */
-  const {
-    publicUserId,
-    internalUserId,
-  } = await resolveUserIdentifiers(userId);
-
 
   // ============================================================
   // LOAD ACTIVE MEMBERSHIP
@@ -108,7 +18,7 @@ const calculateMembershipBenefits = async (
     ORDER BY id DESC
     LIMIT 1
     `,
-    [publicUserId]
+    [userId]
   );
 
   const membership = membershipResult.rows[0];
@@ -138,12 +48,6 @@ const calculateMembershipBenefits = async (
 
   // ============================================================
   // PAYMENT SCREEN USAGE
-  //
-  // Existing orders still use:
-  //
-  // orders.entity_id = user_login.id
-  //
-  // So use INTERNAL user ID here.
   // ============================================================
 
   const previousOrdersResult = await pool.query(
@@ -172,7 +76,7 @@ const calculateMembershipBenefits = async (
     INNER JOIN products p
       ON p.id = item_data.item_id
 
-       WHERE o.user_id = $1
+    WHERE o.user_id = $1
 
       AND o.status IN (
         'PLACED',
@@ -184,7 +88,7 @@ const calculateMembershipBenefits = async (
       AND o.created_at >= $2
     `,
     [
-            publicUserId,
+      userId,
       membership.start_date,
     ]
   );

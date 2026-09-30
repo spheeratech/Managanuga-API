@@ -3,55 +3,6 @@ const Notification = require("../models/Notification");
 const { sendPushNotification } = require("../services/fcmService");
 
 // =====================================================
-// RESOLVE USER ID
-// =====================================================
-
-const resolveUserId = async (userId) => {
-  const cleanUserId = String(userId || "").trim();
-
-  if (!cleanUserId) {
-    throw new Error("userId is required");
-  }
-
-  if (/^\d+$/.test(cleanUserId)) {
-    const numericId = Number(cleanUserId);
-
-    const result = await pool.query(
-      `
-      SELECT id
-      FROM user_login
-      WHERE id = $1
-        AND is_active = 1
-      LIMIT 1
-      `,
-      [numericId]
-    );
-
-    if (result.rowCount === 0) {
-      throw new Error("User not found");
-    }
-
-    return result.rows[0].id;
-  }
-  const result = await pool.query(
-    `
-    SELECT id
-    FROM user_login
-    WHERE user_id = $1
-      AND is_active = 1
-    LIMIT 1
-    `,
-    [cleanUserId]
-  );
-
-  if (result.rowCount === 0) {
-    throw new Error("User not found");
-  }
-
-  return result.rows[0].id;
-};
-
-// =====================================================
 // GET ALL NOTIFICATIONS
 // =====================================================
 
@@ -66,18 +17,9 @@ const getNotifications = async (req, res) => {
       });
     }
 
-    const resolvedUserId = await resolveUserId(userId);
-
-    if (!resolvedUserId) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
     const notifications =
       await Notification.getUserNotifications(
-        resolvedUserId
+        userId
       );
 
     res.status(200).json({
@@ -112,18 +54,9 @@ const getUnreadCount = async (req, res) => {
       });
     }
 
-    const resolvedUserId = await resolveUserId(userId);
-
-    if (!resolvedUserId) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
     const count =
       await Notification.getUnreadCount(
-        resolvedUserId
+        userId
       );
 
     res.status(200).json({
@@ -159,20 +92,10 @@ const markAsRead = async (req, res) => {
       });
     }
 
-    const resolvedUserId =
-      await resolveUserId(userId);
-
-    if (!resolvedUserId) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
     const notification =
       await Notification.markAsRead(
         id,
-        resolvedUserId
+        userId
       );
 
     if (!notification) {
@@ -214,18 +137,8 @@ const markAllAsRead = async (req, res) => {
       });
     }
 
-    const resolvedUserId =
-      await resolveUserId(userId);
-
-    if (!resolvedUserId) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
     await Notification.markAllAsRead(
-      resolvedUserId
+      userId
     );
 
     res.status(200).json({
@@ -270,20 +183,10 @@ const createTestNotification = async (
       });
     }
 
-    const resolvedUserId =
-      await resolveUserId(userId);
-
-    if (!resolvedUserId) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
     // Save notification in database
     const notification =
       await Notification.createNotification({
-        userId: resolvedUserId,
+        userId,
         title,
         message,
         type: type || "GENERAL",
@@ -298,10 +201,10 @@ const createTestNotification = async (
         user_id,
         fcm_token
       FROM user_login
-      WHERE id = $1
+      WHERE user_id = $1
       LIMIT 1
       `,
-      [resolvedUserId]
+      [userId]
     );
 
     const user = result.rows[0];
