@@ -1779,6 +1779,42 @@ try {
     `Transaction order ID ${razorpay_order_id} saved`
   );
 
+  /* ===================================================
+   UPDATE MEMBERSHIP USAGE
+=================================================== */
+
+if (membershipBenefits) {
+
+  try {
+
+    await Membership.updateMembershipUsage({
+      userId,
+
+      litresUsed:
+        membershipBenefits.totalLitres,
+
+      walletUsed:
+        membershipBenefits.walletClaim,
+
+      orderId:
+        createdOrder.id,
+    });
+
+    console.log(
+      `Membership usage updated for order ${createdOrder.order_id}`
+    );
+
+  } catch (membershipUsageError) {
+
+    console.error(
+      "MEMBERSHIP USAGE UPDATE ERROR:",
+      membershipUsageError.message
+    );
+
+    throw membershipUsageError;
+  }
+}
+
 } catch (orderPaymentError) {
 
   console.error(
