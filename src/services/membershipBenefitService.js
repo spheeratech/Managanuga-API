@@ -243,12 +243,60 @@ const processMembershipBenefit = async ({
   }
 
 
-  /*
+    /*
    * ==========================================================
    * CREDIT BENEFITS
    * ==========================================================
    */
+
+  /*
+   * ==========================================================
+   * CHECK EXISTING BENEFIT FOR EACH BENEFICIARY
+   * ==========================================================
+   *
+   * A reseller/vendor should receive the membership benefit
+   * from this customer only once.
+   *
+   * Check:
+   *   customer + beneficiary + beneficiary role
+   */
+  const newBenefits = [];
+
   for (const benefit of benefits) {
+    const existingBenefitResult = await client.query(
+      `
+      SELECT 1
+      FROM benefits
+      WHERE
+        customer_id = $1
+        AND beneficiary_id = $2
+        AND beneficiary_role = $3
+        AND status = 'CREDITED'
+      LIMIT 1
+      `,
+      [
+        String(customerId).trim(),
+        String(benefit.beneficiaryId).trim(),
+        benefit.beneficiaryRole,
+      ]
+    );
+
+    if (existingBenefitResult.rows.length > 0) {
+      console.log(
+        `Benefit already exists for customer ${customerId} -> ${benefit.beneficiaryId} (${benefit.beneficiaryRole}). Skipping.`
+      );
+
+      continue;
+    }
+
+    newBenefits.push(benefit);
+  }
+
+  /*
+   * Credit only beneficiaries who have not already received
+   * a credited benefit from this customer.
+   */
+  for (const benefit of newBenefits) {
 
     /*
      * --------------------------------------------------------

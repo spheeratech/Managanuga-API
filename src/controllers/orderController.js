@@ -171,14 +171,14 @@ if (!user_id) {
       if (orderDetails?.phone) {
         await sendOrderConfirmation({
           mobile: orderDetails.phone,
-          orderId: order.id,
+          orderId: order.order_id,
           products: productNames,
           orderSummary,
         });
 
         console.log(
           "WHATSAPP ORDER CONFIRMATION SENT FOR ORDER:",
-          order.id
+         order.order_id
         );
       } else {
         console.log(
