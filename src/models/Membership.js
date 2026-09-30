@@ -564,21 +564,6 @@ const updateMembershipUsage = async ({
       throw new Error("User not found");
     }
 
-    /*
-     * Resolve INTERNAL ID specifically for
-     * membership_wallet_transactions.user_id.
-     */
-    const resolvedInternalUserId =
-      await resolveInternalUserId(
-        resolvedPublicUserId,
-        client
-      );
-
-    if (!resolvedInternalUserId) {
-      throw new Error(
-        "Internal user ID not found"
-      );
-    }
 
     /*
      * Lock the active membership.
@@ -674,7 +659,7 @@ const updateMembershipUsage = async ({
         `,
         [
           updatedMembership.id,
-          resolvedInternalUserId,
+          resolvedPublicUserId,
           orderId,
           Number(walletUsed),
           Number(
