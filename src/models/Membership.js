@@ -177,6 +177,7 @@ const createMembership = async ({
     UPDATE user_memberships
     SET
       status = 'EXPIRED',
+       is_active = 0,
       updated_at = NOW()
     WHERE
       user_id = $1
@@ -202,9 +203,10 @@ const createMembership = async ({
       terms_and_conditions,
       assigned_by,
       assigned_role,
-      referral_code
+      referral_code,
+      is_active
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
     RETURNING *;
     `,
     [
@@ -218,7 +220,8 @@ const createMembership = async ({
       termsAndConditions,
       assignedBy,
       assignedRole,
-      referralCode
+      referralCode,
+      1
     ]
   );
 
