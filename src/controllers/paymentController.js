@@ -1575,30 +1575,14 @@ try {
         createdOrder
       );
 
-
       /* ===================================================
          ORDER ID
       =================================================== */
-const createdOrderDbId = createdOrder.id;
-const createdOrderId = createdOrder.order_id;
 
-if (!createdOrderDbId || !createdOrderId) {
-  console.error(
-    "Created order does not contain required order IDs:",
-    createdOrder
-  );
+      const createdOrderDbId = createdOrder.id;
+      const createdOrderId = createdOrder.order_id;
 
-  return res.status(500).json({
-    success: false,
-    message: "Order created but order ID was not returned",
-  });
-}
-        console.error(
-          "Created order does not contain order ID:",
-          createdOrder
-        );
-
-
+      if (!createdOrderDbId || !createdOrderId) {
         return res.status(500).json({
           success: false,
           message:
@@ -2058,6 +2042,7 @@ return res.json({
   message:
     "Payment verified and order created successfully.",
 });
+    }
 
 
 
