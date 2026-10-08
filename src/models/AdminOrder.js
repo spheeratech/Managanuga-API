@@ -102,7 +102,7 @@ const createAdminOrder = async ({
       INSERT INTO orders
       (
         user_id,
-        total_amount,
+        actual_amount AS total_amount,
         warehouse_id,
         status,
         payment_status
@@ -132,7 +132,7 @@ const createAdminOrder = async ({
 
     await client.query(
       `
-      INSERT INTO order_items
+      INSERT INTO order_items_old
       (
         order_id,
         item_type,
@@ -220,7 +220,7 @@ const getAdminOrders = async () => {
     SELECT
       o.id,
       o.user_id,
-      o.total_amount,
+      o.actual_amount AS total_amount,
       o.warehouse_id,
       o.status,
       o.payment_status,
@@ -337,7 +337,7 @@ const getAdminOrderById = async (id) => {
       oi.unit_price,
       (oi.quantity * oi.unit_price) AS subtotal
 
-    FROM order_items oi
+    FROM order_items_old oi
 
     JOIN products p
       ON p.id = oi.item_id
@@ -414,7 +414,7 @@ const deleteAdminOrder = async (id) => {
       SELECT
         item_id,
         quantity
-      FROM order_items
+      FROM order_items_old
       WHERE order_id = $1::integer
       `,
       [Number(id)],
@@ -441,7 +441,7 @@ const deleteAdminOrder = async (id) => {
 
     await client.query(
       `
-      DELETE FROM order_items
+      DELETE FROM order_items_old
       WHERE order_id = $1::integer
       `,
       [Number(id)],
@@ -489,7 +489,7 @@ const deleteAllAdminOrders = async () => {
       SELECT
         item_id,
         quantity
-      FROM order_items
+      FROM order_items_old
     `);
 
     // --------------------------------
@@ -512,7 +512,7 @@ const deleteAllAdminOrders = async () => {
     // --------------------------------
 
     await client.query(`
-      DELETE FROM order_items
+      DELETE FROM order_items_old
     `);
 
     // --------------------------------
@@ -552,8 +552,8 @@ const verifyAdminOrder = async (
     UPDATE orders
     SET
       status = $1,
-      admin_verified = 1,
-      admin_accepted = 1,
+       admin_verified = TRUE,
+       admin_accepted = TRUE,
       delivery_method = $2
     WHERE id = $3::integer
     RETURNING *

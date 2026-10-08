@@ -5,6 +5,7 @@ const router = express.Router();
 const {
   createUser,
   getAllUsers,
+  getUsersByVendorId,
   getUserById,
   updateUserStatus,
   loginUser,
@@ -16,7 +17,7 @@ router.post("/", createUser);
 router.post("/login", loginUser);
 
 router.get("/", getAllUsers);
-
+router.get("/vendor-users", getUsersByVendorId);
 // router.get("/:userId", getUserById);
 
 router.put("/:userId", updateUser);

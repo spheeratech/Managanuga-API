@@ -180,6 +180,20 @@ const AdminUser = {
 
     return result.rows;
   },
+  // --------------------------------------------------
+  // GET USERS BY VENDOR
+  // --------------------------------------------------
+  async getUsersByVendorId(vendorUserId) {
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM public.get_users_by_vendor_id($1)
+      `,
+      [vendorUserId],
+    );
+
+    return result.rows;
+  },
 
   // --------------------------------------------------
   // GET USER BY ID
