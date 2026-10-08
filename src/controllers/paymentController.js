@@ -1825,7 +1825,7 @@ try {
       userId,
 
     order_id:
-      createdOrderId,
+     createdOrderDbId,
 
     order_type:
       "ORDER",
@@ -1879,7 +1879,7 @@ try {
         "ORDER_PLACED",
 
       referenceId:
-        createdOrderId,
+         createdOrderDbId,
     });
 
   console.log(
