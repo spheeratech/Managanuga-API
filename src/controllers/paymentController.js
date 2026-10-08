@@ -1579,13 +1579,20 @@ try {
       /* ===================================================
          ORDER ID
       =================================================== */
+const createdOrderDbId = createdOrder.id;
+const createdOrderId = createdOrder.order_id;
 
-      const createdOrderId =
-        createdOrder.id ||
-        createdOrder.order_id;
+if (!createdOrderDbId || !createdOrderId) {
+  console.error(
+    "Created order does not contain required order IDs:",
+    createdOrder
+  );
 
-
-      if (!createdOrderId) {
+  return res.status(500).json({
+    success: false,
+    message: "Order created but order ID was not returned",
+  });
+}
         console.error(
           "Created order does not contain order ID:",
           createdOrder
@@ -1688,7 +1695,7 @@ try {
             walletClaim,
             deliveryCharge,
             payableAmount,
-            createdOrderId,
+            createdOrderDbId,
           ]
         );
 
@@ -1764,7 +1771,7 @@ try {
     `,
     [
       razorpay_order_id,
-      createdOrderId,
+      createdOrderDbId,
     ]
   );
 
