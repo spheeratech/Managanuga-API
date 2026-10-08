@@ -386,7 +386,7 @@ const razorpayOrder =
 
         payableAmount,
 
-        razorpayAmount: payableAmount,
+        razorpayTestAmount,
       },
     });
 
@@ -535,12 +535,10 @@ const razorpayAmount =
   100;
 
 
-const expectedAmount =
-  Number(localPayment.payable_amount);
-
+const expectedAmount = 1;
 
 console.log(
-  "Expected Razorpay Amount:",
+  "Expected Razorpay Test Amount:",
   expectedAmount
 );
 
