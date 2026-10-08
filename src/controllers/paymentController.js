@@ -323,11 +323,12 @@ const publicUserId = user_id;
        actualAmount and payableAmount.
     ===================================================== */
 
-   const razorpayOrder =
-  await razorpayService.createRazorpayOrder(
-    payableAmount
-  );
+  const razorpayTestAmount = 1;
 
+const razorpayOrder =
+  await razorpayService.createRazorpayOrder(
+    razorpayTestAmount
+  );
 
     console.log(
       "RAZORPAY ORDER:",
