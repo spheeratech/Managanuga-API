@@ -19,16 +19,49 @@ const getDistricts = async (req, res) => {
   }
 };
 
+// const getCities = async (req, res) => {
+//   try {
+//     const districtName = req.query.district_name || req.query.district_id || "";
+//     const data = await Hub.getCitiesByDistrict(districtName);
+//     res.json({ success: true, data });
+//   } catch (error) {
+//     res.status(500).json({ success: false, message: error.message });
+//   }
+// };
 const getCities = async (req, res) => {
   try {
-    const districtName = req.query.district_name || req.query.district_id || "";
-    const data = await Hub.getCitiesByDistrict(districtName);
-    res.json({ success: true, data });
+    const districtName = String(req.query.district_name || "").trim();
+
+    const stateId = String(req.query.state_id || "").trim();
+
+    console.log("================================");
+    console.log("GET CITIES");
+    console.log("District:", districtName);
+    console.log("State ID:", stateId);
+    console.log("================================");
+
+    if (!districtName || !stateId) {
+      return res.json({
+        success: true,
+        data: [],
+      });
+    }
+
+    const data = await Hub.getCitiesByDistrict(districtName, stateId);
+
+    return res.json({
+      success: true,
+      data,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("GET CITIES ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
-
 const getPincodes = async (req, res) => {
   try {
     const { city_id } = req.query;

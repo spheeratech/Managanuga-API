@@ -1,6 +1,7 @@
 const AdminOrder = require("../models/AdminOrder");
 const xpressbeesService = require("../services/xpressbeesService");
 const Warehouse = require("../models/Warehouse");
+const { sendSMS } = require("../services/smsService");
 
 const createAdminOrder = async (req, res) => {
   try {
@@ -249,6 +250,32 @@ const verifyAdminOrder = async (req, res) => {
         success: false,
         message: "Order not found",
       });
+    }
+    try {
+      const customerPhone = existingOrder.customer_phone;
+
+      if (customerPhone) {
+        const confirmationMessage = `ManaGanuga: Order ${order.id} confirmed successfully. Thank you for shopping with us.`;
+
+        await sendSMS(
+          String(customerPhone),
+          confirmationMessage,
+          process.env.SMS_ORDER_CONFIRMED_TEMPLATE_ID,
+        );
+
+        console.log(
+          `ORDER CONFIRMATION SMS SENT: Order ${order.id} -> ${customerPhone}`,
+        );
+      } else {
+        console.warn(
+          `ORDER CONFIRMATION SMS SKIPPED: No mobile number for order ${order.id}`,
+        );
+      }
+    } catch (smsError) {
+      console.error(
+        `ORDER CONFIRMATION SMS FAILED FOR ORDER ${order.id}:`,
+        smsError.message,
+      );
     }
 
     // --------------------------------
