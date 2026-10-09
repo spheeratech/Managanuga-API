@@ -293,42 +293,33 @@ const createUser = async (req, res) => {
     );
     console.log("========================================");
     await client.query("COMMIT");
-    let smsSent = false;
+let smsSent = false;
 
-    try {
-      const passwordMessage =
-        `We are delighted to have you with us. Your account for managanuga has been created successfully.\n` +
-        `User ID: ${clean(mobileNo)}\n` +
-        `Password: ${generatedPassword}\n` +
-        `For your peace of mind, we recommend updating your password after your first login.\n` +
-        `managanuga`;
+if (targetRole === "RESELLER") {
+  try {
+   const passwordMessage =
+  `We are delighted to welcome you to the ManaGanuga Reseller Network!\n\n` +
+  `Your reseller account has been created successfully. Please find your login credentials below:\n\n` +
+  `👤 User ID: ${clean(mobileNo)}\n` +
+  `🔐 Password: ${generatedPassword}\n` +
+  `We recommend changing your password after your first login.\n\n` +
+  `You can now log in to your ManaGanuga account and get started with your reseller journey.\n\n` +
+  `For any assistance, please contact our support team.`;
 
-      console.log(
-        "PASSWORD SMS TEMPLATE:",
-        process.env.SMS_PASSWORD_TEMPLATE_ID,
-      );
+    await sendSMS(
+      clean(mobileNo),
+      passwordMessage,
+      process.env.SMS_RESELLER_TEMPLATE_ID,
+    );
 
-      console.log("PASSWORD SMS MOBILE:", clean(mobileNo));
-
-      console.log("PASSWORD SMS USER ID:", clean(mobileNo));
-
-      console.log("PASSWORD SMS PASSWORD:", generatedPassword);
-
-      await sendSMS(
-        clean(mobileNo),
-        passwordMessage,
-        process.env.SMS_PASSWORD_TEMPLATE_ID,
-      );
-
-      smsSent = true;
-
-      console.log("✅ Registration SMS sent successfully");
-    } catch (smsError) {
-      console.error(
-        "⚠️ User created, but registration SMS failed:",
-        smsError.message,
-      );
-    }
+    smsSent = true;
+  } catch (smsError) {
+    console.error(
+      "Reseller created, but registration SMS failed:",
+      smsError.message
+    );
+  }
+}
     // return res.status(201).json({
     //   success: true,
     //   message: `${targetRole} created successfully`,
