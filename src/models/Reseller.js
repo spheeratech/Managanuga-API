@@ -1,4 +1,5 @@
 const pool = require("../../db");
+const { getRoleName } = require("../utils/userRoles");
 
 const getCustomers = async (userId) => {
   const cleanUserId = String(userId).trim();
@@ -37,7 +38,7 @@ const getCustomers = async (userId) => {
    * Only customers who actually purchased an ACTIVE membership
    * through this reseller's referral code.
    */
-  if (currentUser.role === "RESELLER") {
+  if (Number(currentUser.role) === 4) {
     const result = await pool.query(
       `
       SELECT * FROM get_customers_by_referalid($1)
@@ -45,7 +46,13 @@ const getCustomers = async (userId) => {
       [cleanUserId]
     );
 
-    return result.rows;
+    return result.rows.map((user) => {
+      const roleName = getRoleName(user.role);
+      if (!roleName) {
+        throw new Error(`Unknown role returned for user ${user.user_id}`);
+      }
+      return { ...user, role: roleName };
+    });
   }
 
 
@@ -70,14 +77,14 @@ const getCustomers = async (userId) => {
    * This represents the actual payable/paid amount for each order,
    * rather than the original item/order total.
    */
-  if (currentUser.role === "VENDOR") {
+  if (Number(currentUser.role) === 3) {
     const result = await pool.query(
       `
       SELECT
         ul.user_id,
         ul.username,
         ul.mobile_no,
-        ul.role,
+        ur.role_name AS role,
 
         COUNT(o.id)::INTEGER AS total_orders,
 
@@ -95,17 +102,19 @@ const getCustomers = async (userId) => {
 
       LEFT JOIN orders o
         ON o.user_id = ul.user_id
+      LEFT JOIN user_roles ur
+        ON ur.id = ul.role
 
       WHERE
         ul.assigned_by = $1
-        AND ul.role IN ('USER', 'CUSTOMER')
+        AND ul.role IN (5, 6)
         AND ul.is_active = 1
 
       GROUP BY
         ul.user_id,
         ul.username,
         ul.mobile_no,
-        ul.role
+        ur.role_name
 
       ORDER BY
         ul.username ASC;
@@ -193,7 +202,7 @@ const getProfile = async (userId) => {
 
     WHERE
       ul.user_id = $1
-      AND ul.role = 'RESELLER'
+      AND ul.role = 4
       AND ul.is_active = 1
 
     LIMIT 1;

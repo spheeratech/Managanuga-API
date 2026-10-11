@@ -5,6 +5,7 @@ const clean = (val) =>
   val && String(val).trim() !== "" ? String(val).trim() : null;
 const { sendSMS } = require("../services/smsService");
 const crypto = require("crypto");
+const { ROLE_IDS_BY_NAME } = require("../utils/userRoles");
 const generatePassword = (length = 8) => {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
@@ -151,7 +152,7 @@ const createUser = async (req, res) => {
     // --------------------------------------------------
     // VERIFY CREATOR ROLE MATCHES DATABASE
     // --------------------------------------------------
-    if (creator.role !== normalizedCreatorRole) {
+    if (Number(creator.role) !== ROLE_IDS_BY_NAME[normalizedCreatorRole]) {
       return res.status(403).json({
         success: false,
         message: "Creator role does not match the selected creator user",
@@ -333,7 +334,7 @@ if (targetRole === "RESELLER") {
       data: {
         userId: user.login.user_id,
         username: user.login.username,
-        role: user.login.role,
+        role: targetRole,
 
         firstName: user.info.first_name,
         lastName: user.info.last_name,
@@ -554,13 +555,14 @@ const loginUser = async (req, res) => {
         l.username,
         l.mobile_no,
         l.password,
-        l.role,
+        ur.role_name AS role,
         l.is_active,
         i.first_name,
         i.last_name,
         i.email
       FROM user_login l
       LEFT JOIN user_info i ON l.user_id = i.user_id
+      LEFT JOIN user_roles ur ON ur.id = l.role
       WHERE LOWER(i.email) = LOWER($1) 
          OR LOWER(l.username) = LOWER($1) 
          OR l.mobile_no = $1

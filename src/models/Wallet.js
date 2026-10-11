@@ -28,7 +28,12 @@ const Wallet = {
       WHERE
         w.user_id = $1
         AND ul.is_active = 1
-        AND ul.role = w.wallet_type
+        AND EXISTS (
+          SELECT 1
+          FROM user_roles ur
+          WHERE ur.id = ul.role
+            AND UPPER(TRIM(ur.role_name)) = UPPER(TRIM(w.wallet_type))
+        )
       LIMIT 1
       `,
       [walletUserId]
@@ -107,7 +112,12 @@ const Wallet = {
         WHERE
           w.user_id = $1
           AND ul.is_active = 1
-          AND ul.role = w.wallet_type
+          AND EXISTS (
+            SELECT 1
+            FROM user_roles ur
+            WHERE ur.id = ul.role
+              AND UPPER(TRIM(ur.role_name)) = UPPER(TRIM(w.wallet_type))
+          )
         FOR UPDATE
         `,
         [walletUserId]

@@ -7,7 +7,7 @@ const getCustomers = async (vendorId) => {
       ul.user_id,
       ul.username,
       ul.mobile_no,
-      ul.role,
+      ur.role_name AS role,
 
       COUNT(o.id)::INTEGER AS total_orders,
 
@@ -20,16 +20,18 @@ const getCustomers = async (vendorId) => {
 
     LEFT JOIN orders o
       ON o.user_id = ul.user_id
+    LEFT JOIN user_roles ur
+      ON ur.id = ul.role
 
     WHERE ul.assigned_by = $1
-      AND ul.role IN ('USER', 'CUSTOMER')
+      AND ul.role IN (5, 6)
       AND ul.is_active = 1
 
     GROUP BY
       ul.user_id,
       ul.username,
       ul.mobile_no,
-      ul.role
+      ur.role_name
 
     ORDER BY ul.username ASC;
     `,
@@ -75,7 +77,7 @@ const getOrders = async (vendorId) => {
       ON ul.user_id = o.user_id
 
     WHERE ul.assigned_by = $1
-      AND ul.role IN ('USER', 'CUSTOMER')
+      AND ul.role IN (5, 6)
       AND ul.is_active = 1
 
     ORDER BY o.created_at DESC;
@@ -141,7 +143,7 @@ const getProfile = async (userId) => {
       ON ui.user_id = ul.user_id
 
     WHERE ul.user_id = $1
-      AND ul.role = 'VENDOR'
+      AND ul.role = 3
       AND ul.is_active = 1
 
     LIMIT 1;

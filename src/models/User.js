@@ -43,16 +43,32 @@ const findById = async (userId) => {
 // This function is kept for compatibility with any old
 // controller that may still call User.create().
 const create = async ({ mobile }) => {
+  const roleResult = await pool.query(
+    `
+    SELECT id
+    FROM user_roles
+    WHERE id = 6
+      AND UPPER(TRIM(role_name)) = 'USER'
+      AND is_active = 1
+    LIMIT 1
+    `
+  );
+
+  if (roleResult.rows.length === 0) {
+    throw new Error("Active USER role not found in user_roles");
+  }
+
   const result = await pool.query(
     `
     INSERT INTO user_login (
       mobile_no,
+      role,
       is_active
     )
-    VALUES ($1, 1)
+    VALUES ($1, $2, 1)
     RETURNING *
     `,
-    [mobile]
+    [mobile, roleResult.rows[0].id]
   );
 
   return result.rows[0];

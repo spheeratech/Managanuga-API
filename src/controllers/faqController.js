@@ -1,5 +1,6 @@
 const FAQ = require("../models/FAQ");
 const pool = require("../../db");
+const { getRoleName } = require("../utils/userRoles");
 
 const getFAQs = async (req, res) => {
   try {
@@ -15,15 +16,17 @@ const getFAQs = async (req, res) => {
     const loginResult = await pool.query(
       `
       SELECT
-        user_id,
-        id AS login_id,
-        role
+        user_login.user_id,
+        user_login.id AS login_id,
+        ur.role_name AS role
       FROM user_login
+      LEFT JOIN user_roles ur
+        ON ur.id = user_login.role
       WHERE (
-        user_id = $1
-        OR id::text = $1
+        user_login.user_id = $1
+        OR user_login.id::text = $1
       )
-      AND is_active = 1
+      AND user_login.is_active = 1
       LIMIT 1
       `,
       [String(userId).trim()]
@@ -38,10 +41,19 @@ const getFAQs = async (req, res) => {
       });
     }
 
+    // Convert numeric role ID to role name.
+    const loginRole = getRoleName(loginUser.role);
+
+    if (!loginRole) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user role",
+      });
+    }
+
+    // Customer FAQ uses the USER FAQ document.
     const faqRole =
-      String(loginUser.role).toUpperCase() === "CUSTOMER"
-        ? "USER"
-        : String(loginUser.role).toUpperCase();
+      loginRole === "CUSTOMER" ? "USER" : loginRole;
 
     if (!["USER", "VENDOR", "RESELLER"].includes(faqRole)) {
       return res.status(400).json({
@@ -61,15 +73,15 @@ const getFAQs = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-     data: {
-  user_id: loginUser.user_id,
-  login_id: loginUser.login_id,
-  login_role: loginUser.role,
-  faq_role: faqRole,
-  document_type: faq.document_type,
-  document_link: faq.document_link,
-  faqs: faq.faqs,
-},
+      data: {
+        user_id: loginUser.user_id,
+        login_id: loginUser.login_id,
+        login_role: loginRole,
+        faq_role: faqRole,
+        document_type: faq.document_type,
+        document_link: faq.document_link,
+        faqs: faq.faqs,
+      },
     });
   } catch (error) {
     console.error("Get FAQs error:", error);
