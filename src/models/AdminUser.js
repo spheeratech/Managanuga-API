@@ -1,4 +1,5 @@
 const pool = require("../../db");
+const { getRoleName } = require("../utils/userRoles");
 
 const AdminUser = {
   async findByUsername(username) {
@@ -46,9 +47,28 @@ const AdminUser = {
   // --------------------------------------------------
   // CREATE USER
   // --------------------------------------------------
-  async createUser(client, loginData, infoData) {
-    const defaultPassword = "123456";
+    async createUser(client, loginData, infoData) {
+    // Resolve the numeric role ID from user_roles
+    const roleResult = await client.query(
+      `
+      SELECT id
+      FROM user_roles
+      WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
+      LIMIT 1
+      `,
+      [loginData.role]
+    );
 
+    if (roleResult.rows.length === 0) {
+      throw new Error(
+        `Role "${loginData.role}" not found in user_roles`
+      );
+    }
+
+    const roleId = roleResult.rows[0].id;
+
+    // Store the numeric role ID in the existing role column.
+    // Store the ID directly in the role column.
     const loginResult = await client.query(
       `
       INSERT INTO user_login (
@@ -69,20 +89,18 @@ const AdminUser = {
         loginData.userId,
         loginData.username,
         loginData.mobileNo,
-        // defaultPassword,
         loginData.password,
-        loginData.role,
+        roleId,
         loginData.isActive,
         loginData.createdBy || null,
         loginData.assignedBy || null,
         loginData.relationshipType || null,
-      ],
+      ]
     );
-    console.log("========================================");
-    console.log("CREATE USER - PRODUCTION DEBUG");
 
-    console.log("INFO DATA BEFORE INSERT:");
-    console.log(JSON.stringify(infoData, null, 2));
+    console.log("========================================");
+    console.log("CREATE USER");
+    console.log("Role ID:", roleId);
     console.log("========================================");
 
     const infoResult = await client.query(
@@ -105,8 +123,10 @@ const AdminUser = {
         contact_person_name,
         contact_person_mobile
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,$10,
-    $11, $12, $13, $14, $15, $16)
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14, $15, $16
+      )
       RETURNING *
       `,
       [
@@ -126,9 +146,8 @@ const AdminUser = {
         infoData.bankName || null,
         infoData.contactPersonName || null,
         infoData.contactPersonNumber || null,
-      ],
+      ]
     );
-    console.log("INSERTED USER_INFO:", infoResult.rows[0]);
 
     return {
       login: loginResult.rows[0],
@@ -146,7 +165,7 @@ const AdminUser = {
         l.user_id,
         l.username,
         COALESCE(l.mobile_no, i.mobile) AS mobile_no,
-        l.role,
+        ur.role_name AS role,
         l.is_active,
         l.created_by,
         l.assigned_by,
@@ -173,12 +192,20 @@ const AdminUser = {
 
       LEFT JOIN user_info i
         ON l.user_id = i.user_id
+      LEFT JOIN user_roles ur
+        ON ur.id = l.role
 
       ORDER BY l.created_at DESC
       `,
     );
 
-    return result.rows;
+    return result.rows.map((user) => {
+      const roleName = getRoleName(user.role);
+      if (!roleName) {
+        throw new Error(`Unknown role returned for user ${user.user_id}`);
+      }
+      return { ...user, role: roleName };
+    });
   },
   // --------------------------------------------------
   // GET USERS BY VENDOR
@@ -192,7 +219,13 @@ const AdminUser = {
       [vendorUserId],
     );
 
-    return result.rows;
+    return result.rows.map((user) => {
+      const roleName = getRoleName(user.role);
+      if (!roleName) {
+        throw new Error(`Unknown role returned for user ${user.user_id}`);
+      }
+      return { ...user, role: roleName };
+    });
   },
 
   // --------------------------------------------------
@@ -205,7 +238,7 @@ const AdminUser = {
         l.user_id,
         l.username,
         l.mobile_no,
-        l.role,
+        ur.role_name AS role,
         l.is_active,
         l.created_by,
         l.assigned_by,
@@ -233,6 +266,8 @@ const AdminUser = {
 
       LEFT JOIN user_info i
         ON l.user_id = i.user_id
+      LEFT JOIN user_roles ur
+        ON ur.id = l.role
 
       WHERE l.user_id = $1
 
@@ -250,10 +285,30 @@ const AdminUser = {
   async updateStatus(userId, isActive) {
     const result = await pool.query(
       `
-      UPDATE user_login
-      SET is_active = $1
-      WHERE user_id = $2
-      RETURNING *
+      WITH updated AS (
+        UPDATE user_login
+        SET is_active = $1
+        WHERE user_id = $2
+        RETURNING *
+      )
+      SELECT
+        updated.id,
+        updated.user_id,
+        updated.username,
+        updated.mobile_no,
+        updated.password,
+        ur.role_name AS role,
+        updated.is_active,
+        updated.created_by,
+        updated.assigned_by,
+        updated.relationship_type,
+        updated.created_at,
+        updated.fcm_token,
+        updated.deleted_at,
+        updated.deleted_by
+      FROM updated
+      LEFT JOIN user_roles ur
+        ON ur.id = updated.role
       `,
       [isActive, userId],
     );
@@ -265,6 +320,25 @@ const AdminUser = {
   // UPDATE USER
   // --------------------------------------------------
   async updateUser(client, userId, data) {
+    let roleId = null;
+    if (data.role) {
+      const roleResult = await client.query(
+        `
+        SELECT id
+        FROM user_roles
+        WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
+        LIMIT 1
+        `,
+        [data.role],
+      );
+
+      if (roleResult.rows.length === 0) {
+        throw new Error(`Role "${data.role}" not found in user_roles`);
+      }
+
+      roleId = roleResult.rows[0].id;
+    }
+
     await client.query(
       `
       UPDATE user_login
@@ -274,7 +348,7 @@ const AdminUser = {
         is_active = COALESCE($3, is_active)
       WHERE user_id = $4
       `,
-      [data.mobileNo, data.role, data.isActive, userId],
+      [data.mobileNo, roleId, data.isActive, userId],
     );
 
     const infoResult = await client.query(

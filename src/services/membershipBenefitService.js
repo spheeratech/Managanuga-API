@@ -26,7 +26,7 @@ const pool = require("../../db");
  * Example:
  *
  * assignedBy  = "MGRS260803"
- * assignedRole = "RESELLER"
+ * assignedRole = 4
  *
  * The service then determines whether that reseller has a
  * parent vendor through user_login.created_by.
@@ -65,7 +65,7 @@ const processMembershipBenefit = async ({
    *
    * Vendor gets 20%.
    */
-  if (assignedRole === "VENDOR") {
+  if (Number(assignedRole) === 3) {
 
     const vendorResult = await client.query(
       `
@@ -75,7 +75,7 @@ const processMembershipBenefit = async ({
       FROM user_login
       WHERE
         user_id = $1
-        AND role = 'VENDOR'
+        AND role = 3
         AND is_active = 1
       LIMIT 1
       `,
@@ -112,7 +112,7 @@ const processMembershipBenefit = async ({
    * CUSTOMER REFERRED / ASSIGNED TO RESELLER
    * ==========================================================
    */
-  else if (assignedRole === "RESELLER") {
+  else if (Number(assignedRole) === 4) {
 
     const resellerResult = await client.query(
       `
@@ -123,7 +123,7 @@ const processMembershipBenefit = async ({
       FROM user_login
       WHERE
         user_id = $1
-        AND role = 'RESELLER'
+        AND role = 4
         AND is_active = 1
       LIMIT 1
       `,
@@ -162,7 +162,7 @@ const processMembershipBenefit = async ({
         FROM user_login
         WHERE
           user_id = $1
-          AND role = 'VENDOR'
+          AND role = 3
           AND is_active = 1
         LIMIT 1
         `,

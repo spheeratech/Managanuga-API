@@ -16,7 +16,6 @@ const {
   sendUserRegistrationWhatsApp,
 } = require("../services/whatsappService");
 
-
 // SEND OTP
 exports.sendOtp = async (req, res) => {
   console.log("SEND OTP ROUTE HIT");
@@ -210,7 +209,7 @@ exports.verifyOtp = async (req, res) => {
         login_id: loginUser.id,
         username: loginUser.username,
         mobile: loginUser.mobile_no,
-        role: loginUser.role,
+        role: loginUser.role_name,
         requiresName: false,
       };
 
@@ -332,7 +331,7 @@ try {
       login_id: createdLoginUser.id,
       username: createdLoginUser.username,
       mobile: createdLoginUser.mobile_no,
-      role: createdLoginUser.role,
+      role: createdLoginUser.role_name,
       requiresName: true,
     };
 
@@ -403,7 +402,7 @@ exports.loginWithPassword = async (req, res) => {
       login_id: loginUser.id,
       username: loginUser.username,
       mobile: loginUser.mobile_no,
-      role: loginUser.role,
+      role: loginUser.role_name,
     };
 
     // Generate token
@@ -688,7 +687,7 @@ exports.login = async (req, res) => {
         ul.username,
         ul.mobile_no,
         ul.password,
-        ul.role,
+        ur.role_name AS role,
         ul.is_active,
         ul.created_by,
         ul.assigned_by,
@@ -699,6 +698,8 @@ exports.login = async (req, res) => {
       FROM user_login ul
       LEFT JOIN user_info ui
         ON ui.user_id = ul.user_id
+      LEFT JOIN user_roles ur
+        ON ur.id = ul.role
       WHERE
         LOWER(ul.username) = LOWER($1)
         OR LOWER(ui.email) = LOWER($1)

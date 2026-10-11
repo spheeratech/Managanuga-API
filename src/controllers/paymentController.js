@@ -4,6 +4,7 @@ const Notification = require("../models/Notification");
 const razorpayService = require("../services/razorpayService");
 const Membership = require("../models/Membership");
 const pool = require("../../db");
+const { getRoleName } = require("../utils/userRoles");
 const xpressbeesService = require("../services/xpressbeesService");
 const Cart = require("../models/Cart");
 const User = require("../models/User");
@@ -886,8 +887,8 @@ if (
     null;
 
 
-  let assignedRole =
-    null;
+  let assignedRoleId = null;
+  let assignedRole = null;
 
 
   if (assignedBy) {
@@ -903,10 +904,11 @@ if (
       );
 
 
-    assignedRole =
-      assignedUserResult
-        .rows[0]
-        ?.role || null;
+    assignedRoleId =
+      assignedUserResult.rows[0]?.role == null
+        ? null
+        : Number(assignedUserResult.rows[0].role);
+    assignedRole = getRoleName(assignedRoleId);
   }
 
 
@@ -938,7 +940,7 @@ if (
           FROM user_login ul
           WHERE ul.user_id = $1
             AND ul.is_active = 1
-            AND ul.role IN ('VENDOR', 'RESELLER')
+            AND ul.role IN (3, 4)
           LIMIT 1
         `,
         [cleanReferralCode]
@@ -976,8 +978,8 @@ if (
       referrer.referral_user_id;
 
 
-    assignedRole =
-      referrer.role;
+    assignedRoleId = Number(referrer.role);
+    assignedRole = getRoleName(assignedRoleId);
 
 
     validatedReferralCode =
@@ -1225,7 +1227,7 @@ const membershipBenefitResult =
 
     assignedBy,
 
-    assignedRole,
+    assignedRole: assignedRoleId,
 
     subscriptionAmount:
       Number(plan.plan_price),
@@ -1253,7 +1255,7 @@ try {
    */
   if (
     assignedBy &&
-    assignedRole
+    assignedRoleId
   ) {
 
     let shouldNotifyReferral =
@@ -1267,7 +1269,7 @@ try {
      * Send notification to the Vendor.
      */
     if (
-      assignedRole === "VENDOR"
+      assignedRoleId === 3
     ) {
       shouldNotifyReferral = true;
     }
@@ -1292,7 +1294,7 @@ try {
      * Send notification to the Reseller.
      */
     if (
-      assignedRole === "RESELLER"
+      assignedRoleId === 4
     ) {
 
       const resellerResult =
@@ -1302,7 +1304,7 @@ try {
               created_by
             FROM user_login
             WHERE user_id = $1
-              AND role = 'RESELLER'
+              AND role = 4
               AND is_active = 1
             LIMIT 1
           `,
@@ -1327,7 +1329,7 @@ try {
                 user_id
               FROM user_login
               WHERE user_id = $1
-                AND role = 'VENDOR'
+                AND role = 3
                 AND is_active = 1
               LIMIT 1
             `,

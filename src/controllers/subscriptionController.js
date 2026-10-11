@@ -270,7 +270,7 @@ const verifySubscriptionPayment = async (req, res) => {
         `
         UPDATE user_login
         SET
-          role = 'CUSTOMER',
+          role = 5,
           is_active = 1
         WHERE user_id = $1
         `,
@@ -405,8 +405,28 @@ const verifySubscriptionPayment = async (req, res) => {
       // Temporary password
       const temporaryPassword = phone;
 
+      // GET CUSTOMER ROLE ID
+      // ===================================================
+
+      const customerRoleResult = await client.query(
+        `
+        SELECT id
+        FROM user_roles
+        WHERE id = 5
+          AND UPPER(TRIM(role_name)) = 'CUSTOMER'
+        LIMIT 1
+        `
+      );
+
+      if (customerRoleResult.rows.length === 0) {
+        throw new Error("CUSTOMER role not found in user_roles");
+      }
+
+      const customerRoleId = customerRoleResult.rows[0].id;
+
       // ===================================================
       // INSERT USER_LOGIN
+      // Store numeric role ID in the existing role column
       // ===================================================
 
       await client.query(
@@ -429,14 +449,27 @@ const verifySubscriptionPayment = async (req, res) => {
           $2,
           $3,
           $4,
-          'CUSTOMER',
+          $5,
           1,
           'SUPER_ADMIN',
           NULL,
           'CUSTOMER'
         )
         `,
-        [userId, username, phone, temporaryPassword],
+        [
+          userId,
+          username,
+          phone,
+          temporaryPassword,
+          customerRoleId,
+        ]
+      );
+
+      console.log(
+        "New user_login created:",
+        userId,
+        "Role ID:",
+        customerRoleId
       );
 
       console.log("New user_login created:", userId);

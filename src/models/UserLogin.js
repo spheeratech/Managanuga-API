@@ -17,10 +17,14 @@ const UserLogin = {
   async findByMobile(mobile) {
     const result = await pool.query(
       `
-      SELECT *
-      FROM user_login
-      WHERE mobile_no = $1
-        AND is_active = 1
+      SELECT
+        ul.*,
+        ur.role_name
+      FROM user_login ul
+      LEFT JOIN user_roles ur
+        ON ur.id = ul.role
+      WHERE ul.mobile_no = $1
+        AND ul.is_active = 1
       LIMIT 1
       `,
       [mobile]
@@ -32,10 +36,21 @@ const UserLogin = {
   async updateFcmToken(userId, fcmToken) {
     const result = await pool.query(
       `
-      UPDATE user_login
-      SET fcm_token = $1
-      WHERE user_id = $2
-      RETURNING user_id, username, mobile_no, role, fcm_token
+      WITH updated AS (
+        UPDATE user_login
+        SET fcm_token = $1
+        WHERE user_id = $2
+        RETURNING user_id, username, mobile_no, role, fcm_token
+      )
+      SELECT
+        updated.user_id,
+        updated.username,
+        updated.mobile_no,
+        ur.role_name AS role,
+        updated.fcm_token
+      FROM updated
+      LEFT JOIN user_roles ur
+        ON ur.id = updated.role
       `,
       [fcmToken, userId]
     );
@@ -49,14 +64,13 @@ const UserLogin = {
     try {
       await client.query("BEGIN");
 
-      // Prevent two registrations for the same mobile at the same time.
+      // Prevent duplicate registrations for the same mobile.
       await client.query(
         `SELECT pg_advisory_xact_lock(hashtext($1))`,
         [`USER_REGISTRATION:${mobile}`]
       );
 
-      // If an active account already exists for this mobile,
-      // do not create another account.
+      // Check whether an active account already exists.
       const activeUserResult = await client.query(
         `
         SELECT id, user_id, username, mobile_no, role, is_active
@@ -69,10 +83,12 @@ const UserLogin = {
       );
 
       if (activeUserResult.rows.length > 0) {
-        throw new Error("An active account already exists for this mobile number");
+        throw new Error(
+          "An active account already exists for this mobile number"
+        );
       }
 
-      // Lock MGU ID generation.
+      // Lock user ID generation.
       await client.query(
         `SELECT pg_advisory_xact_lock(hashtext($1))`,
         ["MGU_USER_ID"]
@@ -88,9 +104,7 @@ const UserLogin = {
       const sequenceResult = await client.query(
         `
         SELECT COALESCE(
-          MAX(
-            CAST(RIGHT(user_id, 2) AS INTEGER)
-          ),
+          MAX(CAST(RIGHT(user_id, 2) AS INTEGER)),
           0
         ) AS last_sequence
         FROM user_login
@@ -109,9 +123,26 @@ const UserLogin = {
       const sequence = String(nextSequence).padStart(2, "0");
       const userId = `${prefix}${sequence}`;
 
-      // user_login is now the ONLY user/customer table.
-      // Its numeric primary key (id) is used internally by
-      // memberships, cart, orders and wallet transactions.
+      // Find the USER role and its numeric ID.
+      const roleResult = await client.query(
+        `
+        SELECT id, role_name
+        FROM user_roles
+        WHERE id = 6
+          AND UPPER(TRIM(role_name)) = 'USER'
+          AND is_active = 1
+        LIMIT 1
+        `
+      );
+
+      if (roleResult.rows.length === 0) {
+        throw new Error("Active USER role not found in user_roles");
+      }
+
+      const roleId = roleResult.rows[0].id;
+      const roleName = roleResult.rows[0].role_name;
+
+      // Store the numeric role ID in the existing role column.
       const loginResult = await client.query(
         `
         INSERT INTO user_login
@@ -124,8 +155,7 @@ const UserLogin = {
           created_by,
           is_active
         )
-        VALUES
-        ($1, $2, $3, $4, $5, $6, 1)
+        VALUES ($1, $2, $3, $4, $5, $6, 1)
         RETURNING *
         `,
         [
@@ -133,7 +163,7 @@ const UserLogin = {
           mobile,
           mobile,
           password,
-          "USER",
+          roleId,
           createdBy,
         ]
       );
@@ -144,15 +174,12 @@ const UserLogin = {
 
       return {
         ...createdLoginUser,
-
-        // user_login.id is now the internal numeric user ID.
+        role_name: roleName,
         numeric_user_id: createdLoginUser.id,
       };
-
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
-
     } finally {
       client.release();
     }
@@ -175,10 +202,20 @@ const UserLogin = {
   async updateUsername(userId, username) {
     const result = await pool.query(
       `
-      UPDATE user_login
-      SET username = $1
-      WHERE user_id = $2
-      RETURNING user_id, username, mobile_no, role
+      WITH updated AS (
+        UPDATE user_login
+        SET username = $1
+        WHERE user_id = $2
+        RETURNING user_id, username, mobile_no, role
+      )
+      SELECT
+        updated.user_id,
+        updated.username,
+        updated.mobile_no,
+        ur.role_name AS role
+      FROM updated
+      LEFT JOIN user_roles ur
+        ON ur.id = updated.role
       `,
       [username, userId]
     );
@@ -192,8 +229,7 @@ const UserLogin = {
     try {
       await client.query("BEGIN");
 
-      // userId is the public MGU ID.
-      // Resolve it directly to user_login.id.
+      // Resolve the public MGU user ID.
       const userResult = await client.query(
         `
         SELECT id
@@ -254,11 +290,9 @@ const UserLogin = {
       await client.query("COMMIT");
 
       return result.rows[0];
-
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
-
     } finally {
       client.release();
     }
