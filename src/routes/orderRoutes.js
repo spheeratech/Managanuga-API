@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const requireAuthenticatedRole = require("../middleware/requireAuthenticatedRole");
 
 const {
   createOrder,
@@ -11,7 +12,11 @@ const {
   trackOrder
 } = require("../controllers/orderController");
 
-router.post("/", createOrder);
+router.post(
+  "/",
+  requireAuthenticatedRole(["CUSTOMER", "USER"], "user_id", true),
+  createOrder
+);
 
 router.get("/", getOrders);
 

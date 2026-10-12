@@ -69,7 +69,7 @@ const getWishlist = async (userId) => {
 
     FROM wishlist_items w
 
-    INNER JOIN products p
+    INNER JOIN lkp_products p
       ON p.id = w.product_id
 
     WHERE w.user_id = $1
@@ -101,7 +101,7 @@ const addToWishlist = async (userId, productId) => {
   const productResult = await pool.query(
     `
     SELECT id
-    FROM products
+    FROM lkp_products
     WHERE id = $1
       AND is_active = 1
     LIMIT 1

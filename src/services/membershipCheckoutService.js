@@ -1,13 +1,21 @@
 const pool = require("../../db");
 
+const roundMoney = (value) =>
+  Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
 const calculateMembershipBenefits = async (
   userId,
   cartItems,
+  selectedMembershipId = undefined,
 ) => {
 
   // ============================================================
   // LOAD ACTIVE MEMBERSHIP
   // ============================================================
+
+  if (selectedMembershipId === null) {
+    return null;
+  }
 
   const membershipResult = await pool.query(
     `
@@ -15,15 +23,22 @@ const calculateMembershipBenefits = async (
     FROM user_memberships
     WHERE user_id = $1
       AND status = 'ACTIVE'
+      AND is_active = 1
+      AND ($2::integer IS NULL OR id = $2::integer)
     ORDER BY id DESC
     LIMIT 1
     `,
-    [userId]
+    [userId, selectedMembershipId ?? null]
   );
 
   const membership = membershipResult.rows[0];
 
   if (!membership) {
+    if (selectedMembershipId !== undefined) {
+      throw new Error(
+        "The selected membership is not active for this customer"
+      );
+    }
     return null;
   }
 
@@ -42,7 +57,8 @@ const calculateMembershipBenefits = async (
       Number(item.quantity);
 
     totalLitres +=
-      Number(item.quantity);
+      Number(item.quantity) *
+      Number(item.weight || 0);
   }
 
 
@@ -73,10 +89,11 @@ const calculateMembershipBenefits = async (
       unit_price
     )
 
-    INNER JOIN products p
+    INNER JOIN lkp_products p
       ON p.id = item_data.item_id
 
     WHERE o.user_id = $1
+      AND o.payment_status = 'PAID'
 
       AND o.status IN (
         'PLACED',
@@ -89,7 +106,7 @@ const calculateMembershipBenefits = async (
     `,
     [
       userId,
-      membership.start_date,
+      membership.last_reset_date || membership.start_date,
     ]
   );
 
@@ -101,8 +118,10 @@ const calculateMembershipBenefits = async (
 
 
   const paymentUsageLitres =
-    Number(membership.used_litres || 0) +
-    previousOrderLitres;
+    Math.max(
+      Number(membership.used_litres || 0),
+      previousOrderLitres
+    );
 
 
   const monthlyLimit =
@@ -123,16 +142,10 @@ const calculateMembershipBenefits = async (
   // MEMBERSHIP DISCOUNT CALCULATION
   // ============================================================
 
-  const usedLitres =
-    Number(
-      membership.used_litres || 0
-    );
-
-
   const remainingLitres =
     Math.max(
       monthlyLimit -
-      usedLitres,
+      paymentUsageLitres,
       0
     );
 
@@ -177,27 +190,32 @@ const calculateMembershipBenefits = async (
     const price =
       Number(item.price);
 
+    const weight =
+      Number(item.weight || 0);
 
-    const fullQty =
-      Math.min(
-        quantity,
-        remainingFullLitres
-      );
+    const itemLitres = quantity * weight;
+    const fullLitres = Math.min(
+      itemLitres,
+      remainingFullLitres
+    );
+    const fullQuantity =
+      weight > 0
+        ? fullLitres / weight
+        : 0;
 
 
     membershipDiscount +=
-      fullQty *
+      fullQuantity *
       price *
       (discountPercent / 100);
 
 
-    remainingFullLitres -=
-      fullQty;
+    remainingFullLitres -= fullLitres;
 
 
     const halfQty =
       quantity -
-      fullQty;
+      fullQuantity;
 
 
     membershipDiscount +=
@@ -243,10 +261,37 @@ const calculateMembershipBenefits = async (
 
 
   // ============================================================
-  // MEMBERS GET FREE DELIVERY
+  // The configured product-weight threshold controls free delivery.
   // ============================================================
 
-  const deliveryCharge = 0;
+  const deliveryRuleResult = await pool.query(
+    `
+    SELECT
+      delivery_cart_count,
+      delivery_charges,
+      expected_delivery_days
+    FROM delivery_charges
+    WHERE is_active = 1
+    ORDER BY id DESC
+    LIMIT 1
+    `
+  );
+
+  const deliveryRule = deliveryRuleResult.rows[0];
+  if (!deliveryRule) {
+    throw new Error("Delivery charge configuration not found");
+  }
+
+  const deliveryThreshold = Number(
+    deliveryRule.delivery_cart_count
+  );
+  const configuredDeliveryCharge = Number(
+    deliveryRule.delivery_charges
+  );
+  const deliveryCharge =
+    totalLitres >= deliveryThreshold
+      ? 0
+      : configuredDeliveryCharge;
 
 
   // ============================================================
@@ -271,7 +316,7 @@ const calculateMembershipBenefits = async (
 
     totalLitres,
 
-    usedLitres,
+    usedLitres: paymentUsageLitres,
 
     remainingLitres,
 
@@ -288,7 +333,117 @@ const calculateMembershipBenefits = async (
     walletClaim,
 
     deliveryCharge,
+    deliverySavings:
+      deliveryCharge === 0 ? configuredDeliveryCharge : 0,
+    expectedDeliveryDays:
+      deliveryRule.expected_delivery_days,
 
+    payableAmount,
+  };
+};
+
+const calculateCheckoutTotals = async (
+  userId,
+  cartItems,
+  selectedMembershipId = undefined
+) => {
+  const membershipBenefits = await calculateMembershipBenefits(
+    userId,
+    cartItems,
+    selectedMembershipId
+  );
+
+  let subtotal = 0;
+  let totalLitres = 0;
+
+  for (const item of cartItems) {
+    const quantity = Number(item.quantity);
+    const price = Number(item.price);
+    const weight = Number(item.weight || 0);
+    const stock = Number(item.stock);
+
+    if (
+      !Number.isFinite(quantity) ||
+      quantity <= 0 ||
+      !Number.isFinite(price) ||
+      price < 0 ||
+      !Number.isFinite(weight) ||
+      weight < 0 ||
+      (Number.isFinite(stock) && quantity > stock)
+    ) {
+      throw new Error("Invalid product quantity, price, weight, or stock");
+    }
+
+    subtotal += quantity * price;
+    totalLitres += quantity * weight;
+  }
+
+  let deliveryCharge = membershipBenefits?.deliveryCharge;
+  let deliverySavings = membershipBenefits?.deliverySavings;
+  let expectedDeliveryDays =
+    membershipBenefits?.expectedDeliveryDays;
+
+  if (deliveryCharge === undefined) {
+    const deliveryRuleResult = await pool.query(
+      `
+      SELECT
+        delivery_cart_count,
+        delivery_charges,
+        expected_delivery_days
+      FROM delivery_charges
+      WHERE is_active = 1
+      ORDER BY id DESC
+      LIMIT 1
+      `
+    );
+    const deliveryRule = deliveryRuleResult.rows[0];
+
+    if (!deliveryRule) {
+      throw new Error("Delivery charge configuration not found");
+    }
+
+    const configuredDeliveryCharge = Number(
+      deliveryRule.delivery_charges
+    );
+    deliveryCharge =
+      totalLitres >= Number(deliveryRule.delivery_cart_count)
+        ? 0
+        : configuredDeliveryCharge;
+    deliverySavings =
+      deliveryCharge === 0 ? configuredDeliveryCharge : 0;
+    expectedDeliveryDays = deliveryRule.expected_delivery_days;
+  }
+
+  const membershipDiscount = Number(
+    membershipBenefits?.membershipDiscount || 0
+  );
+  const walletClaim = Number(membershipBenefits?.walletClaim || 0);
+  const roundedSubtotal = roundMoney(subtotal);
+  const roundedDiscount = roundMoney(membershipDiscount);
+  const roundedClaim = roundMoney(walletClaim);
+  const roundedDelivery = roundMoney(deliveryCharge);
+  const payableAmount = roundMoney(
+    roundedSubtotal -
+    roundedDiscount -
+    roundedClaim +
+    roundedDelivery
+  );
+
+  if (!Number.isFinite(payableAmount) || payableAmount < 0) {
+    throw new Error("Invalid checkout total");
+  }
+
+  return {
+    membership: membershipBenefits?.membership || null,
+    membershipBenefits,
+    subtotal: roundedSubtotal,
+    actualAmount: roundedSubtotal,
+    totalLitres,
+    membershipDiscount: roundedDiscount,
+    walletClaim: roundedClaim,
+    deliveryCharge: roundedDelivery,
+    deliverySavings: roundMoney(deliverySavings),
+    expectedDeliveryDays,
     payableAmount,
   };
 };
@@ -296,4 +451,5 @@ const calculateMembershipBenefits = async (
 
 module.exports = {
   calculateMembershipBenefits,
+  calculateCheckoutTotals,
 };

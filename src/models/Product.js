@@ -54,7 +54,7 @@ const getProducts = async () => {
         '[]'
       ) AS product_views
 
-    FROM products p
+    FROM lkp_products p
     ORDER BY p.display_order ASC
   `);
 
@@ -102,7 +102,7 @@ const getProductById = async (id) => {
         ),
         '[]'
       ) AS product_views
-    FROM products p
+    FROM lkp_products p
     WHERE p.id = $1
   `, [id]);
 
@@ -111,7 +111,7 @@ const getProductById = async (id) => {
 
 const createProduct = async (productData) => {
   const query = `
-    INSERT INTO products (
+    INSERT INTO lkp_products (
       name,
       price,
       stock,
@@ -151,7 +151,7 @@ const updateProduct = async (id, data) => {
   const values = [...fields.map((field) => data[field]), id];
 
   const query = `
-    UPDATE products
+    UPDATE lkp_products
     SET ${setClause}
     WHERE id = $${fields.length + 1}
     RETURNING *;
@@ -163,7 +163,7 @@ const updateProduct = async (id, data) => {
 };
 const deleteProduct = async (id) => {
   const result = await pool.query(
-    "DELETE FROM products WHERE id = $1 RETURNING *",
+    "DELETE FROM lkp_products WHERE id = $1 RETURNING *",
     [id],
   );
 

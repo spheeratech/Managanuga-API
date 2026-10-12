@@ -1,4 +1,5 @@
 const express = require("express");
+const requireAuthenticatedRole = require("../middleware/requireAuthenticatedRole");
 
 const router = express.Router();
 
@@ -19,7 +20,11 @@ const {
 
 router.get("/plans", getSubscriptionPlans);
 router.get("/my-membership", getMyMembership);
-router.get("/my-membership-wallet", getMembershipWallet);
+router.get(
+  "/my-membership-wallet",
+  requireAuthenticatedRole(["CUSTOMER", "USER"], "userId", true),
+  getMembershipWallet
+);
 router.put("/accept-terms", acceptSubscriptionTerms);
 router.post("/create-order", createSubscriptionOrder);
 router.post("/validate-referral", validateReferralCode);

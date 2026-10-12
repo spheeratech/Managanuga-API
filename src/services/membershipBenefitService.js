@@ -31,13 +31,13 @@ const pool = require("../../db");
  * The service then determines whether that reseller has a
  * parent vendor through user_login.created_by.
  */
-const processMembershipBenefit = async ({
+const processMembershipBenefitInTransaction = async ({
   membershipId,
   customerId,
   assignedBy,
   assignedRole,
   subscriptionAmount,
-  client = pool,
+  client,
 }) => {
 
   /*
@@ -250,59 +250,31 @@ const processMembershipBenefit = async ({
    */
 
   /*
-   * ==========================================================
-   * CHECK EXISTING BENEFIT FOR EACH BENEFICIARY
-   * ==========================================================
-   *
-   * A reseller/vendor should receive the membership benefit
-   * from this customer only once.
-   *
-   * Check:
-   *   customer + beneficiary + beneficiary role
+   * A vendor/reseller can receive a commission from a customer
+   * only once, regardless of how many memberships are activated.
+   * The advisory lock and wallet row lock serialize concurrent
+   * attempts using only the existing wallet and ledger tables.
    */
-  const newBenefits = [];
-
   for (const benefit of benefits) {
-    const existingBenefitResult = await client.query(
-      `
-      SELECT 1
-      FROM benefits
-      WHERE
-        customer_id = $1
-        AND beneficiary_id = $2
-        AND beneficiary_role = $3
-        AND status = 'CREDITED'
-      LIMIT 1
-      `,
+    const beneficiaryId = String(benefit.beneficiaryId).trim();
+    const cleanCustomerId = String(customerId).trim();
+    const creditAmount =
+      Math.round(Number(benefit.benefitAmount) * 100) / 100;
+
+    if (!Number.isFinite(creditAmount) || creditAmount < 0) {
+      throw new Error(
+        `Invalid membership commission amount for ${beneficiaryId}`
+      );
+    }
+
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext($1))`,
       [
-        String(customerId).trim(),
-        String(benefit.beneficiaryId).trim(),
-        benefit.beneficiaryRole,
+        `MEMBERSHIP_BENEFIT:${cleanCustomerId}:` +
+          `${beneficiaryId}:${benefit.beneficiaryRole}`,
       ]
     );
 
-    if (existingBenefitResult.rows.length > 0) {
-      console.log(
-        `Benefit already exists for customer ${customerId} -> ${benefit.beneficiaryId} (${benefit.beneficiaryRole}). Skipping.`
-      );
-
-      continue;
-    }
-
-    newBenefits.push(benefit);
-  }
-
-  /*
-   * Credit only beneficiaries who have not already received
-   * a credited benefit from this customer.
-   */
-  for (const benefit of newBenefits) {
-
-    /*
-     * --------------------------------------------------------
-     * Make sure beneficiary wallet exists
-     * --------------------------------------------------------
-     */
     await client.query(
       `
       INSERT INTO wallets
@@ -317,66 +289,171 @@ const processMembershipBenefit = async ({
       DO NOTHING
       `,
       [
-        benefit.beneficiaryId,
+        beneficiaryId,
         benefit.beneficiaryRole,
       ]
     );
 
+    const walletResult = await client.query(
+      `
+      SELECT id, user_id, wallet_type, balance
+      FROM wallets
+      WHERE user_id = $1
+        AND UPPER(TRIM(wallet_type)) = $2
+        AND is_active = 1
+      FOR UPDATE
+      `,
+      [beneficiaryId, benefit.beneficiaryRole]
+    );
 
-    /*
-     * --------------------------------------------------------
-     * Credit wallet
-     * --------------------------------------------------------
-     */
-    await client.query(
+    const wallet = walletResult.rows[0];
+
+    if (!wallet) {
+      throw new Error(
+        `Active ${benefit.beneficiaryRole} wallet not found for ${beneficiaryId}`
+      );
+    }
+
+    const existingTransactionResult = await client.query(
+      `
+      SELECT 1
+      FROM wallet_transactions
+      WHERE user_id = $1
+        AND wallet_id = $2
+        AND benefited_by = $3
+        AND transaction_type = 'CREDIT'
+        AND benefit_type = 'MEMBERSHIP_COMMISSION'
+        AND status = 'COMPLETED'
+        AND is_active = 1
+      LIMIT 1
+      `,
+      [beneficiaryId, wallet.id, cleanCustomerId]
+    );
+
+    if (existingTransactionResult.rows.length > 0) {
+      console.log(
+        `Benefit already exists for customer ${cleanCustomerId} -> ${beneficiaryId} (${benefit.beneficiaryRole}). Skipping.`
+      );
+      continue;
+    }
+
+    const updatedWalletResult = await client.query(
       `
       UPDATE wallets
       SET
         balance = balance + $1,
-        updated_at = NOW()
+        updated_at = NOW(),
+        updated_by = $3
       WHERE
-        user_id = $2
+        id = $2
+        AND is_active = 1
+      RETURNING id, user_id, wallet_type, balance
       `,
       [
-        benefit.benefitAmount,
-        benefit.beneficiaryId,
+        creditAmount,
+        wallet.id,
+        cleanCustomerId,
       ]
     );
 
+    const updatedWallet = updatedWalletResult.rows[0];
 
-    /*
-     * --------------------------------------------------------
-     * Record benefit history
-     * --------------------------------------------------------
-     */
+    if (!updatedWallet) {
+      throw new Error(
+        `Unable to credit ${benefit.beneficiaryRole} wallet for ${beneficiaryId}`
+      );
+    }
+
     await client.query(
       `
-      INSERT INTO benefits
+      INSERT INTO wallet_transactions
       (
-        membership_id,
-        customer_id,
-        beneficiary_id,
-        beneficiary_role,
-        benefit_percent,
+        transaction_type,
+        description,
+        created_by,
+        user_id,
+        wallet_id,
+        benefit_percentage,
         benefit_amount,
-        status
+        benefited_by,
+        benefit_type,
+        status,
+        wallet_balance_after
       )
-      VALUES
-      ($1, $2, $3, $4, $5, $6, 'CREDITED')
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       `,
       [
-        membershipId,
-        customerId,
-        benefit.beneficiaryId,
-        benefit.beneficiaryRole,
+        "CREDIT",
+        `Membership commission [membership_id=${membershipId}; customer_id=${cleanCustomerId}; role=${benefit.beneficiaryRole}]`,
+        cleanCustomerId,
+        beneficiaryId,
+        updatedWallet.id,
         benefit.benefitPercent,
-        benefit.benefitAmount,
+        creditAmount,
+        cleanCustomerId,
+        "MEMBERSHIP_COMMISSION",
+        "COMPLETED",
+        updatedWallet.balance,
       ]
     );
   }
 
 
   return benefits;
+};
+
+const processMembershipBenefit = async ({
+  membershipId,
+  customerId,
+  assignedBy,
+  assignedRole,
+  subscriptionAmount,
+  client: suppliedClient = pool,
+}) => {
+  if (!assignedBy || !assignedRole) {
+    return processMembershipBenefitInTransaction({
+      membershipId,
+      customerId,
+      assignedBy,
+      assignedRole,
+      subscriptionAmount,
+      client: suppliedClient,
+    });
+  }
+
+  if (suppliedClient !== pool) {
+    return processMembershipBenefitInTransaction({
+      membershipId,
+      customerId,
+      assignedBy,
+      assignedRole,
+      subscriptionAmount,
+      client: suppliedClient,
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const result = await processMembershipBenefitInTransaction({
+      membershipId,
+      customerId,
+      assignedBy,
+      assignedRole,
+      subscriptionAmount,
+      client,
+    });
+
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 

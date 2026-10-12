@@ -3,7 +3,7 @@ const pool = require("../../db");
 const getPlans = async () => {
   const result = await pool.query(`
     SELECT *
-    FROM subscription_plans
+    FROM lkp_subscription_plans
     WHERE is_active = 1
     ORDER BY display_order ASC
   `);
@@ -15,10 +15,18 @@ const getPlans = async () => {
 const acceptTerms = async (userId) => {
   const result = await pool.query(
     `
-    UPDATE membership
-    SET terms_conditions = 1
-    WHERE user_id = $1
-    RETURNING *
+    UPDATE user_memberships
+    SET terms_and_conditions = TRUE
+    WHERE id = (
+      SELECT id
+      FROM user_memberships
+      WHERE user_id = $1
+        AND status = 'ACTIVE'
+        AND is_active = 1
+      ORDER BY id DESC
+      LIMIT 1
+    )
+    RETURNING *, terms_and_conditions AS terms_conditions
     `,
     [userId],
   );
@@ -32,7 +40,7 @@ const acceptTerms = async (userId) => {
 const getAdminPlans = async () => {
   const result = await pool.query(`
     SELECT *
-    FROM subscription_plans
+    FROM lkp_subscription_plans
     ORDER BY display_order ASC, id ASC
   `);
 
@@ -52,7 +60,7 @@ const createPlan = async ({
 }) => {
   const result = await pool.query(
     `
-    INSERT INTO subscription_plans
+    INSERT INTO lkp_subscription_plans
     (
       plan_name,
       plan_price,
@@ -88,9 +96,9 @@ const createPlan = async ({
 const togglePlanStatus = async (planId) => {
   const result = await pool.query(
     `
-    UPDATE subscription_plans
+    UPDATE lkp_subscription_plans
     SET
-      is_active = NOT is_active,
+      is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = $1
     RETURNING *
@@ -109,7 +117,7 @@ const togglePlanStatus = async (planId) => {
 const deletePlan = async (planId) => {
   const result = await pool.query(
     `
-    DELETE FROM subscription_plans
+    DELETE FROM lkp_subscription_plans
     WHERE id = $1
     RETURNING *
     `,
@@ -143,7 +151,7 @@ const assignSubscription = async (userId, planName) => {
 const activatePlan = async (planId) => {
   const result = await pool.query(
     `
-    UPDATE subscription_plans
+    UPDATE lkp_subscription_plans
     SET
       is_active = 1,
       updated_at = CURRENT_TIMESTAMP
@@ -167,7 +175,7 @@ const activatePlan = async (planId) => {
 const deactivatePlan = async (planId) => {
   const result = await pool.query(
     `
-    UPDATE subscription_plans
+    UPDATE lkp_subscription_plans
     SET
       is_active = 0,
       updated_at = CURRENT_TIMESTAMP

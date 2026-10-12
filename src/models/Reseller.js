@@ -102,7 +102,7 @@ const getCustomers = async (userId) => {
 
       LEFT JOIN orders o
         ON o.user_id = ul.user_id
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = ul.role
 
       WHERE
@@ -144,24 +144,29 @@ const getBenefits = async (userId) => {
   const result = await pool.query(
     `
     SELECT
-      id,
-      membership_id,
-      customer_id,
-      beneficiary_id,
-      beneficiary_role,
-      benefit_percent,
-      benefit_amount,
-      status,
-      created_at
-
-    FROM benefits
-
-    WHERE
-      beneficiary_id = $1
-      AND beneficiary_role = 'RESELLER'
-
-    ORDER BY
-      created_at DESC;
+      wt.id,
+      NULLIF(
+        substring(wt.description FROM 'membership_id=([^;]+)'),
+        ''
+      )::INTEGER AS membership_id,
+      wt.benefited_by AS customer_id,
+      wt.user_id AS beneficiary_id,
+      w.wallet_type AS beneficiary_role,
+      wt.benefit_percentage AS benefit_percent,
+      wt.benefit_amount,
+      'CREDITED' AS status,
+      wt.created_at
+    FROM wallet_transactions wt
+    INNER JOIN wallets w
+      ON w.id = wt.wallet_id
+     AND w.user_id = wt.user_id
+    WHERE wt.user_id = $1
+      AND UPPER(TRIM(w.wallet_type)) = 'RESELLER'
+      AND wt.transaction_type = 'CREDIT'
+      AND wt.benefit_type = 'MEMBERSHIP_COMMISSION'
+      AND wt.status = 'COMPLETED'
+      AND wt.is_active = 1
+    ORDER BY wt.created_at DESC, wt.id DESC;
     `,
     [String(userId).trim()]
   );

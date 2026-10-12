@@ -12,7 +12,7 @@ const getCategories = async () => {
       description,
       is_active,
       created_at
-    FROM categories
+    FROM lkp_categories
     ORDER BY id ASC
   `);
 
@@ -31,7 +31,7 @@ const getActiveCategories = async () => {
       description,
       is_active,
       created_at
-    FROM categories
+    FROM lkp_categories
     WHERE is_active = 1
     ORDER BY name ASC
   `);
@@ -51,7 +51,7 @@ const getCategoryById = async (id) => {
       description,
       is_active,
       created_at
-    FROM categories
+    FROM lkp_categories
     WHERE id = $1
     `,
     [id],
@@ -66,7 +66,7 @@ const getCategoryById = async (id) => {
 const createCategory = async (categoryData) => {
   const result = await pool.query(
     `
-    INSERT INTO categories (
+    INSERT INTO lkp_categories (
       name,
       description,
       is_active
@@ -106,7 +106,7 @@ const updateCategory = async (id, data) => {
 
   const result = await pool.query(
     `
-    UPDATE categories
+    UPDATE lkp_categories
     SET ${setClause}
     WHERE id = $${fields.length + 1}
     RETURNING *
@@ -123,7 +123,7 @@ const updateCategory = async (id, data) => {
 const deleteCategory = async (id) => {
   const result = await pool.query(
     `
-    DELETE FROM categories
+    DELETE FROM lkp_categories
     WHERE id = $1
     RETURNING *
     `,

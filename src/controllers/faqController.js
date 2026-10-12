@@ -20,7 +20,7 @@ const getFAQs = async (req, res) => {
         user_login.id AS login_id,
         ur.role_name AS role
       FROM user_login
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = user_login.role
       WHERE (
         user_login.user_id = $1
