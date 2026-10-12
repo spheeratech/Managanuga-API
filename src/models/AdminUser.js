@@ -48,11 +48,11 @@ const AdminUser = {
   // CREATE USER
   // --------------------------------------------------
     async createUser(client, loginData, infoData) {
-    // Resolve the numeric role ID from user_roles
+    // Resolve the numeric role ID from lkp_user_roles
     const roleResult = await client.query(
       `
       SELECT id
-      FROM user_roles
+      FROM lkp_user_roles
       WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
       LIMIT 1
       `,
@@ -61,7 +61,7 @@ const AdminUser = {
 
     if (roleResult.rows.length === 0) {
       throw new Error(
-        `Role "${loginData.role}" not found in user_roles`
+        `Role "${loginData.role}" not found in lkp_user_roles`
       );
     }
 
@@ -192,7 +192,7 @@ const AdminUser = {
 
       LEFT JOIN user_info i
         ON l.user_id = i.user_id
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = l.role
 
       ORDER BY l.created_at DESC
@@ -266,7 +266,7 @@ const AdminUser = {
 
       LEFT JOIN user_info i
         ON l.user_id = i.user_id
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = l.role
 
       WHERE l.user_id = $1
@@ -307,7 +307,7 @@ const AdminUser = {
         updated.deleted_at,
         updated.deleted_by
       FROM updated
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = updated.role
       `,
       [isActive, userId],
@@ -325,7 +325,7 @@ const AdminUser = {
       const roleResult = await client.query(
         `
         SELECT id
-        FROM user_roles
+        FROM lkp_user_roles
         WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
         LIMIT 1
         `,
@@ -333,7 +333,7 @@ const AdminUser = {
       );
 
       if (roleResult.rows.length === 0) {
-        throw new Error(`Role "${data.role}" not found in user_roles`);
+        throw new Error(`Role "${data.role}" not found in lkp_user_roles`);
       }
 
       roleId = roleResult.rows[0].id;

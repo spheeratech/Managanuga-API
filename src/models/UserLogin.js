@@ -21,7 +21,7 @@ const UserLogin = {
         ul.*,
         ur.role_name
       FROM user_login ul
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = ul.role
       WHERE ul.mobile_no = $1
         AND ul.is_active = 1
@@ -49,7 +49,7 @@ const UserLogin = {
         ur.role_name AS role,
         updated.fcm_token
       FROM updated
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = updated.role
       `,
       [fcmToken, userId]
@@ -127,7 +127,7 @@ const UserLogin = {
       const roleResult = await client.query(
         `
         SELECT id, role_name
-        FROM user_roles
+        FROM lkp_user_roles
         WHERE id = 6
           AND UPPER(TRIM(role_name)) = 'USER'
           AND is_active = 1
@@ -136,7 +136,7 @@ const UserLogin = {
       );
 
       if (roleResult.rows.length === 0) {
-        throw new Error("Active USER role not found in user_roles");
+        throw new Error("Active USER role not found in lkp_user_roles");
       }
 
       const roleId = roleResult.rows[0].id;
@@ -169,6 +169,30 @@ const UserLogin = {
       );
 
       const createdLoginUser = loginResult.rows[0];
+
+      if (
+        ["CUSTOMER", "USER"].includes(
+          String(roleName).trim().toUpperCase()
+        )
+      ) {
+        await client.query(
+          `
+          INSERT INTO user_wallet
+          (
+            user_id,
+            wallet_amount,
+            prev_balance,
+            current_balance,
+            created_by,
+            updated_by,
+            is_active
+          )
+          VALUES ($1, 0, 0, 0, $1, $1, 1)
+          ON CONFLICT (user_id) DO NOTHING
+          `,
+          [createdLoginUser.user_id]
+        );
+      }
 
       await client.query("COMMIT");
 
@@ -214,7 +238,7 @@ const UserLogin = {
         updated.mobile_no,
         ur.role_name AS role
       FROM updated
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = updated.role
       `,
       [username, userId]

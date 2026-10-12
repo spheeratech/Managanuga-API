@@ -14,7 +14,7 @@ const {
 } = require("../services/fcmService");
 
 const {
-  calculateMembershipBenefits,
+  calculateCheckoutTotals,
 } = require("../services/membershipCheckoutService");
 
 const {
@@ -41,6 +41,7 @@ const {
   buyNow,
   productId,
   quantity,
+  address_id,
 } = req.body;
 
 const publicUserId = user_id;
@@ -56,9 +57,31 @@ const publicUserId = user_id;
     const paymentTypeUpper =
       (paymentType || "ORDER").toUpperCase();
 
+    if (paymentTypeUpper !== "MEMBERSHIP") {
+      const addressResult = await pool.query(
+        `
+        SELECT 1
+        FROM user_address
+        WHERE id = $1
+          AND user_id = $2
+          AND is_active = 1
+        LIMIT 1
+        `,
+        [address_id, publicUserId]
+      );
+
+      if (!addressResult.rows[0]) {
+        return res.status(400).json({
+          success: false,
+          message: "Active delivery address does not belong to this user",
+        });
+      }
+    }
+
 
     let actualAmount = 0;
     let payableAmount = 0;
+    let checkoutTotals = null;
 
 
     /* =====================================================
@@ -72,7 +95,7 @@ const publicUserId = user_id;
         await pool.query(
           `
             SELECT *
-            FROM subscription_plans
+            FROM lkp_subscription_plans
             WHERE id = $1
           `,
           [membershipPlanId]
@@ -90,7 +113,6 @@ const publicUserId = user_id;
             "Membership plan not found",
         });
       }
-
 
       actualAmount =
         Number(plan.plan_price);
@@ -128,8 +150,9 @@ const publicUserId = user_id;
                 price,
                 weight,
                 stock
-              FROM products
+              FROM lkp_products
               WHERE id = $1
+                AND is_active = 1
               LIMIT 1
             `,
             [productId]
@@ -151,11 +174,7 @@ const publicUserId = user_id;
           productResult.rows[0];
 
 
-        const buyNowQuantity =
-          Math.max(
-            1,
-            Number(quantity || 1)
-          );
+        const buyNowQuantity = Number(quantity ?? 1);
 
 
         /*
@@ -229,60 +248,12 @@ const publicUserId = user_id;
       }
 
 
-      /*
-       * Use the SAME membership calculation
-       * that Checkout Summary uses.
-       */
-      const benefits =
-        await calculateMembershipBenefits(
-          publicUserId,
-          cartItems
-        );
-
-
-      /*
-       * Calculate actual item subtotal.
-       */
-      const subtotal =
-        cartItems.reduce(
-          (sum, item) =>
-            sum +
-            Number(item.price || 0) *
-            Number(item.quantity || 0),
-          0
-        );
-
-
-      actualAmount =
-        subtotal;
-
-
-      if (benefits) {
-        /*
-         * MEMBERSHIP USER
-         *
-         * payableAmount comes from the central
-         * membership calculation service.
-         */
-        payableAmount =
-          Number(
-            benefits.payableAmount
-          );
-
-
-        console.log(
-          "Membership Benefits:",
-          benefits
-        );
-      } else {
-        /*
-         * NORMAL USER
-         *
-         * Existing delivery charge remains ₹40.
-         */
-        payableAmount =
-          subtotal + 40;
-      }
+      checkoutTotals = await calculateCheckoutTotals(
+        publicUserId,
+        cartItems
+      );
+      actualAmount = checkoutTotals.actualAmount;
+      payableAmount = checkoutTotals.payableAmount;
     }
 
 
@@ -346,8 +317,7 @@ const razorpayOrder =
 
     const payment =
       await Payment.createPayment({
-        order_id:
-          order_id || null,
+        order_id: null,
 
         tnx_order_id:
           razorpayOrder.id,
@@ -369,6 +339,12 @@ const razorpayOrder =
 
         membership_plan_id:
           membershipPlanId || null,
+
+        membership_id:
+          checkoutTotals?.membershipBenefits?.membership?.id ?? null,
+
+        created_by:
+          publicUserId,
       });
 
 
@@ -412,6 +388,9 @@ const razorpayOrder =
 ========================================================= */
 
 const verifyPayment = async (req, res) => {
+  let verificationLockClient = null;
+  let verificationLockKey = null;
+
   try {
     const {
       razorpay_order_id,
@@ -491,13 +470,30 @@ const verifyPayment = async (req, res) => {
       });
     }
 
+    if (
+      razorpayPayment.order_id !== razorpay_order_id ||
+      String(razorpayPayment.currency || "").toUpperCase() !== "INR"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment order or currency mismatch",
+      });
+    }
+
+    verificationLockKey =
+      `RAZORPAY_VERIFICATION:${razorpay_order_id}`;
+    verificationLockClient = await pool.connect();
+    await verificationLockClient.query(
+      "SELECT pg_advisory_lock(hashtext($1))",
+      [verificationLockKey]
+    );
 
     /* =====================================================
        FIND LOCAL PAYMENT
     ===================================================== */
 
     const existingPayment =
-  await pool.query(
+      await verificationLockClient.query(
     `
       SELECT *
       FROM payments
@@ -521,6 +517,46 @@ if (!localPayment) {
   });
 }
 
+if (
+  String(localPayment.payment_gateway || "").toUpperCase() !== "RAZORPAY" ||
+  String(localPayment.created_by || "") !== String(userId || "")
+) {
+  return res.status(403).json({
+    success: false,
+    message: "Payment does not belong to the authenticated user",
+  });
+}
+
+if (
+  String(localPayment.payment_type || "ORDER").toUpperCase() !==
+  String(paymentType || "ORDER").toUpperCase()
+) {
+  return res.status(409).json({
+    success: false,
+    message: "Payment type does not match the local payment request",
+  });
+}
+
+if (
+  String(localPayment.payment_type || "").toUpperCase() === "MEMBERSHIP" &&
+  Number(localPayment.membership_plan_id) !== Number(membershipPlanId)
+) {
+  return res.status(409).json({
+    success: false,
+    message: "Membership plan does not match the local payment request",
+  });
+}
+
+if (
+  localPayment.payment_id &&
+  String(localPayment.payment_id) !== String(razorpay_payment_id)
+) {
+  return res.status(409).json({
+    success: false,
+    message:
+      "A different gateway payment is already associated with this request",
+  });
+}
 
 /* =====================================================
    VERIFY RAZORPAY AMOUNT
@@ -532,9 +568,10 @@ if (!localPayment) {
    order payable amount.
 ===================================================== */
 
+const razorpayAmountPaise =
+  Number(razorpayPayment.amount);
 const razorpayAmount =
-  Number(razorpayPayment.amount) /
-  100;
+  razorpayAmountPaise / 100;
 
 
 const expectedAmount =
@@ -554,10 +591,10 @@ console.log(
 
 
 if (
-  Math.abs(
-    razorpayAmount -
-    expectedAmount
-  ) > 0.01
+  !Number.isFinite(razorpayAmountPaise) ||
+  !Number.isFinite(expectedAmount) ||
+  !Number.isInteger(razorpayAmountPaise) ||
+  Math.round(razorpayAmountPaise) !== Math.round(expectedAmount * 100)
 ) {
   return res.status(400).json({
     success: false,
@@ -577,6 +614,260 @@ const paymentId =
   razorpayPayment.id ||
   razorpay_payment_id;
 
+if (String(localPayment.status || "").toUpperCase() === "PAID") {
+  if (String(localPayment.payment_id || "") !== String(paymentId)) {
+    return res.status(409).json({
+      success: false,
+      message: "Payment was already verified with a different payment ID",
+    });
+  }
+
+  if (String(localPayment.payment_type || "").toUpperCase() === "ORDER") {
+    const existingOrderResult = await pool.query(
+      `
+      SELECT *
+      FROM orders
+      WHERE order_id = $1
+        AND user_id = $2
+        AND is_active = 1
+      LIMIT 1
+      `,
+      [localPayment.order_id, userId]
+    );
+    const existingOrder = existingOrderResult.rows[0];
+
+    if (!existingOrder) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Captured payment is marked paid but its order requires reconciliation",
+        paymentId: localPayment.id,
+      });
+    }
+
+    return res.json({
+      success: true,
+      payment: localPayment,
+      order: existingOrder,
+      orderId: existingOrder.order_id,
+      membershipBenefits: null,
+      actualAmount: Number(existingOrder.actual_amount),
+      membershipDiscount: Number(existingOrder.membership_discount || 0),
+      walletClaim: Number(existingOrder.wallet_claim || 0),
+      deliveryCharge: Number(existingOrder.delivery_charge || 0),
+      payableAmount: Number(existingOrder.payable_amount),
+      message: "Payment verified and order already created.",
+    });
+  }
+
+  if (String(localPayment.payment_type || "").toUpperCase() === "MEMBERSHIP") {
+    const membershipResult = await pool.query(
+      `
+      SELECT *
+      FROM user_memberships
+      WHERE payment_id = $1
+        AND user_id = $2
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [localPayment.id, userId]
+    );
+    if (!membershipResult.rows[0]) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Membership payment is marked paid but membership activation requires reconciliation",
+        paymentId: localPayment.id,
+      });
+    }
+
+    return res.json({
+      success: true,
+      payment: localPayment,
+      membership: membershipResult.rows[0],
+      message: "Membership payment was already verified.",
+    });
+  }
+
+  return res.status(409).json({
+    success: false,
+    message: "Paid payment has no supported reconciliation path",
+    paymentId: localPayment.id,
+  });
+}
+
+if (String(localPayment.status || "").toUpperCase() !== "PENDING") {
+  return res.status(409).json({
+    success: false,
+    message:
+      "Payment is not in a reconcilable pending state",
+    paymentId: localPayment.id,
+  });
+}
+
+const pendingOrderResult = await verificationLockClient.query(
+  `
+  SELECT *
+  FROM orders
+  WHERE tnx_order_id = $1
+    AND user_id = $2
+    AND is_active = 1
+  LIMIT 1
+  `,
+  [razorpay_order_id, userId]
+);
+const pendingOrder = pendingOrderResult.rows[0];
+
+if (pendingOrder) {
+  const paymentMembershipId =
+    localPayment.membership_id == null
+      ? null
+      : Number(localPayment.membership_id);
+  const orderMembershipId =
+    pendingOrder.membership_id == null
+      ? null
+      : Number(pendingOrder.membership_id);
+
+  if (
+    Math.round(Number(pendingOrder.payable_amount) * 100) !==
+      Math.round(expectedAmount * 100) ||
+    Math.round(Number(pendingOrder.actual_amount) * 100) !==
+      Math.round(Number(localPayment.actual_amount) * 100) ||
+    paymentMembershipId !== orderMembershipId
+  ) {
+    return res.status(409).json({
+      success: false,
+      message:
+        "Captured payment and existing order totals require reconciliation",
+      paymentId: localPayment.id,
+    });
+  }
+
+  if (
+    (Number(pendingOrder.membership_discount || 0) > 0 ||
+      Number(pendingOrder.wallet_claim || 0) > 0) &&
+    paymentMembershipId === null
+  ) {
+    return res.status(503).json({
+      success: false,
+      message:
+        "Captured membership-benefit order requires reconciliation because its membership ID is missing",
+      paymentId: localPayment.id,
+    });
+  }
+
+  await verificationLockClient.query("BEGIN");
+  try {
+    if (paymentMembershipId !== null) {
+      const litresUsed = await Membership.calculateOrderLitres(
+        pendingOrder.item_id,
+        pendingOrder.quantity,
+        verificationLockClient
+      );
+
+      await Membership.updateMembershipUsage({
+        userId,
+        membershipId: paymentMembershipId,
+        litresUsed,
+        walletUsed: Number(pendingOrder.wallet_claim || 0),
+        orderId: pendingOrder.order_id,
+        client: verificationLockClient,
+      });
+    }
+
+    const orderUpdate = await verificationLockClient.query(
+      `
+      UPDATE orders
+      SET
+        payment_status = 'PAID',
+        updated_at = CURRENT_TIMESTAMP,
+        updated_by = $1
+      WHERE id = $2
+        AND user_id = $1
+        AND tnx_order_id = $3
+        AND is_active = 1
+        AND membership_id IS NOT DISTINCT FROM $4::integer
+      RETURNING *
+      `,
+      [userId, pendingOrder.id, razorpay_order_id, paymentMembershipId]
+    );
+    const paymentUpdate = await verificationLockClient.query(
+      `
+      UPDATE payments
+      SET
+        order_id = $1,
+        status = 'PAID',
+        payment_id = $2,
+        method = $3,
+        upi_transaction_id = $4,
+        updated_at = CURRENT_TIMESTAMP,
+        updated_by = $6
+      WHERE id = $5
+        AND created_by = $6
+        AND tnx_order_id = $7
+        AND payment_gateway = 'RAZORPAY'
+        AND status = 'PENDING'
+        AND membership_id IS NOT DISTINCT FROM $8::integer
+      RETURNING *
+      `,
+      [
+        pendingOrder.order_id,
+        paymentId,
+        razorpayPayment.method || null,
+        razorpayPayment?.acquirer_data?.upi_transaction_id || null,
+        localPayment.id,
+        userId,
+        razorpay_order_id,
+        paymentMembershipId,
+      ]
+    );
+
+    if (!orderUpdate.rows[0] || !paymentUpdate.rows[0]) {
+      throw new Error("Captured payment recovery update failed");
+    }
+
+    await verificationLockClient.query("COMMIT");
+    return res.json({
+      success: true,
+      payment: paymentUpdate.rows[0],
+      order: orderUpdate.rows[0],
+      orderId: orderUpdate.rows[0].order_id,
+      membershipBenefits: null,
+      actualAmount: Number(orderUpdate.rows[0].actual_amount),
+      membershipDiscount: Number(orderUpdate.rows[0].membership_discount || 0),
+      walletClaim: Number(orderUpdate.rows[0].wallet_claim || 0),
+      deliveryCharge: Number(orderUpdate.rows[0].delivery_charge || 0),
+      payableAmount: Number(orderUpdate.rows[0].payable_amount),
+      message: "Captured payment reconciled with its existing order.",
+    });
+  } catch (recoveryError) {
+    await verificationLockClient.query("ROLLBACK");
+    throw recoveryError;
+  }
+}
+
+if (localPayment.order_id) {
+  const priorOrderResult = await pool.query(
+    `
+    SELECT id
+    FROM orders
+    WHERE order_id = $1
+      AND user_id = $2
+      AND is_active = 1
+    LIMIT 1
+    `,
+    [localPayment.order_id, userId]
+  );
+  if (priorOrderResult.rows[0]) {
+    return res.status(409).json({
+      success: false,
+      message:
+        "Captured payment is linked to an order that requires reconciliation",
+      paymentId: localPayment.id,
+    });
+  }
+}
+
 
 const method =
   razorpayPayment.method ||
@@ -590,84 +881,47 @@ const upiTransactionId =
   null;
 
 
-/* =====================================================
-   UPDATE LOCAL PAYMENT
-
-   IMPORTANT:
-   Keep REAL actual/payable amounts.
-===================================================== */
-
-let payment =
-  await Payment.updateByTnxOrderId(
+let payment = localPayment;
+const updateLocalPayment = async (status) => {
+  const updatedPayment = await Payment.updateByTnxOrderId(
     razorpay_order_id,
     {
-      status: "PAID",
-
-      payment_id:
-        paymentId,
-
-      upi_transaction_id:
-        upiTransactionId,
-
+      status,
+      payment_id: paymentId,
+      upi_transaction_id: upiTransactionId,
       method,
-
-      actual_amount:
-        localPayment.actual_amount,
-
-      payable_amount:
-        localPayment.payable_amount,
+      actual_amount: localPayment.actual_amount,
+      payable_amount: localPayment.payable_amount,
+      created_by: userId,
+      payment_record_id: localPayment.id,
     }
   );
 
+  if (!updatedPayment) {
+    throw new Error("Local payment state could not be updated");
+  }
 
-if (!payment) {
-  return res.status(404).json({
-    success: false,
-    message:
-      "Unable to update payment",
-  });
-}
-
-
-console.log(
-  "PAYMENT UPDATED:",
-  payment
-);
-
-
-/* =====================================================
-   PAYMENT SUCCESS NOTIFICATION
-===================================================== */
-
-try {
-  await Notification.createNotification({
-    userId:
+  payment = updatedPayment;
+  return payment;
+};
+const createPaymentSuccessNotification = async () => {
+  try {
+    await Notification.createNotification({
       userId,
+      title: "Payment Successful",
+      message: "Your payment was successfully completed.",
+      type: "PAYMENT_SUCCESS",
+      referenceId: payment.id,
+    });
+  } catch (notificationError) {
+    console.error(
+      "PAYMENT SUCCESS NOTIFICATION ERROR:",
+      notificationError.message
+    );
+  }
+};
 
-    title:
-      "Payment Successful",
-
-    message:
-      "Your payment was successfully completed.",
-
-    type:
-      "PAYMENT_SUCCESS",
-
-    referenceId:
-      payment.id,
-  });
-
-
-  console.log(
-    `Payment notification created for payment ${payment.id}`
-  );
-
-} catch (notificationError) {
-  console.error(
-    "Payment Notification Error:",
-    notificationError
-  );
-}
+await updateLocalPayment("PENDING");
 
 
 await Membership.checkAndResetMonthlyBenefits(
@@ -681,6 +935,12 @@ await Membership.checkAndResetMonthlyBenefits(
 
 let membershipBenefits =
   null;
+let checkoutTotals = null;
+let checkoutItems = [];
+const persistedMembershipId =
+  localPayment.membership_id == null
+    ? null
+    : Number(localPayment.membership_id);
 
 
 if (
@@ -720,8 +980,9 @@ if (
             price,
             weight,
             stock
-          FROM products
+          FROM lkp_products
           WHERE id = $1
+            AND is_active = 1
           LIMIT 1
         `,
         [productId]
@@ -735,11 +996,7 @@ if (
         productResult.rows[0];
 
 
-      const buyNowQuantity =
-        Math.max(
-          1,
-          Number(quantity || 1)
-        );
+      const buyNowQuantity = Number(quantity ?? 1);
 
 
       cartItems = [
@@ -786,15 +1043,58 @@ if (
   }
 
 
+  if (!cartItems || cartItems.length === 0) {
+    return res.status(409).json({
+      success: false,
+      message:
+        "Captured payment requires reconciliation because checkout items are no longer available",
+      paymentId: localPayment.id,
+      paymentStatus: localPayment.status,
+    });
+  }
+
+  checkoutItems = cartItems.map((item) => ({
+    ...item,
+    item_id: item.item_id ?? item.product_id,
+  }));
+  checkoutTotals = await calculateCheckoutTotals(
+    userId,
+    cartItems,
+    persistedMembershipId
+  );
+  membershipBenefits = checkoutTotals.membershipBenefits;
+  const calculatedMembershipId =
+    membershipBenefits?.membership?.id ?? null;
+
+  const expectedPayable = Number(localPayment.payable_amount);
+  const expectedActual = Number(localPayment.actual_amount);
+  const calculatedPayable = Number(checkoutTotals.payableAmount);
+  const calculatedActual = Number(checkoutTotals.actualAmount);
   if (
-    cartItems &&
-    cartItems.length > 0
+    !Number.isFinite(expectedPayable) ||
+    !Number.isFinite(expectedActual) ||
+    Math.round(expectedPayable * 100) !==
+      Math.round(calculatedPayable * 100) ||
+    Math.round(expectedActual * 100) !==
+      Math.round(calculatedActual * 100)
   ) {
-    membershipBenefits =
-      await calculateMembershipBenefits(
-        userId,
-        cartItems
-      );
+    return res.status(409).json({
+      success: false,
+      message:
+        "Captured payment requires reconciliation because checkout totals changed",
+      paymentId: localPayment.id,
+      paymentStatus: localPayment.status,
+    });
+  }
+
+  if (calculatedMembershipId !== persistedMembershipId) {
+    return res.status(409).json({
+      success: false,
+      message:
+        "Captured payment requires reconciliation because the selected membership no longer matches the payment",
+      paymentId: localPayment.id,
+      paymentStatus: localPayment.status,
+    });
   }
 }
 
@@ -812,7 +1112,7 @@ if (
     await pool.query(
       `
         SELECT *
-        FROM subscription_plans
+        FROM lkp_subscription_plans
         WHERE id = $1
       `,
       [membershipPlanId]
@@ -828,6 +1128,18 @@ if (
       success: false,
       message:
         "Membership plan not found",
+    });
+  }
+
+  if (
+    Math.round(Number(plan.plan_price) * 100) !==
+    Math.round(expectedAmount * 100)
+  ) {
+    return res.status(409).json({
+      success: false,
+      message:
+        "Captured membership payment amount does not match its persisted plan price",
+      paymentId: localPayment.id,
     });
   }
 
@@ -1233,6 +1545,8 @@ const membershipBenefitResult =
       Number(plan.plan_price),
   });
 
+await updateLocalPayment("PAID");
+await createPaymentSuccessNotification();
 
 console.log(
   "===== MEMBERSHIP WALLET BENEFITS ====="
@@ -1477,7 +1791,7 @@ try {
         await pool.query(
           `
             SELECT *
-            FROM addresses
+            FROM user_address
             WHERE id = $1
               AND user_id = $2
             LIMIT 1
@@ -1517,11 +1831,7 @@ try {
         productId
       ) {
 
-        const buyNowQuantity =
-          Math.max(
-            1,
-            Number(quantity || 1)
-          );
+        const buyNowQuantity = Number(quantity ?? 1);
 
 
         console.log(
@@ -1543,7 +1853,13 @@ try {
     userId,
     address_id,
     productId,
-    buyNowQuantity
+    buyNowQuantity,
+    {
+      cartItems: checkoutItems,
+      checkoutTotals,
+      membershipId: persistedMembershipId,
+      gatewayOrderId: razorpay_order_id,
+    }
   );
 
 
@@ -1561,7 +1877,16 @@ try {
        createdOrder =
   await Order.createOrder(
     userId,
-    address_id
+    address_id,
+    false,
+    null,
+    1,
+    {
+      cartItems: checkoutItems,
+      checkoutTotals,
+      membershipId: persistedMembershipId,
+      gatewayOrderId: razorpay_order_id,
+    }
   );
       }
 
@@ -1600,43 +1925,11 @@ try {
          SAVE ORDER BREAKDOWN
       =================================================== */
 
-      const actualAmount =
-        membershipBenefits
-          ?.actualAmount ??
-        Number(
-          localPayment.actual_amount ||
-          0
-        );
-
-
-      const membershipDiscount =
-        membershipBenefits
-          ?.membershipDiscount ??
-        0;
-
-
-      const walletClaim =
-        membershipBenefits
-          ?.walletClaim ??
-        0;
-
-
-      const deliveryCharge =
-        membershipBenefits
-          ? Number(
-              membershipBenefits.deliveryCharge ||
-              0
-            )
-          : 40;
-
-
-      const payableAmount =
-        membershipBenefits
-          ?.payableAmount ??
-        (
-          Number(actualAmount) +
-          Number(deliveryCharge)
-        );
+      const actualAmount = checkoutTotals.actualAmount;
+      const membershipDiscount = checkoutTotals.membershipDiscount;
+      const walletClaim = checkoutTotals.walletClaim;
+      const deliveryCharge = checkoutTotals.deliveryCharge;
+      const payableAmount = checkoutTotals.payableAmount;
 
 
       console.log(
@@ -1660,109 +1953,86 @@ try {
       });
 
 
-      /* ===================================================
-         INSERT / UPDATE ORDER BREAKDOWN
-      =================================================== */
-
-      try {
-
-        await pool.query(
-          `
-            UPDATE orders
-            SET
-              actual_amount = $1,
-              membership_discount = $2,
-              wallet_claim = $3,
-              delivery_charge = $4,
-              payable_amount = $5,
-              updated_at = CURRENT_TIMESTAMP
-            WHERE id = $6
-          `,
-          [
-            actualAmount,
-            membershipDiscount,
-            walletClaim,
-            deliveryCharge,
-            payableAmount,
-            createdOrderDbId,
-          ]
-        );
-
-
-        console.log(
-          `Order breakdown updated for order ${createdOrderId}`
-        );
-
-      } catch (breakdownError) {
-
-        console.error(
-          "ORDER BREAKDOWN UPDATE ERROR:",
-          breakdownError.message
-        );
-
-        /*
-         * Do not fail an already-created order
-         * only because the breakdown update failed.
-         */
-      }
-
-/* ===================================================
-   LINK PAYMENT TO ORDER
-=================================================== */
-
 try {
+  await verificationLockClient.query("BEGIN");
 
-  await pool.query(
+  if (Number(createdOrder.membership_id || 0) !== Number(persistedMembershipId || 0)) {
+    throw new Error("Created order membership does not match its payment");
+  }
+
+  if (persistedMembershipId !== null) {
+    const litresUsed = await Membership.calculateOrderLitres(
+      createdOrder.item_id,
+      createdOrder.quantity,
+      verificationLockClient
+    );
+
+    await Membership.updateMembershipUsage({
+      userId,
+      membershipId: persistedMembershipId,
+      litresUsed,
+      walletUsed: Number(createdOrder.wallet_claim || 0),
+      orderId: createdOrder.order_id,
+      client: verificationLockClient,
+    });
+  }
+
+  const updatedOrderResult = await verificationLockClient.query(
     `
-      UPDATE payments
-      SET
-        order_id = $1,
-        tnx_order_id = $2,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
+    UPDATE orders
+    SET
+      payment_status = 'PAID',
+      updated_at = CURRENT_TIMESTAMP,
+      updated_by = $1
+    WHERE id = $2
+      AND user_id = $1
+      AND tnx_order_id = $3
+      AND is_active = 1
+      AND membership_id IS NOT DISTINCT FROM $4::integer
+    RETURNING *
+    `,
+    [userId, createdOrderDbId, razorpay_order_id, persistedMembershipId]
+  );
+
+  const updatedPaymentResult = await verificationLockClient.query(
+    `
+    UPDATE payments
+    SET
+      order_id = $1,
+      status = 'PAID',
+      payment_id = $2,
+      method = $3,
+      upi_transaction_id = $4,
+      updated_at = CURRENT_TIMESTAMP,
+      updated_by = $6
+    WHERE id = $5
+      AND created_by = $6
+      AND tnx_order_id = $7
+      AND payment_gateway = 'RAZORPAY'
+      AND status = 'PENDING'
+      AND membership_id IS NOT DISTINCT FROM $8::integer
+    RETURNING *
     `,
     [
       createdOrder.order_id,
-      createdOrder.tnx_order_id || razorpay_order_id,
+      paymentId,
+      method,
+      upiTransactionId,
       payment.id,
-    ]
-  );
-
-  console.log(
-    `Payment ${payment.id} linked to MGO order ${createdOrder.order_id}`
-  );
-
-} catch (paymentLinkError) {
-
-  console.error(
-    "PAYMENT ORDER LINK ERROR:",
-    paymentLinkError.message
-  );
-
-  throw paymentLinkError;
-}
-
-
-/* ===================================================
-   UPDATE ORDER PAYMENT STATUS
-=================================================== */
-
-try {
-
-  await pool.query(
-    `
-      UPDATE orders
-      SET
-        tnx_order_id = $1,
-        payment_status = 'PAID',
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $2
-    `,
-    [
+      userId,
       razorpay_order_id,
-      createdOrderDbId,
+      persistedMembershipId,
     ]
   );
+
+  if (!updatedOrderResult.rows[0] || !updatedPaymentResult.rows[0]) {
+    throw new Error("Order and captured payment could not be reconciled");
+  }
+
+  await verificationLockClient.query("COMMIT");
+  createdOrder = updatedOrderResult.rows[0];
+  payment = updatedPaymentResult.rows[0];
+  await createPaymentSuccessNotification();
 
   console.log(
     `Order ${createdOrderId} marked as PAID`
@@ -1772,44 +2042,8 @@ try {
     `Transaction order ID ${razorpay_order_id} saved`
   );
 
-  /* ===================================================
-   UPDATE MEMBERSHIP USAGE
-=================================================== */
-
-if (membershipBenefits) {
-
-  try {
-
-    await Membership.updateMembershipUsage({
-      userId,
-
-      litresUsed:
-        membershipBenefits.totalLitres,
-
-      walletUsed:
-        membershipBenefits.walletClaim,
-
-      orderId:
-        createdOrder.id,
-    });
-
-    console.log(
-      `Membership usage updated for order ${createdOrder.order_id}`
-    );
-
-  } catch (membershipUsageError) {
-
-    console.error(
-      "MEMBERSHIP USAGE UPDATE ERROR:",
-      membershipUsageError.message
-    );
-
-    throw membershipUsageError;
-  }
-}
-
 } catch (orderPaymentError) {
-
+  await verificationLockClient.query("ROLLBACK");
   console.error(
     "ORDER PAYMENT STATUS ERROR:",
     orderPaymentError.message
@@ -1963,7 +2197,7 @@ try {
           a.user_id,
           a.phone AS mobile_no,
           a.full_name
-        FROM addresses a
+        FROM user_address a
         WHERE a.id = $1
           AND a.user_id = $2
           AND a.is_active = 1
@@ -2080,6 +2314,24 @@ return res.json({
       error.message ||
       "Payment verification failed",
   });
+} finally {
+  if (verificationLockClient) {
+    try {
+      if (verificationLockKey) {
+        await verificationLockClient.query(
+          "SELECT pg_advisory_unlock(hashtext($1))",
+          [verificationLockKey]
+        );
+      }
+    } catch (unlockError) {
+      console.error(
+        "RAZORPAY VERIFICATION LOCK RELEASE ERROR:",
+        unlockError.message
+      );
+    } finally {
+      verificationLockClient.release();
+    }
+  }
 }
 };
 
@@ -2100,25 +2352,16 @@ const getPayments = async (req, res) => {
     let payments;
 
 
-    if (user_id) {
-
-      payments =
-        await Payment.getPaymentsByUserId(
-          user_id
-        );
-
-    } else if (order_id) {
-
-      payments =
-        await Payment.getPaymentsByOrderId(
-          order_id
-        );
-
-    } else {
-
-      payments =
-        await Payment.getAllPayments();
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
     }
+
+    payments = order_id
+      ? await Payment.getPaymentsByUserAndOrderId(user_id, order_id)
+      : await Payment.getPaymentsByUserId(user_id);
 
 
     return res.json({
@@ -2195,8 +2438,9 @@ const checkoutSummary = async (req, res) => {
               price,
               weight,
               stock
-            FROM products
+            FROM lkp_products
             WHERE id = $1
+              AND is_active = 1
             LIMIT 1
           `,
           [productId]
@@ -2219,11 +2463,7 @@ const checkoutSummary = async (req, res) => {
         productResult.rows[0];
 
 
-      const buyNowQuantity =
-        Math.max(
-          1,
-          Number(quantity || 1)
-        );
+      const buyNowQuantity = Number(quantity ?? 1);
 
 
       /*
@@ -2306,144 +2546,20 @@ const checkoutSummary = async (req, res) => {
        MEMBERSHIP BENEFITS
     ===================================================== */
 
-    const membershipBenefits =
-      await calculateMembershipBenefits(
-        publicUserId,
-        cartItems
-      );
-
-
-    /* =====================================================
-       SUBTOTAL
-    ===================================================== */
-
-    const subtotal =
-      cartItems.reduce(
-        (
-          total,
-          item
-        ) =>
-          total +
-          (
-            Number(
-              item.price || 0
-            ) *
-            Number(
-              item.quantity || 0
-            )
-          ),
-        0
-      );
-
-
-    /* =====================================================
-       MEMBERSHIP DISCOUNT
-    ===================================================== */
-
-    const membershipDiscount =
-      Number(
-        membershipBenefits
-          ?.membershipDiscount || 0
-      );
-
-
-    /* =====================================================
-       WALLET CLAIM
-    ===================================================== */
-
-    const walletClaim =
-      Number(
-        membershipBenefits
-          ?.walletClaim || 0
-      );
-
-
-    /* =====================================================
-       DELIVERY CHARGE
-    ===================================================== */
-
-    const totalLitres =
-      cartItems.reduce(
-        (total, item) =>
-          total +
-          Number(item.weight || 0) *
-          Number(item.quantity || 0),
-        0
-      );
-
-    const deliveryRuleResult =
-      await pool.query(
-        `
-          SELECT
-            delivery_cart_count,
-            delivery_charges,
-            expected_delivery_days
-          FROM delivery_charges
-          WHERE is_active = 1
-          ORDER BY id DESC
-          LIMIT 1
-        `
-      );
-
-    if (
-      !deliveryRuleResult.rows.length
-    ) {
-      return res.status(500).json({
-        success: false,
-        message:
-          "Delivery charge configuration not found",
-      });
-    }
-
-    const deliveryCartCount =
-      Number(
-        deliveryRuleResult.rows[0]
-          .delivery_cart_count
-      );
-
-    const configuredDeliveryCharge =
-      Number(
-        deliveryRuleResult.rows[0]
-          .delivery_charges
-      );
-
-    const expectedDeliveryDays =
-      deliveryRuleResult.rows[0]
-        .expected_delivery_days;
-
-    const deliveryCharge =
-      totalLitres >= deliveryCartCount
-        ? 0
-        : configuredDeliveryCharge;
-
-    const deliverySavings =
-      deliveryCharge === 0
-        ? configuredDeliveryCharge
-        : 0;
-
-
-    /* =====================================================
-       ACTUAL AMOUNT
-    ===================================================== */
-
-    const actualAmount =
-      Number(
-        membershipBenefits
-          ?.actualAmount ??
-        subtotal
-      );
-
-
-    /* =====================================================
-       PAYABLE AMOUNT
-    ===================================================== */
-
-    const payableAmount =
-      Number(actualAmount) -
-      Number(membershipDiscount) -
-      Number(walletClaim) +
-      Number(deliveryCharge);
-
+    const checkoutTotals = await calculateCheckoutTotals(
+      publicUserId,
+      cartItems
+    );
+    const membershipBenefits = checkoutTotals.membershipBenefits;
+    const subtotal = checkoutTotals.subtotal;
+    const totalLitres = checkoutTotals.totalLitres;
+    const membershipDiscount = checkoutTotals.membershipDiscount;
+    const walletClaim = checkoutTotals.walletClaim;
+    const deliveryCharge = checkoutTotals.deliveryCharge;
+    const deliverySavings = checkoutTotals.deliverySavings;
+    const expectedDeliveryDays = checkoutTotals.expectedDeliveryDays;
+    const actualAmount = checkoutTotals.actualAmount;
+    const payableAmount = checkoutTotals.payableAmount;
 
     console.log(
       "===== CHECKOUT SUMMARY ====="

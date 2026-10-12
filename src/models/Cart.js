@@ -39,10 +39,12 @@ const getCartItemDetails = async (cartId, user_id = null) => {
 
     FROM cart_items c
 
-    JOIN products p
+    JOIN lkp_products p
       ON p.id = c.item_id
 
     WHERE c.id = $1
+      AND c.is_active = 1
+      AND p.is_active = 1
   `;
 
   const values = [cartId];
@@ -190,10 +192,12 @@ const getItems = async (user_id) => {
 
     FROM cart_items c
 
-    JOIN products p
+    JOIN lkp_products p
       ON p.id = c.item_id
 
     WHERE c.user_id = $1
+      AND c.is_active = 1
+      AND p.is_active = 1
 
     ORDER BY c.id DESC
     `,
@@ -330,8 +334,10 @@ const getAllItems = async () => {
 
     FROM cart_items c
 
-    JOIN products p
+    JOIN lkp_products p
       ON p.id = c.item_id
+    WHERE c.is_active = 1
+      AND p.is_active = 1
 
     ORDER BY c.id DESC
     `

@@ -46,7 +46,7 @@ const create = async ({ mobile }) => {
   const roleResult = await pool.query(
     `
     SELECT id
-    FROM user_roles
+    FROM lkp_user_roles
     WHERE id = 6
       AND UPPER(TRIM(role_name)) = 'USER'
       AND is_active = 1
@@ -55,7 +55,7 @@ const create = async ({ mobile }) => {
   );
 
   if (roleResult.rows.length === 0) {
-    throw new Error("Active USER role not found in user_roles");
+    throw new Error("Active USER role not found in lkp_user_roles");
   }
 
   const result = await pool.query(

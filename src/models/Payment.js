@@ -15,10 +15,13 @@ const createPayment = async (data) => {
       payable_amount,
       status,
       payment_type,
-      membership_plan_id
+      membership_plan_id,
+      membership_id,
+      created_by,
+      updated_by
     )
     VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8)
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
     RETURNING *
     `,
     [
@@ -30,6 +33,8 @@ const createPayment = async (data) => {
       data.status || "PENDING",
       data.payment_type || "ORDER",
       data.membership_plan_id || null,
+      data.membership_id ?? null,
+      data.created_by || null,
     ]
   );
 
@@ -69,6 +74,37 @@ const getPaymentById = async (id) => {
   return result.rows[0];
 };
 
+const getPaymentsByUserId = async (userId) => {
+  const result = await pool.query(
+    `
+    SELECT *
+    FROM payments
+    WHERE created_by = $1
+      AND is_active = 1
+    ORDER BY id DESC
+    `,
+    [String(userId).trim()]
+  );
+
+  return result.rows;
+};
+
+const getPaymentsByUserAndOrderId = async (userId, orderId) => {
+  const result = await pool.query(
+    `
+    SELECT *
+    FROM payments
+    WHERE created_by = $1
+      AND order_id = $2
+      AND is_active = 1
+    ORDER BY id DESC
+    `,
+    [String(userId).trim(), String(orderId).trim()]
+  );
+
+  return result.rows;
+};
+
 
 /* --------------------------------
    UPDATE PAYMENT BY RAZORPAY ORDER ID
@@ -86,8 +122,12 @@ const updateByTnxOrderId = async (
       upi_transaction_id = COALESCE($3, upi_transaction_id),
       method = COALESCE($4, method),
       actual_amount = COALESCE($5, actual_amount),
-      payable_amount = COALESCE($6, payable_amount)
+      payable_amount = COALESCE($6, payable_amount),
+      updated_at = CURRENT_TIMESTAMP,
+      updated_by = $8
     WHERE tnx_order_id = $7
+      AND created_by = $8
+      AND id = $9
     RETURNING *
     `,
     [
@@ -98,6 +138,8 @@ const updateByTnxOrderId = async (
       data.actual_amount ?? null,
       data.payable_amount ?? null,
       tnx_order_id,
+      data.created_by,
+      data.payment_record_id,
     ]
   );
 
@@ -171,6 +213,8 @@ module.exports = {
   createPayment,
   getPayments,
   getPaymentById,
+  getPaymentsByUserId,
+  getPaymentsByUserAndOrderId,
   updateByTnxOrderId,
   linkPaymentToOrder,
   createPaymentLog,

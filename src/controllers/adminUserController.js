@@ -562,7 +562,7 @@ const loginUser = async (req, res) => {
         i.email
       FROM user_login l
       LEFT JOIN user_info i ON l.user_id = i.user_id
-      LEFT JOIN user_roles ur ON ur.id = l.role
+      LEFT JOIN lkp_user_roles ur ON ur.id = l.role
       WHERE LOWER(i.email) = LOWER($1) 
          OR LOWER(l.username) = LOWER($1) 
          OR l.mobile_no = $1

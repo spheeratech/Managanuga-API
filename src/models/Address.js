@@ -1,5 +1,10 @@
 const pool = require("../../db");
 
+const normalizeDefaultFlag = (value) =>
+  value === true ||
+  value === 1 ||
+  ["true", "1"].includes(String(value ?? "").trim().toLowerCase());
+
 /**
  * Resolve a public user_id (MGU...) and verify that the user exists.
  */
@@ -39,7 +44,7 @@ const createAddress = async (addressData) => {
   }
 
   const query = `
-    INSERT INTO addresses (
+    INSERT INTO user_address (
       user_id,
       address_type,
       full_name,
@@ -79,7 +84,7 @@ const createAddress = async (addressData) => {
     addressData.state,
     addressData.country || "India",
     addressData.postal_code,
-    addressData.is_default || 0,
+    normalizeDefaultFlag(addressData.is_default),
   ];
 
   const result = await pool.query(query, values);
@@ -97,7 +102,7 @@ const createAddress = async (addressData) => {
 const getAddresses = async (filters = {}) => {
   let query = `
     SELECT *
-    FROM addresses
+    FROM user_address
     WHERE 1=1
   `;
 
@@ -147,7 +152,11 @@ const updateAddress = async (id, data) => {
   for (const field of allowedFields) {
     if (Object.prototype.hasOwnProperty.call(data, field)) {
       fields.push(field);
-      values.push(data[field]);
+      values.push(
+        field === "is_default"
+          ? normalizeDefaultFlag(data[field])
+          : data[field]
+      );
     }
   }
 
@@ -162,7 +171,7 @@ const updateAddress = async (id, data) => {
   values.push(id);
 
   const query = `
-    UPDATE addresses
+    UPDATE user_address
     SET ${setClause}
     WHERE id = $${values.length}
     RETURNING *;
@@ -179,7 +188,7 @@ const updateAddress = async (id, data) => {
  */
 const deleteAddress = async (id) => {
   const query = `
-    DELETE FROM addresses
+    DELETE FROM user_address
     WHERE id = $1
     RETURNING *;
   `;
@@ -200,9 +209,9 @@ const getDefaultAddress = async (userId) => {
 
   const query = `
     SELECT *
-    FROM addresses
+    FROM user_address
     WHERE user_id = $1
-      AND is_default = 1
+      AND is_default = TRUE
     ORDER BY id DESC
     LIMIT 1;
   `;

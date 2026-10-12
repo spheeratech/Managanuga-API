@@ -92,12 +92,14 @@ const getOrders = async (req, res) => {
 // ======================================================
 const getBenefits = async (req, res) => {
   try {
-    const vendorId = getVendorId(req);
+    const vendorId = String(
+      req.authenticatedUser?.id || ""
+    ).trim();
 
     if (!vendorId) {
       return res.status(400).json({
         success: false,
-        message: "vendorId is required",
+        message: "Authenticated vendor identity is required",
       });
     }
 

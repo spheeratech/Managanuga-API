@@ -698,7 +698,7 @@ exports.login = async (req, res) => {
       FROM user_login ul
       LEFT JOIN user_info ui
         ON ui.user_id = ul.user_id
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = ul.role
       WHERE
         LOWER(ul.username) = LOWER($1)

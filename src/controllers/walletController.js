@@ -45,6 +45,108 @@ const getWallet = async (req, res) => {
   }
 };
 
+const getWalletTransactions = async (req, res) => {
+  try {
+    const {userId} = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const transactions =
+      await Wallet.getCustomerTransactions(
+        String(userId).trim()
+      );
+
+    return res.status(200).json({
+      success: true,
+      transactions,
+    });
+  } catch (error) {
+    console.error("Get Wallet Transactions Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+const payOrderWithWallet = async (req, res) => {
+  try {
+    const {orderId} = req.params;
+    const {userId} = req.body;
+
+    if (!orderId || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID and user ID are required",
+      });
+    }
+
+    const result = await Wallet.payOrderWithCustomerWallet(
+      String(userId).trim(),
+      String(orderId).trim()
+    );
+
+    if (!result.duplicate) {
+      try {
+        await Notification.createNotification({
+          userId: result.order.user_id,
+          title: "Payment Successful",
+          message: "Your order was paid using your wallet balance.",
+          type: "PAYMENT_SUCCESS",
+          referenceId: result.payment.id,
+        });
+      } catch (notificationError) {
+        console.error(
+          "Wallet Payment Notification Error:",
+          notificationError
+        );
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: result.duplicate
+        ? "Order has already been paid using your wallet"
+        : "Order paid successfully using your wallet",
+      data: result,
+    });
+  } catch (error) {
+    if (
+      error.message === "Customer order not found" ||
+      error.message === "Customer wallet not found"
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    if (
+      error.message === "Insufficient wallet balance" ||
+      error.message === "Order has already been paid" ||
+      error.message === "Wallet amount must be a valid positive number"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    console.error("Wallet Order Payment Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 
 /*
  * ============================================================
@@ -352,6 +454,8 @@ const getRedeemTransactions = async (req, res) => {
 
 module.exports = {
   getWallet,
+  getWalletTransactions,
+  payOrderWithWallet,
   createRedeemRequest,
   updateRedeemStatus,
   getRedeemStatus,
