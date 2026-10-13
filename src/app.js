@@ -25,6 +25,7 @@ const legalContentRoutes = require("./routes/legalContentRoutes");
 const userDocumentRoutes = require("./routes/userDocumentRoutes");
 const eventPosterRoutes = require("./routes/eventPosterRoutes");
 const appImageRoutes = require("./routes/appImageRoutes");
+const couponRoutes = require("./routes/couponRoutes");
 const faqRoutes = require("./routes/faqRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const app = express();
@@ -49,6 +50,7 @@ app.use("/api/vendor", vendorRoutes);
 app.use("/api/reseller", resellerRoutes);
 app.use("/api/legal", legalContentRoutes);
 app.use("/api/faqs", faqRoutes);
+app.use("/api/coupons", couponRoutes);
 app.use("/api/locations", locationRoutes);
 
 // Web APP APIs
