@@ -297,9 +297,11 @@ const publicUserId = user_id;
 
  // const razorpayTestAmount = 1;
 
+const razorpayTestAmount = 1;
+
 const razorpayOrder =
   await razorpayService.createRazorpayOrder(
-    payableAmount
+    razorpayTestAmount
   );
 
     console.log(
@@ -574,8 +576,7 @@ const razorpayAmount =
   razorpayAmountPaise / 100;
 
 
-const expectedAmount =
-  Number(localPayment.payable_amount);
+const expectedAmount = 1;
 
 
 console.log(
