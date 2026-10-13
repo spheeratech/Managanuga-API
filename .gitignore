@@ -20,7 +20,8 @@ production.env
 *.sql
 *.dump
 *.sq
+!migrations/
+!migrations/*.sql
 .env
 .env.*
 !.env.example
-

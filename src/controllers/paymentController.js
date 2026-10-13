@@ -299,6 +299,18 @@ if (couponCode && String(couponCode).trim()) {
     });
   }
 
+  if (
+    await Coupon.hasSuccessfulUseForUser({
+      userId: req.authenticatedUser.id,
+      couponId: coupon.coupon_id,
+    })
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "You have already used this coupon",
+    });
+  }
+
   couponDiscount = Math.round(
     (
       Number(payableAmount) *
@@ -461,6 +473,7 @@ const razorpayOrder =
 const verifyPayment = async (req, res) => {
   let verificationLockClient = null;
   let verificationLockKey = null;
+  let couponVerificationLockKey = null;
 
   try {
     const {
@@ -1008,6 +1021,8 @@ let membershipBenefits =
   null;
 let checkoutTotals = null;
 let checkoutItems = [];
+let verifiedCoupon = null;
+let verifiedCouponDiscount = 0;
 const persistedMembershipId =
   localPayment.membership_id == null
     ? null
@@ -1135,9 +1150,6 @@ if (
   );
 
 
-let verifiedCoupon = null;
-let verifiedCouponDiscount = 0;
-
 if (couponCode && String(couponCode).trim()) {
   verifiedCoupon = await Coupon.findByCode(
     String(couponCode).trim()
@@ -1161,6 +1173,27 @@ if (couponCode && String(couponCode).trim()) {
     return res.status(400).json({
       success: false,
       message: "This coupon requires a minimum purchase of 2 litres",
+    });
+  }
+
+  couponVerificationLockKey =
+    `COUPON_USE:${req.authenticatedUser.id}:${verifiedCoupon.coupon_id}`;
+  await verificationLockClient.query(
+    "SELECT pg_advisory_lock(hashtext($1))",
+    [couponVerificationLockKey]
+  );
+
+  if (
+    await Coupon.hasSuccessfulUseForUser({
+      userId: req.authenticatedUser.id,
+      couponId: verifiedCoupon.coupon_id,
+      excludePaymentId: localPayment.id,
+      client: verificationLockClient,
+    })
+  ) {
+    return res.status(409).json({
+      success: false,
+      message: "You have already used this coupon",
     });
   }
 
@@ -2132,7 +2165,7 @@ if (verifiedCoupon && payment) {
       AND is_active = 1
     LIMIT 1
     `,
-    [userId]
+    [req.authenticatedUser.id]
   );
 
   const couponNumericUserId = couponUserResult.rows[0]?.id;
@@ -2475,6 +2508,12 @@ return res.json({
     error
   );
 
+  if (error.code === "COUPON_ALREADY_USED") {
+    return res.status(409).json({
+      success: false,
+      message: "You have already used this coupon",
+    });
+  }
 
   return res.status(500).json({
     success: false,
@@ -2485,6 +2524,20 @@ return res.json({
   });
 } finally {
   if (verificationLockClient) {
+    if (couponVerificationLockKey) {
+      try {
+        await verificationLockClient.query(
+          "SELECT pg_advisory_unlock(hashtext($1))",
+          [couponVerificationLockKey]
+        );
+      } catch (unlockError) {
+        console.error(
+          "COUPON VERIFICATION LOCK RELEASE ERROR:",
+          unlockError.message
+        );
+      }
+    }
+
     try {
       if (verificationLockKey) {
         await verificationLockClient.query(
