@@ -40,6 +40,18 @@ const validateCoupon = async (req, res) => {
       });
     }
 
+    const alreadyUsed = await Coupon.hasSuccessfulUseForUser({
+      userId: req.authenticatedUser.id,
+      couponId: coupon.coupon_id,
+    });
+
+    if (alreadyUsed) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already used this coupon",
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: "Coupon applied successfully",
