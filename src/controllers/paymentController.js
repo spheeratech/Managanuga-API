@@ -8,6 +8,7 @@ const { getRoleName } = require("../utils/userRoles");
 const xpressbeesService = require("../services/xpressbeesService");
 const Cart = require("../models/Cart");
 const User = require("../models/User");
+const Coupon = require("../models/Coupon");
 
 const {
   sendPushNotification,
@@ -42,6 +43,7 @@ const {
   productId,
   quantity,
   address_id,
+  couponCode,
 } = req.body;
 
 const publicUserId = user_id;
@@ -256,6 +258,73 @@ const publicUserId = user_id;
       payableAmount = checkoutTotals.payableAmount;
     }
 
+if (
+  paymentTypeUpper === "MEMBERSHIP" &&
+  couponCode &&
+  String(couponCode).trim()
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Coupons can only be applied to product orders",
+  });
+}
+
+
+let couponDetails = null;
+let couponDiscount = 0;
+
+if (couponCode && String(couponCode).trim()) {
+  const coupon = await Coupon.findByCode(
+    String(couponCode).trim()
+  );
+
+  if (!coupon) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid coupon",
+    });
+  }
+
+  if (Number(coupon.is_active) !== 1) {
+    return res.status(400).json({
+      success: false,
+      message: "Coupon expired",
+    });
+  }
+
+  if (Number(checkoutTotals.totalLitres) < 2) {
+    return res.status(400).json({
+      success: false,
+      message: "This coupon requires a minimum purchase of 2 litres",
+    });
+  }
+
+  couponDiscount = Math.round(
+    (
+      Number(payableAmount) *
+      Number(coupon.coupon_percentage) / 100 +
+      Number.EPSILON
+    ) * 100
+  ) / 100;
+
+  payableAmount = Math.max(
+    0,
+    Math.round(
+      (
+        Number(payableAmount) -
+        couponDiscount +
+        Number.EPSILON
+      ) * 100
+    ) / 100
+  );
+
+  couponDetails = {
+    coupon_id: coupon.coupon_id,
+    coupon_code: coupon.coupon_code,
+    coupon_percentage: Number(coupon.coupon_percentage),
+    coupon_discount: couponDiscount,
+  };
+}
 
     /* =====================================================
        SAFETY CHECK
@@ -406,6 +475,7 @@ const verifyPayment = async (req, res) => {
       productId,
       quantity,
       referralCode,
+      couponCode,
     } = req.body;
     /* =====================================================
        VERIFY SIGNATURE
@@ -1063,6 +1133,54 @@ if (
     cartItems,
     persistedMembershipId
   );
+
+
+let verifiedCoupon = null;
+let verifiedCouponDiscount = 0;
+
+if (couponCode && String(couponCode).trim()) {
+  verifiedCoupon = await Coupon.findByCode(
+    String(couponCode).trim()
+  );
+
+  if (!verifiedCoupon) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid coupon",
+    });
+  }
+
+  if (Number(verifiedCoupon.is_active) !== 1) {
+    return res.status(400).json({
+      success: false,
+      message: "Coupon expired",
+    });
+  }
+
+  if (Number(checkoutTotals.totalLitres) < 2) {
+    return res.status(400).json({
+      success: false,
+      message: "This coupon requires a minimum purchase of 2 litres",
+    });
+  }
+
+  verifiedCouponDiscount = Math.round(
+    Number(checkoutTotals.payableAmount) *
+    Number(verifiedCoupon.coupon_percentage)
+  ) / 100;
+
+  checkoutTotals = {
+    ...checkoutTotals,
+    payableAmount: Math.max(
+      0,
+      Math.round(
+        (Number(checkoutTotals.payableAmount) -
+          verifiedCouponDiscount) * 100
+      ) / 100
+    ),
+  };
+}
+
   membershipBenefits = checkoutTotals.membershipBenefits;
   const calculatedMembershipId =
     membershipBenefits?.membership?.id ?? null;
@@ -1978,22 +2096,72 @@ try {
     });
   }
 
-  const updatedOrderResult = await verificationLockClient.query(
+const updatedOrderResult = await verificationLockClient.query(
+  `
+  UPDATE orders
+  SET
+    payment_status = 'PAID',
+    coupon_discount = $5,
+    payable_amount = $6,
+    updated_at = CURRENT_TIMESTAMP,
+    updated_by = $1
+  WHERE id = $2
+    AND user_id = $1
+    AND tnx_order_id = $3
+    AND is_active = 1
+    AND membership_id IS NOT DISTINCT FROM $4::integer
+  RETURNING *
+  `,
+  [
+    userId,
+    createdOrderDbId,
+    razorpay_order_id,
+    persistedMembershipId,
+    Number(verifiedCouponDiscount || 0),
+    Number(checkoutTotals.payableAmount),
+  ]
+);
+
+
+if (verifiedCoupon && payment) {
+  const couponUserResult = await verificationLockClient.query(
     `
-    UPDATE orders
-    SET
-      payment_status = 'PAID',
-      updated_at = CURRENT_TIMESTAMP,
-      updated_by = $1
-    WHERE id = $2
-      AND user_id = $1
-      AND tnx_order_id = $3
+    SELECT id
+    FROM user_login
+    WHERE user_id = $1
       AND is_active = 1
-      AND membership_id IS NOT DISTINCT FROM $4::integer
-    RETURNING *
+    LIMIT 1
     `,
-    [userId, createdOrderDbId, razorpay_order_id, persistedMembershipId]
+    [userId]
   );
+
+  const couponNumericUserId = couponUserResult.rows[0]?.id;
+
+  if (!couponNumericUserId) {
+    throw new Error("Could not resolve numeric user ID for coupon transaction");
+  }
+
+  await Coupon.createTransaction(
+    {
+      transactionId: razorpay_payment_id,
+      userId: couponNumericUserId,
+      orderId: createdOrderDbId,
+      paymentId: payment.id,
+      couponId: verifiedCoupon.coupon_id,
+      status: "APPLIED",
+      createdBy: String(userId),
+      updatedBy: String(userId),
+    },
+    verificationLockClient
+  );
+
+  console.log("Coupon transaction recorded", {
+    couponId: verifiedCoupon.coupon_id,
+    orderId: createdOrderDbId,
+    paymentId: payment.id,
+  });
+}
+
 
   const updatedPaymentResult = await verificationLockClient.query(
     `
@@ -2395,12 +2563,13 @@ const getPayments = async (req, res) => {
 const checkoutSummary = async (req, res) => {
   try {
 
-    const {
-      user_id,
-      buyNow,
-      productId,
-      quantity,
-    } = req.body;
+const {
+  user_id,
+  buyNow,
+  productId,
+  quantity,
+  couponCode,
+} = req.body;
 
     const publicUserId = user_id;
 
@@ -2559,8 +2728,51 @@ const checkoutSummary = async (req, res) => {
     const deliveryCharge = checkoutTotals.deliveryCharge;
     const deliverySavings = checkoutTotals.deliverySavings;
     const expectedDeliveryDays = checkoutTotals.expectedDeliveryDays;
-    const actualAmount = checkoutTotals.actualAmount;
-    const payableAmount = checkoutTotals.payableAmount;
+
+const actualAmount = checkoutTotals.actualAmount;
+const payableAmount = Number(checkoutTotals.payableAmount);
+
+let coupon = null;
+let couponDiscount = 0;
+let finalPayableAmount = payableAmount;
+
+
+if (couponCode && String(couponCode).trim()) {
+  coupon = await Coupon.findByCode(String(couponCode).trim());
+
+  if (!coupon) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid coupon",
+    });
+  }
+
+  if (Number(coupon.is_active) !== 1) {
+    return res.status(400).json({
+      success: false,
+      message: "Coupon expired",
+    });
+  }
+
+  if (Number(totalLitres) < 2) {
+    return res.status(400).json({
+      success: false,
+      message: "This coupon requires a minimum purchase of 2 litres",
+    });
+  }
+
+  couponDiscount = Math.round(
+    (Number(payableAmount) * Number(coupon.coupon_percentage) / 100 +
+      Number.EPSILON) * 100
+  ) / 100;
+
+  finalPayableAmount = Math.max(
+    0,
+    Math.round(
+      (Number(payableAmount) - couponDiscount + Number.EPSILON) * 100
+    ) / 100
+  );
+}
 
     console.log(
       "===== CHECKOUT SUMMARY ====="
@@ -2600,29 +2812,28 @@ const checkoutSummary = async (req, res) => {
        RESPONSE
     ===================================================== */
 
-    return res.json({
-      success: true,
-
-      cartItems,
-
-      membershipBenefits,
-
-      subtotal,
-
-      actualAmount,
-
-      membershipDiscount,
-
-      walletClaim,
-
-      deliveryCharge,
-
-      deliverySavings,
-
-      expectedDeliveryDays,
-
-      payableAmount,
-    });
+  return res.json({
+  success: true,
+  cartItems,
+  membershipBenefits,
+  subtotal,
+  actualAmount,
+  membershipDiscount,
+  walletClaim,
+  deliveryCharge,
+  deliverySavings,
+  expectedDeliveryDays,
+  payableAmount,
+  coupon: coupon
+    ? {
+        coupon_id: coupon.coupon_id,
+        coupon_code: coupon.coupon_code,
+        coupon_percentage: Number(coupon.coupon_percentage),
+      }
+    : null,
+  couponDiscount,
+  finalPayableAmount,
+});
 
   } catch (error) {
 
