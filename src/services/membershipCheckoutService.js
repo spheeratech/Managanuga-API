@@ -3,6 +3,31 @@ const pool = require("../../db");
 const roundMoney = (value) =>
   Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
+const getDeliveryRule = async (cartCount) => {
+  const deliveryRuleResult = await pool.query(
+    `
+    SELECT
+      delivery_charges,
+      expected_delivery_days
+    FROM delivery_charges
+    WHERE is_active = 1
+      AND delivery_cart_count <= $1
+    ORDER BY delivery_cart_count DESC, id DESC
+    LIMIT 1
+    `,
+    [cartCount]
+  );
+
+  const deliveryRule = deliveryRuleResult.rows[0];
+  if (!deliveryRule) {
+    throw new Error(
+      `Delivery charge configuration not found for cart count ${cartCount}`
+    );
+  }
+
+  return deliveryRule;
+};
+
 const calculateMembershipBenefits = async (
   userId,
   cartItems,
@@ -260,38 +285,8 @@ const calculateMembershipBenefits = async (
     );
 
 
-  // ============================================================
-  // The configured product-weight threshold controls free delivery.
-  // ============================================================
-
-  const deliveryRuleResult = await pool.query(
-    `
-    SELECT
-      delivery_cart_count,
-      delivery_charges,
-      expected_delivery_days
-    FROM delivery_charges
-    WHERE is_active = 1
-    ORDER BY id DESC
-    LIMIT 1
-    `
-  );
-
-  const deliveryRule = deliveryRuleResult.rows[0];
-  if (!deliveryRule) {
-    throw new Error("Delivery charge configuration not found");
-  }
-
-  const deliveryThreshold = Number(
-    deliveryRule.delivery_cart_count
-  );
-  const configuredDeliveryCharge = Number(
-    deliveryRule.delivery_charges
-  );
-  const deliveryCharge =
-    totalLitres >= deliveryThreshold
-      ? 0
-      : configuredDeliveryCharge;
+  const deliveryRule = await getDeliveryRule(cartItems.length);
+  const deliveryCharge = Number(deliveryRule.delivery_charges);
 
 
   // ============================================================
@@ -333,8 +328,7 @@ const calculateMembershipBenefits = async (
     walletClaim,
 
     deliveryCharge,
-    deliverySavings:
-      deliveryCharge === 0 ? configuredDeliveryCharge : 0,
+    deliverySavings: 0,
     expectedDeliveryDays:
       deliveryRule.expected_delivery_days,
 
@@ -384,33 +378,9 @@ const calculateCheckoutTotals = async (
     membershipBenefits?.expectedDeliveryDays;
 
   if (deliveryCharge === undefined) {
-    const deliveryRuleResult = await pool.query(
-      `
-      SELECT
-        delivery_cart_count,
-        delivery_charges,
-        expected_delivery_days
-      FROM delivery_charges
-      WHERE is_active = 1
-      ORDER BY id DESC
-      LIMIT 1
-      `
-    );
-    const deliveryRule = deliveryRuleResult.rows[0];
-
-    if (!deliveryRule) {
-      throw new Error("Delivery charge configuration not found");
-    }
-
-    const configuredDeliveryCharge = Number(
-      deliveryRule.delivery_charges
-    );
-    deliveryCharge =
-      totalLitres >= Number(deliveryRule.delivery_cart_count)
-        ? 0
-        : configuredDeliveryCharge;
-    deliverySavings =
-      deliveryCharge === 0 ? configuredDeliveryCharge : 0;
+    const deliveryRule = await getDeliveryRule(cartItems.length);
+    deliveryCharge = Number(deliveryRule.delivery_charges);
+    deliverySavings = 0;
     expectedDeliveryDays = deliveryRule.expected_delivery_days;
   }
 
