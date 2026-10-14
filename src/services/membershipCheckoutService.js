@@ -3,7 +3,25 @@ const pool = require("../../db");
 const roundMoney = (value) =>
   Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
-const getDeliveryRule = async (cartCount) => {
+const getUnitLitres = (unitSize) => {
+  const size = Number(unitSize || 0);
+
+  if (!Number.isFinite(size) || size < 0) {
+    throw new Error("Invalid product unit size");
+  }
+
+  // Product sizes are stored in litres unless a numeric value represents millilitres.
+  return size > 10 ? size / 1000 : size;
+};
+
+const calculateTotalLitres = (cartItems) =>
+  cartItems.reduce(
+    (total, item) =>
+      total + getUnitLitres(item.weight) * Number(item.quantity),
+    0
+  );
+
+const getDeliveryRule = async (totalLitres) => {
   const deliveryRuleResult = await pool.query(
     `
     SELECT
@@ -15,13 +33,13 @@ const getDeliveryRule = async (cartCount) => {
     ORDER BY delivery_cart_count DESC, id DESC
     LIMIT 1
     `,
-    [cartCount]
+    [totalLitres]
   );
 
   const deliveryRule = deliveryRuleResult.rows[0];
   if (!deliveryRule) {
     throw new Error(
-      `Delivery charge configuration not found for cart count ${cartCount}`
+      `Delivery charge configuration not found for ${totalLitres} litres`
     );
   }
 
@@ -73,18 +91,14 @@ const calculateMembershipBenefits = async (
   // ============================================================
 
   let subtotal = 0;
-  let totalLitres = 0;
 
   for (const item of cartItems) {
 
     subtotal +=
       Number(item.price) *
       Number(item.quantity);
-
-    totalLitres +=
-      Number(item.quantity) *
-      Number(item.weight || 0);
   }
+  const totalLitres = calculateTotalLitres(cartItems);
 
 
   // ============================================================
@@ -97,7 +111,11 @@ const calculateMembershipBenefits = async (
       COALESCE(
         SUM(
           item_data.quantity *
-          COALESCE(p.weight, 0)
+          CASE
+            WHEN COALESCE(p.weight, 0) > 10
+              THEN COALESCE(p.weight, 0) / 1000
+            ELSE COALESCE(p.weight, 0)
+          END
         ),
         0
       ) AS previous_order_litres
@@ -216,7 +234,7 @@ const calculateMembershipBenefits = async (
       Number(item.price);
 
     const weight =
-      Number(item.weight || 0);
+      getUnitLitres(item.weight);
 
     const itemLitres = quantity * weight;
     const fullLitres = Math.min(
@@ -285,7 +303,7 @@ const calculateMembershipBenefits = async (
     );
 
 
-  const deliveryRule = await getDeliveryRule(cartItems.length);
+  const deliveryRule = await getDeliveryRule(totalLitres);
   const deliveryCharge = Number(deliveryRule.delivery_charges);
 
 
@@ -348,7 +366,6 @@ const calculateCheckoutTotals = async (
   );
 
   let subtotal = 0;
-  let totalLitres = 0;
 
   for (const item of cartItems) {
     const quantity = Number(item.quantity);
@@ -369,8 +386,8 @@ const calculateCheckoutTotals = async (
     }
 
     subtotal += quantity * price;
-    totalLitres += quantity * weight;
   }
+  const totalLitres = calculateTotalLitres(cartItems);
 
   let deliveryCharge = membershipBenefits?.deliveryCharge;
   let deliverySavings = membershipBenefits?.deliverySavings;
@@ -378,7 +395,7 @@ const calculateCheckoutTotals = async (
     membershipBenefits?.expectedDeliveryDays;
 
   if (deliveryCharge === undefined) {
-    const deliveryRule = await getDeliveryRule(cartItems.length);
+    const deliveryRule = await getDeliveryRule(totalLitres);
     deliveryCharge = Number(deliveryRule.delivery_charges);
     deliverySavings = 0;
     expectedDeliveryDays = deliveryRule.expected_delivery_days;
@@ -422,4 +439,5 @@ const calculateCheckoutTotals = async (
 module.exports = {
   calculateMembershipBenefits,
   calculateCheckoutTotals,
+  getUnitLitres,
 };

@@ -1,4 +1,5 @@
 const pool = require("../../db");
+const { getUnitLitres } = require("../services/membershipCheckoutService");
 
 const calculateOrderLitres = async (itemIds, quantities, client = pool) => {
   if (
@@ -36,7 +37,7 @@ const calculateOrderLitres = async (itemIds, quantities, client = pool) => {
 
   return result.rows.reduce(
     (total, row) =>
-      total + Number(row.quantity) * Number(row.weight || 0),
+      total + Number(row.quantity) * getUnitLitres(row.weight),
     0
   );
 };
