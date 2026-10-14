@@ -44,9 +44,22 @@ const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
   const couponDiscount = roundMoney(
     (eligibleProductAmount * Number(couponPercentage)) / 100
   );
-  const payableAmount = Math.max(
+  const walletClaim = Number(checkoutTotals.walletClaim || 0);
+  const deliveryCharge = Number(checkoutTotals.deliveryCharge || 0);
+  const otherApplicableFees = roundMoney(
+    Number(checkoutTotals.payableAmount) -
+      (eligibleProductAmount - walletClaim + deliveryCharge)
+  );
+  const discountedProductAmount = Math.max(
     0,
-    roundMoney(Number(checkoutTotals.payableAmount) - couponDiscount)
+    roundMoney(
+      eligibleProductAmount - couponDiscount - walletClaim
+    )
+  );
+  const payableAmount = roundMoney(
+    discountedProductAmount +
+      deliveryCharge +
+      otherApplicableFees
   );
 
   return { couponDiscount, payableAmount };
