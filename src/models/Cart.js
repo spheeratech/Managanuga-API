@@ -357,7 +357,7 @@ const getCartCount = async (user_id) => {
 
   const result = await pool.query(
     `
-    SELECT COUNT(*)::INTEGER AS count
+    SELECT COUNT(item_id)::INTEGER AS count
     FROM cart_items
     WHERE user_id = $1
       AND is_active = 1
