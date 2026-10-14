@@ -33,29 +33,47 @@ const roundMoney = (amount) =>
 const isRazorpayTestMode = () =>
   String(process.env.RAZORPAY_KEY_ID || "").startsWith("rzp_test_");
 
+
 const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
+  const subtotal = Number(
+    checkoutTotals.actualAmount ?? checkoutTotals.subtotal ?? 0
+  );
+
+  const membershipDiscount = Number(
+    checkoutTotals.membershipDiscount || 0
+  );
+
+  const walletClaim = Number(checkoutTotals.walletClaim || 0);
+  const deliveryCharge = Number(checkoutTotals.deliveryCharge || 0);
+
+  // Coupon applies to products after membership discount.
+  // Delivery charges and wallet claims are excluded.
   const eligibleProductAmount = Math.max(
     0,
-    roundMoney(
-      Number(checkoutTotals.subtotal) -
-        Number(checkoutTotals.membershipDiscount || 0)
-    )
+    roundMoney(subtotal - membershipDiscount)
   );
+
   const couponDiscount = roundMoney(
     (eligibleProductAmount * Number(couponPercentage)) / 100
   );
-  const walletClaim = Number(checkoutTotals.walletClaim || 0);
-  const deliveryCharge = Number(checkoutTotals.deliveryCharge || 0);
-  const otherApplicableFees = roundMoney(
-    Number(checkoutTotals.payableAmount) -
-      (eligibleProductAmount - walletClaim + deliveryCharge)
-  );
+
   const discountedProductAmount = Math.max(
     0,
     roundMoney(
       eligibleProductAmount - couponDiscount - walletClaim
     )
   );
+
+  const otherApplicableFees = roundMoney(
+    Number(checkoutTotals.payableAmount || 0) -
+      (
+        Number(checkoutTotals.subtotal ?? subtotal) -
+        membershipDiscount -
+        walletClaim +
+        deliveryCharge
+      )
+  );
+
   const payableAmount = roundMoney(
     discountedProductAmount +
       deliveryCharge +
@@ -64,6 +82,7 @@ const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
 
   return { couponDiscount, payableAmount };
 };
+
 
 /* =========================================================
    CREATE RAZORPAY ORDER
