@@ -26,6 +26,32 @@ const {
   sendOrderConfirmation,
   sendSubscriptionWhatsApp,
 } = require("../services/whatsappService");
+
+const roundMoney = (amount) =>
+  Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
+
+const isRazorpayTestMode = () =>
+  String(process.env.RAZORPAY_KEY_ID || "").startsWith("rzp_test_");
+
+const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
+  const eligibleProductAmount = Math.max(
+    0,
+    roundMoney(
+      Number(checkoutTotals.subtotal) -
+        Number(checkoutTotals.membershipDiscount || 0)
+    )
+  );
+  const couponDiscount = roundMoney(
+    (eligibleProductAmount * Number(couponPercentage)) / 100
+  );
+  const payableAmount = Math.max(
+    0,
+    roundMoney(Number(checkoutTotals.payableAmount) - couponDiscount)
+  );
+
+  return { couponDiscount, payableAmount };
+};
+
 /* =========================================================
    CREATE RAZORPAY ORDER
 ========================================================= */
@@ -311,24 +337,12 @@ if (couponCode && String(couponCode).trim()) {
     });
   }
 
-  couponDiscount = Math.round(
-    (
-      Number(payableAmount) *
-      Number(coupon.coupon_percentage) / 100 +
-      Number.EPSILON
-    ) * 100
-  ) / 100;
-
-  payableAmount = Math.max(
-    0,
-    Math.round(
-      (
-        Number(payableAmount) -
-        couponDiscount +
-        Number.EPSILON
-      ) * 100
-    ) / 100
+  const couponTotals = applyCouponToCheckoutTotals(
+    checkoutTotals,
+    coupon.coupon_percentage
   );
+  couponDiscount = couponTotals.couponDiscount;
+  payableAmount = couponTotals.payableAmount;
 
   couponDetails = {
     coupon_id: coupon.coupon_id,
@@ -376,13 +390,11 @@ if (couponCode && String(couponCode).trim()) {
        actualAmount and payableAmount.
     ===================================================== */
 
- // const razorpayTestAmount = 1;
-
-const razorpayTestAmount = 1;
+const razorpayAmount = isRazorpayTestMode() ? 1 : payableAmount;
 
 const razorpayOrder =
   await razorpayService.createRazorpayOrder(
-    razorpayTestAmount
+    razorpayAmount
   );
 
     console.log(
@@ -446,7 +458,7 @@ const razorpayOrder =
 
         payableAmount,
 
-       razorpayAmount: payableAmount,
+        razorpayAmount,
 
       },
     });
@@ -659,7 +671,9 @@ const razorpayAmount =
   razorpayAmountPaise / 100;
 
 
-const expectedAmount = 1;
+const expectedAmount = isRazorpayTestMode()
+  ? 1
+  : Number(localPayment.payable_amount);
 
 
 console.log(
@@ -814,7 +828,7 @@ if (pendingOrder) {
 
   if (
     Math.round(Number(pendingOrder.payable_amount) * 100) !==
-      Math.round(expectedAmount * 100) ||
+      Math.round(Number(localPayment.payable_amount) * 100) ||
     Math.round(Number(pendingOrder.actual_amount) * 100) !==
       Math.round(Number(localPayment.actual_amount) * 100) ||
     paymentMembershipId !== orderMembershipId
@@ -1197,20 +1211,15 @@ if (couponCode && String(couponCode).trim()) {
     });
   }
 
-  verifiedCouponDiscount = Math.round(
-    Number(checkoutTotals.payableAmount) *
-    Number(verifiedCoupon.coupon_percentage)
-  ) / 100;
+  const couponTotals = applyCouponToCheckoutTotals(
+    checkoutTotals,
+    verifiedCoupon.coupon_percentage
+  );
+  verifiedCouponDiscount = couponTotals.couponDiscount;
 
   checkoutTotals = {
     ...checkoutTotals,
-    payableAmount: Math.max(
-      0,
-      Math.round(
-        (Number(checkoutTotals.payableAmount) -
-          verifiedCouponDiscount) * 100
-      ) / 100
-    ),
+    payableAmount: couponTotals.payableAmount,
   };
 }
 
@@ -2814,17 +2823,12 @@ if (couponCode && String(couponCode).trim()) {
     });
   }
 
-  couponDiscount = Math.round(
-    (Number(payableAmount) * Number(coupon.coupon_percentage) / 100 +
-      Number.EPSILON) * 100
-  ) / 100;
-
-  finalPayableAmount = Math.max(
-    0,
-    Math.round(
-      (Number(payableAmount) - couponDiscount + Number.EPSILON) * 100
-    ) / 100
+  const couponTotals = applyCouponToCheckoutTotals(
+    checkoutTotals,
+    coupon.coupon_percentage
   );
+  couponDiscount = couponTotals.couponDiscount;
+  finalPayableAmount = couponTotals.payableAmount;
 }
 
     console.log(
