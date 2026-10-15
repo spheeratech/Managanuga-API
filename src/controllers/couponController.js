@@ -3,7 +3,7 @@ const Coupon = require("../models/Coupon");
 const Membership = require("../models/Membership");
 
 const MEMBERSHIP_COUPON_ERROR =
-  "Invalid coupon. Your membership discount is greater than this coupon discount.";
+ "Coupon is invalid for this user.";
 
 const validateCoupon = async (req, res) => {
   try {
