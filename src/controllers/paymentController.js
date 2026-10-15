@@ -65,7 +65,7 @@ const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
       normalizedCouponPercentage <= membershipPlanPercentage)
   ) {
     const error = new Error(
-      "Invalid coupon. Your membership discount is greater than this coupon discount."
+     "Coupon is invalid for this user."
     );
     error.code = "MEMBERSHIP_COUPON_NOT_ELIGIBLE";
     throw error;
@@ -994,7 +994,7 @@ if (pendingOrder) {
         return res.status(400).json({
           success: false,
           message:
-            "Invalid coupon. Your membership discount is greater than this coupon discount.",
+            "Coupon is invalid for this user.",
         });
       }
     }
