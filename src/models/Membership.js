@@ -294,6 +294,7 @@ const getActiveMembership = async (userId) => {
     WHERE
       um.user_id = $1
       AND um.status = 'ACTIVE'
+      AND um.is_active = 1
 
     ORDER BY um.id DESC
 

@@ -39,23 +39,67 @@ const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
     checkoutTotals.actualAmount ?? checkoutTotals.subtotal ?? 0
   );
 
-  const membershipDiscount = Number(
+  const originalMembershipDiscount = Number(
     checkoutTotals.membershipDiscount || 0
   );
 
-  const walletClaim = Number(checkoutTotals.walletClaim || 0);
+  const membershipBenefits = checkoutTotals.membershipBenefits;
+  const isMembershipCheckout = Boolean(membershipBenefits?.membership);
+  const membershipPlanPercentage = Number(
+    membershipBenefits?.planDiscountPercentage ??
+      membershipBenefits?.membership?.plan_discount_percentage ??
+      membershipBenefits?.membership?.discount_percentage
+  );
+  const normalizedCouponPercentage = Number(couponPercentage);
+
+  if (
+    !Number.isFinite(normalizedCouponPercentage) ||
+    normalizedCouponPercentage < 0
+  ) {
+    throw new Error("Coupon percentage is invalid");
+  }
+
+  if (
+    isMembershipCheckout &&
+    (!Number.isFinite(membershipPlanPercentage) ||
+      normalizedCouponPercentage <= membershipPlanPercentage)
+  ) {
+    const error = new Error(
+      "Invalid coupon. Your membership discount is greater than this coupon discount."
+    );
+    error.code = "MEMBERSHIP_COUPON_NOT_ELIGIBLE";
+    throw error;
+  }
+
+  const membershipDiscount = isMembershipCheckout
+    ? 0
+    : originalMembershipDiscount;
+  const existingWalletClaim = Number(checkoutTotals.walletClaim || 0);
   const deliveryCharge = Number(checkoutTotals.deliveryCharge || 0);
 
-  // Coupon applies to products after membership discount.
-  // Delivery charges and wallet claims are excluded.
+  // Non-members retain the existing post-membership calculation. For members,
+  // the accepted coupon replaces the membership discount on the product total.
   const eligibleProductAmount = Math.max(
     0,
     roundMoney(subtotal - membershipDiscount)
   );
 
-  const couponDiscount = roundMoney(
-    (eligibleProductAmount * Number(couponPercentage)) / 100
+  const couponDiscount = Math.min(
+    eligibleProductAmount,
+    roundMoney((eligibleProductAmount * normalizedCouponPercentage) / 100)
   );
+
+  const availableWalletClaim = isMembershipCheckout
+    ? Number(membershipBenefits.remainingWalletClaim ?? existingWalletClaim)
+    : existingWalletClaim;
+  const walletClaim = isMembershipCheckout
+    ? roundMoney(
+        Math.min(
+          Math.max(availableWalletClaim, 0),
+          Math.max(eligibleProductAmount - couponDiscount, 0)
+        )
+      )
+    : existingWalletClaim;
 
   const discountedProductAmount = Math.max(
     0,
@@ -68,8 +112,8 @@ const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
     Number(checkoutTotals.payableAmount || 0) -
       (
         Number(checkoutTotals.subtotal ?? subtotal) -
-        membershipDiscount -
-        walletClaim +
+        originalMembershipDiscount -
+        existingWalletClaim +
         deliveryCharge
       )
   );
@@ -80,7 +124,29 @@ const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
       otherApplicableFees
   );
 
-  return { couponDiscount, payableAmount };
+  const adjustedMembershipBenefits = isMembershipCheckout
+    ? {
+        ...membershipBenefits,
+        membershipDiscount,
+        walletClaim,
+        payableAmount,
+      }
+    : membershipBenefits;
+
+  return {
+    couponDiscount,
+    payableAmount,
+    checkoutTotals: {
+      ...checkoutTotals,
+      membershipDiscount,
+      walletClaim,
+      couponDiscount,
+      payableAmount,
+      ...(isMembershipCheckout
+        ? { membershipBenefits: adjustedMembershipBenefits }
+        : {}),
+    },
+  };
 };
 
 
@@ -375,6 +441,7 @@ if (couponCode && String(couponCode).trim()) {
   );
   couponDiscount = couponTotals.couponDiscount;
   payableAmount = couponTotals.payableAmount;
+  checkoutTotals = couponTotals.checkoutTotals;
 
   couponDetails = {
     coupon_id: coupon.coupon_id,
@@ -502,6 +569,12 @@ const razorpayOrder =
       err
     );
 
+    if (err.code === "MEMBERSHIP_COUPON_NOT_ELIGIBLE") {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+      });
+    }
 
     return res.status(500).json({
       success: false,
@@ -518,6 +591,8 @@ const verifyPayment = async (req, res) => {
   let verificationLockClient = null;
   let verificationLockKey = null;
   let couponVerificationLockKey = null;
+  let verifiedCoupon = null;
+  let verifiedCouponDiscount = 0;
 
   try {
     const {
@@ -873,6 +948,115 @@ if (pendingOrder) {
     });
   }
 
+  if (couponCode && String(couponCode).trim()) {
+    verifiedCoupon = await Coupon.findByCode(String(couponCode).trim());
+    const orderLitres = await Membership.calculateOrderLitres(
+      pendingOrder.item_id,
+      pendingOrder.quantity,
+      verificationLockClient
+    );
+
+    if (!verifiedCoupon || Number(verifiedCoupon.is_active) !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: !verifiedCoupon ? "Invalid coupon" : "Coupon expired",
+      });
+    }
+    if (orderLitres < 2) {
+      return res.status(400).json({
+        success: false,
+        message: "This coupon requires a minimum purchase of 2 litres",
+      });
+    }
+
+    if (paymentMembershipId !== null) {
+      const planResult = await verificationLockClient.query(
+        `
+        SELECT sp.discount_percentage
+        FROM user_memberships um
+        INNER JOIN lkp_subscription_plans sp
+          ON sp.id = um.plan_id
+        WHERE um.id = $1
+          AND um.user_id = $2
+        LIMIT 1
+        `,
+        [paymentMembershipId, userId]
+      );
+      const planPercentage = Number(
+        planResult.rows[0]?.discount_percentage
+      );
+
+      if (
+        !Number.isFinite(planPercentage) ||
+        Number(verifiedCoupon.coupon_percentage) <= planPercentage
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid coupon. Your membership discount is greater than this coupon discount.",
+        });
+      }
+    }
+
+    couponVerificationLockKey =
+      `COUPON_USE:${req.authenticatedUser.id}:${verifiedCoupon.coupon_id}`;
+    await verificationLockClient.query(
+      "SELECT pg_advisory_lock(hashtext($1))",
+      [couponVerificationLockKey]
+    );
+    if (
+      await Coupon.hasSuccessfulUseForUser({
+        userId: req.authenticatedUser.id,
+        couponId: verifiedCoupon.coupon_id,
+        excludePaymentId: localPayment.id,
+        client: verificationLockClient,
+      })
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "You have already used this coupon",
+      });
+    }
+
+    verifiedCouponDiscount = roundMoney(
+      Math.min(
+        Number(pendingOrder.actual_amount),
+        (Number(pendingOrder.actual_amount) *
+          Number(verifiedCoupon.coupon_percentage)) /
+          100
+      )
+    );
+    const expectedCouponPayable = roundMoney(
+      Math.max(
+        0,
+        Number(pendingOrder.actual_amount) -
+          verifiedCouponDiscount -
+          Number(pendingOrder.wallet_claim || 0)
+      ) + Number(pendingOrder.delivery_charge || 0)
+    );
+
+    if (
+      Number(pendingOrder.coupon_discount || 0) !==
+        verifiedCouponDiscount ||
+      Math.round(expectedCouponPayable * 100) !==
+        Math.round(Number(pendingOrder.payable_amount) * 100)
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Captured payment and coupon totals require reconciliation",
+        paymentId: localPayment.id,
+      });
+    }
+  } else if (Number(pendingOrder.coupon_discount || 0) > 0) {
+    return res.status(409).json({
+      success: false,
+      message:
+        "Coupon code is required to reconcile this captured payment",
+      paymentId: localPayment.id,
+    });
+  }
+
   if (
     (Number(pendingOrder.membership_discount || 0) > 0 ||
       Number(pendingOrder.wallet_claim || 0) > 0) &&
@@ -910,6 +1094,7 @@ if (pendingOrder) {
       UPDATE orders
       SET
         payment_status = 'PAID',
+        coupon_discount = $5,
         updated_at = CURRENT_TIMESTAMP,
         updated_by = $1
       WHERE id = $2
@@ -919,8 +1104,46 @@ if (pendingOrder) {
         AND membership_id IS NOT DISTINCT FROM $4::integer
       RETURNING *
       `,
-      [userId, pendingOrder.id, razorpay_order_id, paymentMembershipId]
+      [
+        userId,
+        pendingOrder.id,
+        razorpay_order_id,
+        paymentMembershipId,
+        verifiedCouponDiscount,
+      ]
     );
+
+    if (verifiedCoupon) {
+      const couponUserResult = await verificationLockClient.query(
+        `
+        SELECT id
+        FROM user_login
+        WHERE user_id = $1
+          AND is_active = 1
+        LIMIT 1
+        `,
+        [req.authenticatedUser.id]
+      );
+      const couponNumericUserId = couponUserResult.rows[0]?.id;
+      if (!couponNumericUserId) {
+        throw new Error(
+          "Could not resolve numeric user ID for coupon transaction"
+        );
+      }
+      await Coupon.createTransaction(
+        {
+          transactionId: razorpay_payment_id,
+          userId: couponNumericUserId,
+          orderId: pendingOrder.id,
+          paymentId: localPayment.id,
+          couponId: verifiedCoupon.coupon_id,
+          status: "APPLIED",
+          createdBy: String(userId),
+          updatedBy: String(userId),
+        },
+        verificationLockClient
+      );
+    }
     const paymentUpdate = await verificationLockClient.query(
       `
       UPDATE payments
@@ -1067,8 +1290,6 @@ let membershipBenefits =
   null;
 let checkoutTotals = null;
 let checkoutItems = [];
-let verifiedCoupon = null;
-let verifiedCouponDiscount = 0;
 const persistedMembershipId =
   localPayment.membership_id == null
     ? null
@@ -1248,11 +1469,7 @@ if (couponCode && String(couponCode).trim()) {
     verifiedCoupon.coupon_percentage
   );
   verifiedCouponDiscount = couponTotals.couponDiscount;
-
-  checkoutTotals = {
-    ...checkoutTotals,
-    payableAmount: couponTotals.payableAmount,
-  };
+  checkoutTotals = couponTotals.checkoutTotals;
 }
 
   membershipBenefits = checkoutTotals.membershipBenefits;
@@ -2556,6 +2773,13 @@ return res.json({
     });
   }
 
+  if (error.code === "MEMBERSHIP_COUPON_NOT_ELIGIBLE") {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+
   return res.status(500).json({
     success: false,
 
@@ -2829,6 +3053,9 @@ const payableAmount = Number(checkoutTotals.payableAmount);
 let coupon = null;
 let couponDiscount = 0;
 let finalPayableAmount = payableAmount;
+let appliedMembershipDiscount = membershipDiscount;
+let appliedWalletClaim = walletClaim;
+let appliedMembershipBenefits = membershipBenefits;
 
 
 if (couponCode && String(couponCode).trim()) {
@@ -2860,7 +3087,11 @@ if (couponCode && String(couponCode).trim()) {
     coupon.coupon_percentage
   );
   couponDiscount = couponTotals.couponDiscount;
-  finalPayableAmount = couponTotals.payableAmount;
+  checkoutTotals = couponTotals.checkoutTotals;
+  finalPayableAmount = checkoutTotals.payableAmount;
+  appliedMembershipDiscount = checkoutTotals.membershipDiscount;
+  appliedWalletClaim = checkoutTotals.walletClaim;
+  appliedMembershipBenefits = checkoutTotals.membershipBenefits;
 }
 
     console.log(
@@ -2904,11 +3135,11 @@ if (couponCode && String(couponCode).trim()) {
   return res.json({
   success: true,
   cartItems,
-  membershipBenefits,
+  membershipBenefits: appliedMembershipBenefits,
   subtotal,
   actualAmount,
-  membershipDiscount,
-  walletClaim,
+  membershipDiscount: appliedMembershipDiscount,
+  walletClaim: appliedWalletClaim,
   deliveryCharge,
   deliverySavings,
   expectedDeliveryDays,
@@ -2932,7 +3163,9 @@ if (couponCode && String(couponCode).trim()) {
     );
 
 
-    return res.status(500).json({
+    return res.status(
+      error.code === "MEMBERSHIP_COUPON_NOT_ELIGIBLE" ? 400 : 500
+    ).json({
       success: false,
 
       message:
@@ -2952,4 +3185,5 @@ module.exports = {
   verifyPayment,
   getPayments,
   checkoutSummary,
+  applyCouponToCheckoutTotals,
 };
