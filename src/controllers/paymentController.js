@@ -129,6 +129,7 @@ const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
         ...membershipBenefits,
         membershipDiscount,
         walletClaim,
+        couponDiscount,
         payableAmount,
       }
     : membershipBenefits;
@@ -1038,6 +1039,8 @@ if (pendingOrder) {
     if (
       Number(pendingOrder.coupon_discount || 0) !==
         verifiedCouponDiscount ||
+      (paymentMembershipId !== null &&
+        Number(pendingOrder.membership_discount || 0) !== 0) ||
       Math.round(expectedCouponPayable * 100) !==
         Math.round(Number(pendingOrder.payable_amount) * 100)
     ) {
@@ -3034,7 +3037,7 @@ const {
        MEMBERSHIP BENEFITS
     ===================================================== */
 
-    const checkoutTotals = await calculateCheckoutTotals(
+    let checkoutTotals = await calculateCheckoutTotals(
       publicUserId,
       cartItems
     );
@@ -3116,15 +3119,15 @@ if (couponCode && String(couponCode).trim()) {
 
       actualAmount,
 
-      membershipDiscount,
+      membershipDiscount: appliedMembershipDiscount,
 
-      walletClaim,
+      walletClaim: appliedWalletClaim,
 
       deliveryCharge,
 
       expectedDeliveryDays,
 
-      payableAmount,
+      payableAmount: finalPayableAmount,
     });
 
 
@@ -3143,7 +3146,7 @@ if (couponCode && String(couponCode).trim()) {
   deliveryCharge,
   deliverySavings,
   expectedDeliveryDays,
-  payableAmount,
+  payableAmount: finalPayableAmount,
   coupon: coupon
     ? {
         coupon_id: coupon.coupon_id,
