@@ -62,13 +62,17 @@ const calculateMembershipBenefits = async (
 
   const membershipResult = await pool.query(
     `
-    SELECT *
-    FROM user_memberships
-    WHERE user_id = $1
-      AND status = 'ACTIVE'
-      AND is_active = 1
-      AND ($2::integer IS NULL OR id = $2::integer)
-    ORDER BY id DESC
+    SELECT
+      um.*,
+      sp.discount_percentage AS plan_discount_percentage
+    FROM user_memberships um
+    INNER JOIN lkp_subscription_plans sp
+      ON sp.id = um.plan_id
+    WHERE um.user_id = $1
+      AND um.status = 'ACTIVE'
+      AND um.is_active = 1
+      AND ($2::integer IS NULL OR um.id = $2::integer)
+    ORDER BY um.id DESC
     LIMIT 1
     `,
     [userId, selectedMembershipId ?? null]
@@ -342,8 +346,12 @@ const calculateMembershipBenefits = async (
     halfDiscountLitres,
 
     membershipDiscount,
+    planDiscountPercentage: Number(
+      membership.plan_discount_percentage
+    ),
 
     walletClaim,
+    remainingWalletClaim,
 
     deliveryCharge,
     deliverySavings: 0,

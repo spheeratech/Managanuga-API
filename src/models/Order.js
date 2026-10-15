@@ -418,6 +418,7 @@ if (!userId) {
           quantity,
           unit_price,
           payable_amount,
+          coupon_discount,
           status,
           payment_status,
           address_id
@@ -436,9 +437,10 @@ if (!userId) {
           $10,
           $11,
           $12,
+          $13,
           'PLACED',
           'PENDING',
-          $13
+          $14
         )
         RETURNING *
         `,
@@ -455,6 +457,7 @@ if (!userId) {
           quantities,
           unitPrices,
           payableAmount,
+          Number(checkoutTotals.couponDiscount || 0),
           address_id,
         ]
       );

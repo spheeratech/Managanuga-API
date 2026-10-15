@@ -1,5 +1,9 @@
 
 const Coupon = require("../models/Coupon");
+const Membership = require("../models/Membership");
+
+const MEMBERSHIP_COUPON_ERROR =
+  "Invalid coupon. Your membership discount is greater than this coupon discount.";
 
 const validateCoupon = async (req, res) => {
   try {
@@ -31,6 +35,16 @@ const validateCoupon = async (req, res) => {
     }
 
     if (
+      !Number.isFinite(Number(coupon.coupon_percentage)) ||
+      Number(coupon.coupon_percentage) < 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid coupon",
+      });
+    }
+
+    if (
       !Number.isFinite(Number(totalLitres)) ||
       Number(totalLitres) < 2
     ) {
@@ -38,6 +52,22 @@ const validateCoupon = async (req, res) => {
         success: false,
         message: "This coupon requires a minimum purchase of 2 litres",
       });
+    }
+
+    const membership = await Membership.getActiveMembership(
+      req.authenticatedUser.id
+    );
+    if (membership) {
+      const planPercentage = Number(membership.discount_percentage);
+      if (
+        !Number.isFinite(planPercentage) ||
+        Number(coupon.coupon_percentage) <= planPercentage
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: MEMBERSHIP_COUPON_ERROR,
+        });
+      }
     }
 
     const alreadyUsed = await Coupon.hasSuccessfulUseForUser({
