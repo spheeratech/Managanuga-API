@@ -102,7 +102,7 @@ const getCustomers = async (userId) => {
 
       LEFT JOIN orders o
         ON o.user_id = ul.user_id
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = ul.role
 
       WHERE

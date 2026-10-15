@@ -30,7 +30,7 @@ const Wallet = {
         AND ul.is_active = 1
         AND EXISTS (
           SELECT 1
-          FROM user_roles ur
+          FROM lkp_user_roles ur
           WHERE ur.id = ul.role
             AND UPPER(TRIM(ur.role_name)) = UPPER(TRIM(w.wallet_type))
         )
@@ -114,7 +114,7 @@ const Wallet = {
           AND ul.is_active = 1
           AND EXISTS (
             SELECT 1
-            FROM user_roles ur
+            FROM lkp_user_roles ur
             WHERE ur.id = ul.role
               AND UPPER(TRIM(ur.role_name)) = UPPER(TRIM(w.wallet_type))
           )

@@ -294,33 +294,73 @@ const createUser = async (req, res) => {
     );
     console.log("========================================");
     await client.query("COMMIT");
-let smsSent = false;
 
-if (targetRole === "RESELLER") {
-  try {
-   const passwordMessage =
-  `We are delighted to welcome you to the ManaGanuga Reseller Network!\n\n` +
-  `Your reseller account has been created successfully. Please find your login credentials below:\n\n` +
-  `👤 User ID: ${clean(mobileNo)}\n` +
-  `🔐 Password: ${generatedPassword}\n` +
-  `We recommend changing your password after your first login.\n\n` +
-  `You can now log in to your ManaGanuga account and get started with your reseller journey.\n\n` +
-  `For any assistance, please contact our support team.`;
+    let smsSent = false;
 
-    await sendSMS(
-      clean(mobileNo),
-      passwordMessage,
-      process.env.SMS_RESELLER_TEMPLATE_ID,
-    );
+    const smsRoles = ["ADMIN", "VENDOR", "RESELLER"];
 
-    smsSent = true;
-  } catch (smsError) {
-    console.error(
-      "Reseller created, but registration SMS failed:",
-      smsError.message
-    );
-  }
-}
+    if (smsRoles.includes(targetRole)) {
+      try {
+        const templateId = process.env.SMS_PASSWORD_TEMPLATE_ID;
+
+        if (!templateId) {
+          throw new Error("SMS_PASSWORD_TEMPLATE_ID is missing from .env");
+        }
+
+        const passwordMessage =
+          `We are delighted to have you with us. Your account for managanuga has been created successfully.\n` +
+          `User ID: ${userId}\n` +
+          `Password: ${generatedPassword}\n` +
+          `For your peace of mind, we recommend updating your password after your first login.\n` +
+          `managanuga`;
+
+        const smsResponse = await sendSMS(
+          clean(mobileNo),
+          passwordMessage,
+          templateId,
+        );
+
+        console.log(
+          `${targetRole} registration SMS provider response:`,
+          smsResponse,
+        );
+
+        smsSent = true;
+      } catch (smsError) {
+        console.error(
+          `${targetRole} created, but registration SMS failed:`,
+          smsError.message,
+        );
+      }
+    }
+
+    // let smsSent = false;
+
+    // if (targetRole === "RESELLER") {
+    //   try {
+    //     const passwordMessage =
+    //       `We are delighted to welcome you to the ManaGanuga {#var#} Network!\n\n` +
+    //       `Your reseller account has been created successfully. Please find your login credentials below:\n\n` +
+    //       `👤 User ID: ${clean(mobileNo)}\n` +
+    //       `🔐 Password: ${generatedPassword}\n` +
+    //       `We recommend changing your password after your first login.\n\n` +
+    //       `You can now log in to your ManaGanuga account and get started with your{#var#} journey.\n\n` +
+    //       `For any assistance, please contact our support team.`;
+
+    //     await sendSMS(
+    //       clean(mobileNo),
+    //       passwordMessage,
+    //       process.env.SMS_RESELLER_TEMPLATE_ID,
+    //     );
+
+    //     smsSent = true;
+    //   } catch (smsError) {
+    //     console.error(
+    //       "Reseller created, but registration SMS failed:",
+    //       smsError.message,
+    //     );
+    //   }
+    // }
     // return res.status(201).json({
     //   success: true,
     //   message: `${targetRole} created successfully`,
@@ -562,7 +602,7 @@ const loginUser = async (req, res) => {
         i.email
       FROM user_login l
       LEFT JOIN user_info i ON l.user_id = i.user_id
-      LEFT JOIN user_roles ur ON ur.id = l.role
+      LEFT JOIN lkp_user_roles ur ON ur.id = l.role
       WHERE LOWER(i.email) = LOWER($1) 
          OR LOWER(l.username) = LOWER($1) 
          OR l.mobile_no = $1

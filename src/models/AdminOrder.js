@@ -57,7 +57,7 @@ const createAdminOrder = async ({
         name,
         price,
         stock
-      FROM products
+      FROM public.lkp_products
       WHERE id = $1::integer
       `,
       [Number(productId)],
@@ -102,8 +102,11 @@ const createAdminOrder = async ({
       INSERT INTO orders
       (
         user_id,
-        actual_amount AS total_amount,
+        actual_amount,
         warehouse_id,
+        item_id,
+        quantity,
+        unit_price,
         status,
         payment_status
       )
@@ -112,6 +115,9 @@ const createAdminOrder = async ({
         $1::varchar,
         $2::numeric,
         $3::integer,
+        $4::integer[],
+        $5::integer[],
+        $6::numeric[],
         'PENDING',
         'PENDING'
       )
@@ -121,36 +127,13 @@ const createAdminOrder = async ({
         String(user_id),
         totalAmount,
         warehouse_id === null ? null : Number(warehouse_id),
+        [Number(product.id)],
+        [orderQuantity],
+        [Number(product.price)],
       ],
     );
 
     const order = orderResult.rows[0];
-
-    // --------------------------------
-    // CREATE ORDER ITEM
-    // --------------------------------
-
-    await client.query(
-      `
-      INSERT INTO order_items_old
-      (
-        order_id,
-        item_type,
-        item_id,
-        quantity,
-        unit_price
-      )
-      VALUES
-      (
-        $1::integer,
-        'PRODUCT',
-        $2::integer,
-        $3::integer,
-        $4::numeric
-      )
-      `,
-      [order.id, Number(product.id), orderQuantity, Number(product.price)],
-    );
 
     // --------------------------------
     // DEDUCT STOCK
@@ -158,7 +141,7 @@ const createAdminOrder = async ({
 
     await client.query(
       `
-      UPDATE products
+      UPDATE public.lkp_products
       SET stock = stock - $1::integer
       WHERE id = $2::integer
       `,
@@ -220,6 +203,7 @@ const getAdminOrders = async () => {
     SELECT
       o.id,
       o.user_id,
+      o.address_id,
       o.actual_amount AS total_amount,
       o.warehouse_id,
       o.status,
@@ -230,48 +214,133 @@ const getAdminOrders = async () => {
 
       -- USER LOGIN DETAILS
       ul.username,
-      ul.mobile_no AS customer_phone,
+
+      -- CUSTOMER CONTACT
+      COALESCE(
+        NULLIF(TRIM(ua.phone), ''),
+        NULLIF(TRIM(ul.mobile_no), '')
+      ) AS customer_phone,
 
       -- USER PROFILE DETAILS
       ui.first_name,
       ui.last_name,
       ui.email AS customer_email,
 
-      -- ADDRESS DETAILS
-      ui.address AS customer_address,
-      ui.city AS customer_city,
-      ui.state AS customer_state,
-      ui.pincode AS customer_pincode,
-
-      -- FINAL CUSTOMER NAME
+      -- DELIVERY ADDRESS SAVED WITH THE MOBILE ORDER
       COALESCE(
+        NULLIF(TRIM(ua.full_name), ''),
         NULLIF(
-          TRIM(
-            CONCAT(
-              COALESCE(ui.first_name, ''),
-              ' ',
-              COALESCE(ui.last_name, '')
-            )
-          ),
+          TRIM(CONCAT_WS(' ', ui.first_name, ui.last_name)),
           ''
         ),
-        NULLIF(ul.username, ''),
+        NULLIF(TRIM(ul.username), ''),
         CONCAT('Customer #', o.user_id)
-      ) AS customer_name
+      ) AS customer_name,
 
-    FROM orders o
+      COALESCE(
+        NULLIF(
+          TRIM(CONCAT_WS(
+            ' ',
+            NULLIF(TRIM(ua.address_line1), ''),
+            NULLIF(TRIM(ua.address_line2), '')
+          )),
+          ''
+        ),
+        NULLIF(TRIM(ui.address), '')
+      ) AS customer_address,
 
-    LEFT JOIN user_login ul
+      COALESCE(
+        NULLIF(TRIM(ua.city), ''),
+        NULLIF(TRIM(ui.city), '')
+      ) AS customer_city,
+
+      COALESCE(
+        NULLIF(TRIM(ua.state), ''),
+        NULLIF(TRIM(ui.state), '')
+      ) AS customer_state,
+
+      COALESCE(
+        NULLIF(TRIM(ua.postal_code), ''),
+        NULLIF(TRIM(ui.pincode), '')
+      ) AS customer_pincode,
+
+      ua.country AS customer_country
+
+    FROM public.orders o
+
+    LEFT JOIN public.user_login ul
       ON CAST(o.user_id AS VARCHAR) = CAST(ul.user_id AS VARCHAR)
 
-    LEFT JOIN user_info ui
+    LEFT JOIN public.user_info ui
       ON CAST(o.user_id AS VARCHAR) = CAST(ui.user_id AS VARCHAR)
+
+    LEFT JOIN public.user_address ua
+      ON ua.id = o.address_id
+     AND CAST(ua.user_id AS VARCHAR) = CAST(o.user_id AS VARCHAR)
 
     ORDER BY o.id DESC
   `);
 
   return result.rows;
 };
+
+// const getAdminOrders = async () => {
+//   const result = await pool.query(`
+//     SELECT
+//       o.id,
+//       o.user_id,
+//       o.actual_amount AS total_amount,
+//       o.warehouse_id,
+//       o.status,
+//       o.payment_status,
+//       o.tracking_number,
+//       o.courier_name,
+//       o.created_at,
+
+//       -- USER LOGIN DETAILS
+//       ul.username,
+//       ul.mobile_no AS customer_phone,
+
+//       -- USER PROFILE DETAILS
+//       ui.first_name,
+//       ui.last_name,
+//       ui.email AS customer_email,
+
+//       -- ADDRESS DETAILS
+//       ui.address AS customer_address,
+//       ui.city AS customer_city,
+//       ui.state AS customer_state,
+//       ui.pincode AS customer_pincode,
+
+//       -- FINAL CUSTOMER NAME
+//       COALESCE(
+//         NULLIF(
+//           TRIM(
+//             CONCAT(
+//               COALESCE(ui.first_name, ''),
+//               ' ',
+//               COALESCE(ui.last_name, '')
+//             )
+//           ),
+//           ''
+//         ),
+//         NULLIF(ul.username, ''),
+//         CONCAT('Customer #', o.user_id)
+//       ) AS customer_name
+
+//     FROM orders o
+
+//     LEFT JOIN user_login ul
+//       ON CAST(o.user_id AS VARCHAR) = CAST(ul.user_id AS VARCHAR)
+
+//     LEFT JOIN user_info ui
+//       ON CAST(o.user_id AS VARCHAR) = CAST(ui.user_id AS VARCHAR)
+
+//     ORDER BY o.id DESC
+//   `);
+
+//   return result.rows;
+// };
 
 /* --------------------------------
    GET ADMIN ORDER BY ID
@@ -283,34 +352,71 @@ const getAdminOrderById = async (id) => {
     SELECT
       o.*,
 
+      -- CUSTOMER NAME
       COALESCE(
+        NULLIF(TRIM(ua.full_name), ''),
         NULLIF(
-          TRIM(
-            CONCAT(
-              COALESCE(ui.first_name, ''),
-              ' ',
-              COALESCE(ui.last_name, '')
-            )
-          ),
+          TRIM(CONCAT_WS(' ', ui.first_name, ui.last_name)),
           ''
         ),
-        ul.username
+        NULLIF(TRIM(ul.username), ''),
+        CONCAT('Customer #', o.user_id)
       ) AS customer_name,
 
-      ul.mobile_no AS customer_phone,
+      -- CUSTOMER CONTACT
+      COALESCE(
+        NULLIF(TRIM(ua.phone), ''),
+        NULLIF(TRIM(ul.mobile_no), '')
+      ) AS customer_phone,
+
       ui.email AS customer_email,
-      ui.address,
-      ui.city,
-      ui.state,
-      ui.pincode
 
-    FROM orders o
+      -- DELIVERY ADDRESS LINKED TO THIS ORDER
+      COALESCE(
+        NULLIF(
+          TRIM(CONCAT_WS(
+            ' ',
+            NULLIF(TRIM(ua.address_line1), ''),
+            NULLIF(TRIM(ua.address_line2), '')
+          )),
+          ''
+        ),
+        NULLIF(TRIM(ui.address), '')
+      ) AS address,
 
-    LEFT JOIN user_login ul
-      ON o.user_id = ul.user_id
+      ua.address_line1,
+      ua.address_line2,
+      ua.full_name AS delivery_name,
+      ua.phone AS delivery_phone,
+      ua.address_type,
+      ua.country,
 
-    LEFT JOIN user_info ui
-      ON o.user_id = ui.user_id
+      COALESCE(
+        NULLIF(TRIM(ua.city), ''),
+        NULLIF(TRIM(ui.city), '')
+      ) AS city,
+
+      COALESCE(
+        NULLIF(TRIM(ua.state), ''),
+        NULLIF(TRIM(ui.state), '')
+      ) AS state,
+
+      COALESCE(
+        NULLIF(TRIM(ua.postal_code), ''),
+        NULLIF(TRIM(ui.pincode), '')
+      ) AS pincode
+
+    FROM public.orders o
+
+    LEFT JOIN public.user_login ul
+      ON CAST(o.user_id AS VARCHAR) = CAST(ul.user_id AS VARCHAR)
+
+    LEFT JOIN public.user_info ui
+      ON CAST(o.user_id AS VARCHAR) = CAST(ui.user_id AS VARCHAR)
+
+    LEFT JOIN public.user_address ua
+      ON ua.id = o.address_id
+     AND CAST(ua.user_id AS VARCHAR) = CAST(o.user_id AS VARCHAR)
 
     WHERE o.id = $1::integer
     `,
@@ -323,28 +429,32 @@ const getAdminOrderById = async (id) => {
 
   const order = orderResult.rows[0];
 
-  // --------------------------------
   // GET ORDER ITEMS
-  // --------------------------------
-
   const itemsResult = await pool.query(
     `
     SELECT
-      oi.id,
-      oi.item_id AS product_id,
+      item.item_index AS id,
+      item.item_id AS product_id,
       p.name AS product_name,
-      oi.quantity,
-      oi.unit_price,
-      (oi.quantity * oi.unit_price) AS subtotal
+      item.quantity,
+      item.unit_price,
+      (item.quantity * item.unit_price) AS subtotal
 
-    FROM order_items_old oi
+    FROM public.orders o
 
-    JOIN products p
-      ON p.id = oi.item_id
+    CROSS JOIN LATERAL unnest(
+      o.item_id,
+      o.quantity,
+      o.unit_price
+    ) WITH ORDINALITY
+      AS item(item_id, quantity, unit_price, item_index)
 
-    WHERE oi.order_id = $1::integer
+    JOIN public.lkp_products p
+      ON p.id = item.item_id
 
-    ORDER BY oi.id
+    WHERE o.id = $1::integer
+
+    ORDER BY item.item_index
     `,
     [Number(id)],
   );
@@ -354,6 +464,85 @@ const getAdminOrderById = async (id) => {
     items: itemsResult.rows,
   };
 };
+
+// const getAdminOrderById = async (id) => {
+//   const orderResult = await pool.query(
+//     `
+//     SELECT
+//       o.*,
+
+//       COALESCE(
+//         NULLIF(
+//           TRIM(
+//             CONCAT(
+//               COALESCE(ui.first_name, ''),
+//               ' ',
+//               COALESCE(ui.last_name, '')
+//             )
+//           ),
+//           ''
+//         ),
+//         ul.username
+//       ) AS customer_name,
+
+//       ul.mobile_no AS customer_phone,
+//       ui.email AS customer_email,
+//       ui.address,
+//       ui.city,
+//       ui.state,
+//       ui.pincode
+
+//     FROM orders o
+
+//     LEFT JOIN user_login ul
+//       ON o.user_id = ul.user_id
+
+//     LEFT JOIN user_info ui
+//       ON o.user_id = ui.user_id
+
+//     WHERE o.id = $1::integer
+//     `,
+//     [Number(id)],
+//   );
+
+//   if (orderResult.rowCount === 0) {
+//     return null;
+//   }
+
+//   const order = orderResult.rows[0];
+
+//   // --------------------------------
+//   // GET ORDER ITEMS
+//   // --------------------------------
+
+//   const itemsResult = await pool.query(
+//     `
+//     SELECT
+//       item.item_index AS id,
+//       item.item_id AS product_id,
+//       p.name AS product_name,
+//       item.quantity,
+//       item.unit_price,
+//       (item.quantity * item.unit_price) AS subtotal
+
+//     FROM orders o
+//     CROSS JOIN LATERAL unnest(o.item_id, o.quantity, o.unit_price)
+//       WITH ORDINALITY AS item(item_id, quantity, unit_price, item_index)
+//     JOIN public.lkp_products p
+//       ON p.id = item.item_id
+
+//     WHERE o.id = $1::integer
+
+//     ORDER BY item.item_index
+//     `,
+//     [Number(id)],
+//   );
+
+//   return {
+//     ...order,
+//     items: itemsResult.rows,
+//   };
+// };
 
 /* --------------------------------
    UPDATE ADMIN ORDER
@@ -409,13 +598,15 @@ const deleteAdminOrder = async (id) => {
     // GET ORDER ITEMS
     // --------------------------------
 
-    const itemsResult = await client.query(
+    const orderItemsResult = await client.query(
       `
       SELECT
-        item_id,
-        quantity
-      FROM order_items_old
-      WHERE order_id = $1::integer
+        item.item_id,
+        item.quantity
+      FROM orders o
+      CROSS JOIN LATERAL unnest(o.item_id, o.quantity)
+        AS item(item_id, quantity)
+      WHERE o.id = $1::integer
       `,
       [Number(id)],
     );
@@ -424,28 +615,16 @@ const deleteAdminOrder = async (id) => {
     // RESTORE PRODUCT STOCK
     // --------------------------------
 
-    for (const item of itemsResult.rows) {
+    for (const item of orderItemsResult.rows) {
       await client.query(
         `
-        UPDATE products
+        UPDATE public.lkp_products
         SET stock = stock + $1::integer
         WHERE id = $2::integer
         `,
         [Number(item.quantity), Number(item.item_id)],
       );
     }
-
-    // --------------------------------
-    // DELETE ORDER ITEMS
-    // --------------------------------
-
-    await client.query(
-      `
-      DELETE FROM order_items_old
-      WHERE order_id = $1::integer
-      `,
-      [Number(id)],
-    );
 
     // --------------------------------
     // DELETE ORDER
@@ -485,35 +664,29 @@ const deleteAllAdminOrders = async () => {
     // GET ALL ORDER ITEMS
     // --------------------------------
 
-    const itemsResult = await client.query(`
+    const orderItemsResult = await client.query(`
       SELECT
-        item_id,
-        quantity
-      FROM order_items_old
+        item.item_id,
+        item.quantity
+      FROM orders o
+      CROSS JOIN LATERAL unnest(o.item_id, o.quantity)
+        AS item(item_id, quantity)
     `);
 
     // --------------------------------
     // RESTORE PRODUCT STOCK
     // --------------------------------
 
-    for (const item of itemsResult.rows) {
+    for (const item of orderItemsResult.rows) {
       await client.query(
         `
-        UPDATE products
+        UPDATE public.lkp_products
         SET stock = stock + $1::integer
         WHERE id = $2::integer
         `,
         [Number(item.quantity), Number(item.item_id)],
       );
     }
-
-    // --------------------------------
-    // DELETE ALL ORDER ITEMS
-    // --------------------------------
-
-    await client.query(`
-      DELETE FROM order_items_old
-    `);
 
     // --------------------------------
     // DELETE ALL ORDERS

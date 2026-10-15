@@ -411,7 +411,7 @@ const verifySubscriptionPayment = async (req, res) => {
       const customerRoleResult = await client.query(
         `
         SELECT id
-        FROM user_roles
+        FROM lkp_user_roles
         WHERE id = 5
           AND UPPER(TRIM(role_name)) = 'CUSTOMER'
         LIMIT 1
@@ -419,7 +419,7 @@ const verifySubscriptionPayment = async (req, res) => {
       );
 
       if (customerRoleResult.rows.length === 0) {
-        throw new Error("CUSTOMER role not found in user_roles");
+        throw new Error("CUSTOMER role not found in lkp_user_roles");
       }
 
       const customerRoleId = customerRoleResult.rows[0].id;

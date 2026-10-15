@@ -264,7 +264,7 @@ const getActiveMembership = async (userId) => {
       sp.validity_months
     FROM user_memberships um
 
-    INNER JOIN subscription_plans sp
+    INNER JOIN lkp_subscription_plans sp
       ON sp.id = um.plan_id
 
     WHERE
@@ -404,7 +404,7 @@ const getMembershipWallet = async (userId) => {
 
     FROM user_memberships um
 
-    INNER JOIN subscription_plans sp
+    INNER JOIN lkp_subscription_plans sp
       ON sp.id = um.plan_id
 
     WHERE

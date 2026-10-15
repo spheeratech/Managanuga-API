@@ -1,6 +1,8 @@
+const pool = require("../../db");
 const AdminOrder = require("../models/AdminOrder");
-const xpressbeesService = require("../services/xpressbeesService");
-const Warehouse = require("../models/Warehouse");
+// const xpressbeesService = require("../services/xpressbeesService");
+const shiprocketService = require("../services/shiprocketService");
+// const Warehouse = require("../models/Warehouse");
 const { sendSMS } = require("../services/smsService");
 
 const createAdminOrder = async (req, res) => {
@@ -199,6 +201,113 @@ const deleteAllAdminOrders = async (req, res) => {
   }
 };
 
+async function findActiveHubForPincode(pincode) {
+  const normalizedPincode = String(pincode ?? "").trim();
+
+  if (!/^\d{6}$/.test(normalizedPincode)) {
+    throw new Error("Customer pincode must contain 6 digits.");
+  }
+
+  const numericPincode = Number(normalizedPincode);
+
+  // First priority: match the hub's primary pincode.
+  let result = await pool.query(
+    `
+      SELECT
+        h.hubid AS id,
+        h.hubpincode AS pincode
+      FROM hubs h
+      WHERE h.hubpincode = $1
+        AND h.is_active = 1
+      LIMIT 1
+    `,
+    [numericPincode],
+  );
+
+  if (result.rows.length > 0) {
+    return result.rows[0];
+  }
+
+  // Second priority: match an active hub route.
+  result = await pool.query(
+    `
+      SELECT
+        h.hubid AS id,
+        h.hubpincode AS pincode
+      FROM hubroute hr
+      INNER JOIN hubs h
+        ON h.hubid = hr.hubid
+      WHERE hr.hubroutepincode = $1
+        AND hr.is_active = 1
+        AND h.is_active = 1
+      LIMIT 1
+    `,
+    [numericPincode],
+  );
+
+  if (result.rows.length > 0) {
+    return result.rows[0];
+  }
+
+  return {
+    id: "HUB001",
+    pincode: "500018",
+  };
+}
+
+// async function findActiveHubForPincode(pincode) {
+//   const normalizedPincode = String(pincode || "").trim();
+
+//   if (!normalizedPincode) {
+//     throw new Error("Customer delivery pincode is missing.");
+//   }
+
+//   // First priority: match the hub's primary pincode.
+//   let result = await pool.query(
+//     `
+//       SELECT
+//         h.hubid AS id,
+//         h.hubname AS name,
+//         h.hubpincode AS pincode
+//       FROM hubs h
+//       WHERE h.hubpincode = $1
+//         AND h.is_active = 1
+//       LIMIT 1
+//     `,
+//     [normalizedPincode],
+//   );
+
+//   if (result.rows.length > 0) {
+//     return result.rows[0];
+//   }
+
+//   // Second priority: match an additional pincode in hub routes.
+//   result = await pool.query(
+//     `
+//       SELECT
+//         h.hubid AS id,
+//         h.hubname AS name,
+//         h.hubpincode AS pincode
+//       FROM hubroute hr
+//       INNER JOIN hubs h
+//         ON h.hubid = hr.hubid
+//       WHERE hr.hubroutepincode = $1
+//         AND hr.is_active = 1
+//         AND h.is_active = 1
+//       LIMIT 1
+//     `,
+//     [normalizedPincode],
+//   );
+
+//   if (result.rows.length > 0) {
+//     return result.rows[0];
+//   }
+
+//   throw new Error(
+//     `No active hub or hub route is configured for delivery pincode ${normalizedPincode}.`,
+//   );
+// }
+
 /* --------------------------------
    VERIFY / ACCEPT ADMIN ORDER
 -------------------------------- */
@@ -283,7 +392,8 @@ const verifyAdminOrder = async (req, res) => {
     // --------------------------------
 
     if (String(delivery_method).toUpperCase() === "MANAGANUGA") {
-      console.log(`Creating Xpressbees shipment for order ${order.id}`);
+      // console.log(`Creating Xpressbees shipment for order ${order.id}`);
+      console.log(`Creating Shiprocket shipment for order ${order.id}`);
 
       if (!existingOrder.customer_name) {
         throw new Error("Customer name is missing");
@@ -309,184 +419,319 @@ const verifyAdminOrder = async (req, res) => {
         throw new Error("Customer pincode is missing");
       }
 
-      if (!order.warehouse_id) {
-        throw new Error("Warehouse is not assigned to this order");
-      }
+      // if (!order.warehouse_id) {
+      //   throw new Error("Warehouse is not assigned to this order");
+      // }
 
-      const warehouse = await Warehouse.getWarehouseById(order.warehouse_id);
+      // const warehouse = await Warehouse.getWarehouseById(order.warehouse_id);
 
-      if (!warehouse) {
-        throw new Error(`Warehouse with id ${order.warehouse_id} not found`);
-      }
+      // if (!warehouse) {
+      //   throw new Error(`Warehouse with id ${order.warehouse_id} not found`);
+      // }
 
-      if (!warehouse.name) {
-        throw new Error("Warehouse name is missing");
-      }
+      // if (!warehouse.name) {
+      //   throw new Error("Warehouse name is missing");
+      // }
 
-      if (!warehouse.contact_name) {
-        throw new Error("Warehouse contact name is missing");
-      }
+      // const hub = await findActiveHubForPincode(existingOrder.pincode);
 
-      if (!warehouse.address) {
-        throw new Error("Warehouse address is missing");
-      }
+      // console.log("SELECTED HUB FOR MANAGANUGA SHIPMENT:", {
+      //   hubId: hub.id,
+      //   // hubName: hub.name,
+      //   hubPincode: hub.pincode,
+      //   customerPincode: existingOrder.pincode,
+      // });
 
-      if (!warehouse.city) {
-        throw new Error("Warehouse city is missing");
-      }
+      // // Reuse the existing Shiprocket service interface.
+      // // Shiprocket pickup_location must match a registered pickup location.
+      // // const warehouse = {
+      // //   name: String(hub.name),
+      // // };
 
-      if (!warehouse.state) {
-        throw new Error("Warehouse state is missing");
-      }
+      // if (!warehouse.contact_name) {
+      //   throw new Error("Warehouse contact name is missing");
+      // }
 
-      if (!warehouse.pincode) {
-        throw new Error("Warehouse pincode is missing");
-      }
+      // if (!warehouse.address) {
+      //   throw new Error("Warehouse address is missing");
+      // }
 
-      if (!warehouse.phone) {
-        throw new Error("Warehouse phone number is missing");
-      }
+      // if (!warehouse.city) {
+      //   throw new Error("Warehouse city is missing");
+      // }
+
+      // if (!warehouse.state) {
+      //   throw new Error("Warehouse state is missing");
+      // }
+
+      // if (!warehouse.pincode) {
+      //   throw new Error("Warehouse pincode is missing");
+      // }
+
+      // if (!warehouse.phone) {
+      //   throw new Error("Warehouse phone number is missing");
+      // }
+      //  if (!existingOrder.items || existingOrder.items.length === 0) {
+      //   throw new Error("Order items are missing");
+      // }
+
+      const hub = await findActiveHubForPincode(existingOrder.pincode);
+
+      // Find the registered Shiprocket pickup location using
+      // the selected hub's PRIMARY pincode.
+      const pickupLocation = await shiprocketService.getPickupLocationByPincode(
+        hub.pincode,
+      );
+
+      console.log("SELECTED HUB AND SHIPROCKET PICKUP LOCATION:", {
+        hubId: hub.id,
+        hubName: hub.name,
+        hubPincode: hub.pincode,
+        customerPincode: existingOrder.pincode,
+        pickupLocation,
+      });
+
+      // Shiprocket requires the exact registered pickup-location name.
+      const warehouse = {
+        name: pickupLocation,
+      };
 
       if (!existingOrder.items || existingOrder.items.length === 0) {
         throw new Error("Order items are missing");
       }
 
+      //   const isPaid =
+      //     String(order.payment_status || "").toUpperCase() === "PAID";
+
+      //   const paymentType = isPaid ? "prepaid" : "cod";
+
+      //   const collectableAmount = isPaid ? 0 : Number(order.total_amount);
+
+      //   // CREATE XPRESSBEES PAYLOAD
+
+      //   const shipmentPayload = {
+      //     order_number: String(order.id),
+
+      //     payment_type: paymentType,
+
+      //     order_amount: Number(order.total_amount),
+
+      //     package_weight: 500,
+
+      //     package_length: 10,
+
+      //     package_breadth: 10,
+
+      //     package_height: 10,
+
+      //     request_auto_pickup: "yes",
+
+      //     consignee: {
+      //       name: String(existingOrder.customer_name),
+
+      //       address: String(existingOrder.address),
+
+      //       address_2: "",
+
+      //       city: String(existingOrder.city),
+
+      //       state: String(existingOrder.state),
+
+      //       pincode: String(existingOrder.pincode),
+
+      //       phone: String(existingOrder.customer_phone),
+      //     },
+
+      //     pickup: {
+      //       warehouse_name: String(warehouse.name),
+
+      //       name: String(warehouse.contact_name),
+
+      //       address: String(warehouse.address),
+
+      //       address_2: "",
+
+      //       city: String(warehouse.city),
+
+      //       state: String(warehouse.state),
+
+      //       pincode: String(warehouse.pincode),
+
+      //       phone: String(warehouse.phone),
+      //     },
+
+      //     order_items: existingOrder.items.map((item) => ({
+      //       name: String(item.product_name),
+
+      //       qty: Number(item.quantity),
+
+      //       price: Number(item.unit_price),
+
+      //       sku: String(item.product_id),
+      //     })),
+
+      //     collectable_amount: collectableAmount,
+      //   };
+
+      //   console.log(
+      //     "XPRESSBEES ADMIN SHIPMENT PAYLOAD:",
+      //     JSON.stringify(shipmentPayload, null, 2),
+      //   );
+
+      //   // CREATE XPRESSBEES SHIPMENT
+
+      //   let shipment;
+
+      //   try {
+      //     shipment = await xpressbeesService.createShipment(shipmentPayload);
+
+      //     console.log(
+      //       "XPRESSBEES ADMIN SHIPMENT RESPONSE:",
+      //       JSON.stringify(shipment, null, 2),
+      //     );
+      //   } catch (shipmentError) {
+      //     console.error(
+      //       "XPRESSBEES ADMIN SHIPMENT ERROR:",
+      //       shipmentError.response?.data || shipmentError.message,
+      //     );
+
+      //     throw new Error(
+      //       shipmentError.response?.data?.message ||
+      //         shipmentError.message ||
+      //         "Xpressbees shipment creation failed",
+      //     );
+      //   }
+
+      //   // GET AWB NUMBER
+
+      //   const awbNumber =
+      //     shipment?.awb_number ||
+      //     shipment?.awb ||
+      //     shipment?.tracking_number ||
+      //     shipment?.awbNumber ||
+      //     shipment?.data?.awb_number ||
+      //     shipment?.data?.awb ||
+      //     shipment?.data?.tracking_number;
+
+      //   if (!awbNumber) {
+      //     console.error("Xpressbees response did not contain AWB:", shipment);
+
+      //     throw new Error(
+      //       "Xpressbees shipment created but AWB number was not returned",
+      //     );
+      //   }
+
+      //   // SAVE SHIPMENT DETAILS
+
+      //   const updatedOrder = await AdminOrder.updateShipmentDetails(order.id, {
+      //     tracking_number: String(awbNumber),
+      //     courier_name: "Xpressbees",
+      //   });
+
+      //   return res.status(200).json({
+      //     success: true,
+
+      //     message:
+      //       "Order verified, accepted and Xpressbees shipment created successfully",
+
+      //     data: updatedOrder,
+
+      //     shipment,
+      //   });
+      // }
+
       const isPaid =
         String(order.payment_status || "").toUpperCase() === "PAID";
 
-      const paymentType = isPaid ? "prepaid" : "cod";
-
-      const collectableAmount = isPaid ? 0 : Number(order.total_amount);
-
-      // CREATE XPRESSBEES PAYLOAD
-
       const shipmentPayload = {
-        order_number: String(order.id),
+        order: {
+          id: order.id,
+          total_amount: Number(order.actual_amount ?? order.total_amount),
+          delivery_charge: Number(order.delivery_charge || 0),
+          payment_status: order.payment_status,
+          email: existingOrder.customer_email || existingOrder.email || "",
+        },
 
-        payment_type: paymentType,
-
-        order_amount: Number(order.total_amount),
-
-        package_weight: 500,
-
-        package_length: 10,
-
-        package_breadth: 10,
-
-        package_height: 10,
-
-        request_auto_pickup: "yes",
-
-        consignee: {
-          name: String(existingOrder.customer_name),
-
-          address: String(existingOrder.address),
-
-          address_2: "",
-
+        address: {
+          full_name: String(existingOrder.customer_name),
+          address_line1: String(existingOrder.address),
+          address_line2: "",
           city: String(existingOrder.city),
-
           state: String(existingOrder.state),
-
-          pincode: String(existingOrder.pincode),
-
+          postal_code: String(existingOrder.pincode),
           phone: String(existingOrder.customer_phone),
+          email: existingOrder.customer_email || existingOrder.email || "",
         },
 
-        pickup: {
-          warehouse_name: String(warehouse.name),
-
-          name: String(warehouse.contact_name),
-
-          address: String(warehouse.address),
-
-          address_2: "",
-
-          city: String(warehouse.city),
-
-          state: String(warehouse.state),
-
-          pincode: String(warehouse.pincode),
-
-          phone: String(warehouse.phone),
+        warehouse: {
+          name: String(warehouse.name),
         },
 
-        order_items: existingOrder.items.map((item) => ({
+        items: existingOrder.items.map((item) => ({
           name: String(item.product_name),
-
           qty: Number(item.quantity),
-
           price: Number(item.unit_price),
-
           sku: String(item.product_id),
         })),
 
-        collectable_amount: collectableAmount,
+        // Existing weight was 500 grams; Shiprocket expects kilograms.
+        packageDetails: {
+          weight: 0.5,
+          length: 10,
+          breadth: 10,
+          height: 10,
+        },
       };
-
-      console.log(
-        "XPRESSBEES ADMIN SHIPMENT PAYLOAD:",
-        JSON.stringify(shipmentPayload, null, 2),
-      );
-
-      // CREATE XPRESSBEES SHIPMENT
 
       let shipment;
 
       try {
-        shipment = await xpressbeesService.createShipment(shipmentPayload);
+        shipment = await shiprocketService.createShipment(shipmentPayload);
 
         console.log(
-          "XPRESSBEES ADMIN SHIPMENT RESPONSE:",
+          "SHIPROCKET ADMIN SHIPMENT RESPONSE:",
           JSON.stringify(shipment, null, 2),
         );
       } catch (shipmentError) {
         console.error(
-          "XPRESSBEES ADMIN SHIPMENT ERROR:",
+          "SHIPROCKET ADMIN SHIPMENT ERROR:",
           shipmentError.response?.data || shipmentError.message,
         );
 
         throw new Error(
           shipmentError.response?.data?.message ||
             shipmentError.message ||
-            "Xpressbees shipment creation failed",
+            "Shiprocket shipment creation failed",
         );
       }
-
-      // GET AWB NUMBER
 
       const awbNumber =
-        shipment?.awb_number ||
-        shipment?.awb ||
-        shipment?.tracking_number ||
-        shipment?.awbNumber ||
-        shipment?.data?.awb_number ||
-        shipment?.data?.awb ||
-        shipment?.data?.tracking_number;
+        shipment?.awb_code ||
+        shipment?.awb?.response?.data?.awb_code ||
+        shipment?.awb?.awb_code ||
+        shipment?.order?.awb_code;
 
       if (!awbNumber) {
-        console.error("Xpressbees response did not contain AWB:", shipment);
+        console.error(
+          "Shiprocket order response did not contain an AWB:",
+          shipment,
+        );
 
         throw new Error(
-          "Xpressbees shipment created but AWB number was not returned",
+          "Shiprocket order may have been created, but an AWB was not returned. Check Shiprocket before retrying.",
         );
       }
-
-      // SAVE SHIPMENT DETAILS
 
       const updatedOrder = await AdminOrder.updateShipmentDetails(order.id, {
         tracking_number: String(awbNumber),
-        courier_name: "Xpressbees",
+        courier_name: "Shiprocket",
       });
 
       return res.status(200).json({
         success: true,
-
         message:
-          "Order verified, accepted and Xpressbees shipment created successfully",
-
+          "Order verified, accepted and Shiprocket shipment created successfully",
         data: updatedOrder,
-
         shipment,
       });
     }

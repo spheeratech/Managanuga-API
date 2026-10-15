@@ -5,13 +5,12 @@ const razorpayService = require("../services/razorpayService");
 const Membership = require("../models/Membership");
 const pool = require("../../db");
 const { getRoleName } = require("../utils/userRoles");
-const xpressbeesService = require("../services/xpressbeesService");
+// const xpressbeesService = require("../services/xpressbeesService");
+const shiprocketService = require("../services/shiprocketService");
 const Cart = require("../models/Cart");
 const User = require("../models/User");
 
-const {
-  sendPushNotification,
-} = require("../services/fcmService");
+const { sendPushNotification } = require("../services/fcmService");
 
 const {
   calculateMembershipBenefits,
@@ -33,18 +32,17 @@ const createOrder = async (req, res) => {
   try {
     console.log("CREATE ORDER HIT");
     console.log("BODY:", req.body);
-const {
-  order_id,
-  user_id,
-  paymentType,
-  membershipPlanId,
-  buyNow,
-  productId,
-  quantity,
-} = req.body;
+    const {
+      order_id,
+      user_id,
+      paymentType,
+      membershipPlanId,
+      buyNow,
+      productId,
+      quantity,
+    } = req.body;
 
-const publicUserId = user_id;
-
+    const publicUserId = user_id;
 
     if (!publicUserId) {
       return res.status(400).json({
@@ -53,75 +51,53 @@ const publicUserId = user_id;
       });
     }
 
-    const paymentTypeUpper =
-      (paymentType || "ORDER").toUpperCase();
-
+    const paymentTypeUpper = (paymentType || "ORDER").toUpperCase();
 
     let actualAmount = 0;
     let payableAmount = 0;
-
 
     /* =====================================================
        MEMBERSHIP PAYMENT
     ===================================================== */
 
-    if (
-      paymentTypeUpper === "MEMBERSHIP"
-    ) {
-      const planResult =
-        await pool.query(
-          `
+    if (paymentTypeUpper === "MEMBERSHIP") {
+      const planResult = await pool.query(
+        `
             SELECT *
-            FROM subscription_plans
+            FROM lkp_subscription_plans
             WHERE id = $1
           `,
-          [membershipPlanId]
-        );
+        [membershipPlanId],
+      );
 
-
-      const plan =
-        planResult.rows[0];
-
+      const plan = planResult.rows[0];
 
       if (!plan) {
         return res.status(404).json({
           success: false,
-          message:
-            "Membership plan not found",
+          message: "Membership plan not found",
         });
       }
 
+      actualAmount = Number(plan.plan_price);
 
-      actualAmount =
-        Number(plan.plan_price);
-
-
-      payableAmount =
-        Number(plan.plan_price);
+      payableAmount = Number(plan.plan_price);
     }
-
 
     /* =====================================================
        NORMAL PRODUCT ORDER
     ===================================================== */
 
-    if (
-      paymentTypeUpper !== "MEMBERSHIP"
-    ) {
+    if (paymentTypeUpper !== "MEMBERSHIP") {
       let cartItems = [];
-
 
       /* -----------------------------------------------
          BUY NOW
       ------------------------------------------------ */
 
-      if (
-        buyNow &&
-        productId
-      ) {
-        const productResult =
-          await pool.query(
-            `
+      if (buyNow && productId) {
+        const productResult = await pool.query(
+          `
               SELECT
                 id,
                 name,
@@ -132,31 +108,19 @@ const publicUserId = user_id;
               WHERE id = $1
               LIMIT 1
             `,
-            [productId]
-          );
+          [productId],
+        );
 
-
-        if (
-          !productResult.rows.length
-        ) {
+        if (!productResult.rows.length) {
           return res.status(404).json({
             success: false,
-            message:
-              "Product not found",
+            message: "Product not found",
           });
         }
 
+        const product = productResult.rows[0];
 
-        const product =
-          productResult.rows[0];
-
-
-        const buyNowQuantity =
-          Math.max(
-            1,
-            Number(quantity || 1)
-          );
-
+        const buyNowQuantity = Math.max(1, Number(quantity || 1));
 
         /*
          * Create the same item structure that
@@ -169,40 +133,27 @@ const publicUserId = user_id;
           {
             cart_id: null,
 
-            user_id:
-              publicUserId,
+            user_id: publicUserId,
 
-            product_id:
-              product.id,
+            product_id: product.id,
 
-            product_name:
-              product.name,
+            product_name: product.name,
 
-            price:
-              Number(product.price || 0),
+            price: Number(product.price || 0),
 
-            weight:
-              Number(product.weight || 0),
+            weight: Number(product.weight || 0),
 
-            stock:
-              Number(product.stock || 0),
+            stock: Number(product.stock || 0),
 
-            quantity:
-              buyNowQuantity,
+            quantity: buyNowQuantity,
 
-            total_price:
-              Number(product.price || 0) *
-              buyNowQuantity,
+            total_price: Number(product.price || 0) * buyNowQuantity,
           },
         ];
-      }
-
-
-      /* -----------------------------------------------
+      } else {
+        /* -----------------------------------------------
          NORMAL CART
       ------------------------------------------------ */
-
-      else {
         /*
          * IMPORTANT:
          *
@@ -210,52 +161,35 @@ const publicUserId = user_id;
          *
          * Cart.getItems(user_id)
          */
-        cartItems =
-          await Cart.getItems(
-            publicUserId
-          );
+        cartItems = await Cart.getItems(publicUserId);
       }
 
-
-      if (
-        !cartItems ||
-        cartItems.length === 0
-      ) {
+      if (!cartItems || cartItems.length === 0) {
         return res.status(400).json({
           success: false,
-          message:
-            "Cart is empty",
+          message: "Cart is empty",
         });
       }
-
 
       /*
        * Use the SAME membership calculation
        * that Checkout Summary uses.
        */
-      const benefits =
-        await calculateMembershipBenefits(
-          publicUserId,
-          cartItems
-        );
-
+      const benefits = await calculateMembershipBenefits(
+        publicUserId,
+        cartItems,
+      );
 
       /*
        * Calculate actual item subtotal.
        */
-      const subtotal =
-        cartItems.reduce(
-          (sum, item) =>
-            sum +
-            Number(item.price || 0) *
-            Number(item.quantity || 0),
-          0
-        );
+      const subtotal = cartItems.reduce(
+        (sum, item) =>
+          sum + Number(item.price || 0) * Number(item.quantity || 0),
+        0,
+      );
 
-
-      actualAmount =
-        subtotal;
-
+      actualAmount = subtotal;
 
       if (benefits) {
         /*
@@ -264,27 +198,18 @@ const publicUserId = user_id;
          * payableAmount comes from the central
          * membership calculation service.
          */
-        payableAmount =
-          Number(
-            benefits.payableAmount
-          );
+        payableAmount = Number(benefits.payableAmount);
 
-
-        console.log(
-          "Membership Benefits:",
-          benefits
-        );
+        console.log("Membership Benefits:", benefits);
       } else {
         /*
          * NORMAL USER
          *
          * Existing delivery charge remains ₹40.
          */
-        payableAmount =
-          subtotal + 40;
+        payableAmount = subtotal + 40;
       }
     }
-
 
     /* =====================================================
        SAFETY CHECK
@@ -297,22 +222,13 @@ const publicUserId = user_id;
     ) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid payment amount",
+        message: "Invalid payment amount",
       });
     }
 
+    console.log("Actual Amount:", actualAmount);
 
-    console.log(
-      "Actual Amount:",
-      actualAmount
-    );
-
-    console.log(
-      "Payable Amount:",
-      payableAmount
-    );
-
+    console.log("Payable Amount:", payableAmount);
 
     /* =====================================================
        CREATE RAZORPAY ORDER
@@ -324,18 +240,12 @@ const publicUserId = user_id;
        actualAmount and payableAmount.
     ===================================================== */
 
- // const razorpayTestAmount = 1;
+    // const razorpayTestAmount = 1;
 
-const razorpayOrder =
-  await razorpayService.createRazorpayOrder(
-    payableAmount
-  );
+    const razorpayOrder =
+      await razorpayService.createRazorpayOrder(payableAmount);
 
-    console.log(
-      "RAZORPAY ORDER:",
-      razorpayOrder
-    );
-
+    console.log("RAZORPAY ORDER:", razorpayOrder);
 
     /* =====================================================
        CREATE LOCAL PAYMENT
@@ -344,33 +254,23 @@ const razorpayOrder =
        Store REAL amounts here.
     ===================================================== */
 
-    const payment =
-      await Payment.createPayment({
-        order_id:
-          order_id || null,
+    const payment = await Payment.createPayment({
+      order_id: order_id || null,
 
-        tnx_order_id:
-          razorpayOrder.id,
+      tnx_order_id: razorpayOrder.id,
 
-        payment_gateway:
-          "RAZORPAY",
+      payment_gateway: "RAZORPAY",
 
-        actual_amount:
-          actualAmount,
+      actual_amount: actualAmount,
 
-        payable_amount:
-          payableAmount,
+      payable_amount: payableAmount,
 
-        status:
-          "PENDING",
+      status: "PENDING",
 
-        payment_type:
-          paymentTypeUpper,
+      payment_type: paymentTypeUpper,
 
-        membership_plan_id:
-          membershipPlanId || null,
-      });
-
+      membership_plan_id: membershipPlanId || null,
+    });
 
     return res.status(201).json({
       success: true,
@@ -380,30 +280,21 @@ const razorpayOrder =
 
         razorpayOrder,
 
-        key:
-          process.env.RAZORPAY_KEY_ID,
+        key: process.env.RAZORPAY_KEY_ID,
 
         actualAmount,
 
         payableAmount,
 
-       razorpayAmount: payableAmount,
-
+        razorpayAmount: payableAmount,
       },
     });
-
-
   } catch (err) {
-    console.error(
-      "CREATE ORDER ERROR:",
-      err
-    );
-
+    console.error("CREATE ORDER ERROR:", err);
 
     return res.status(500).json({
       success: false,
-      message:
-        err.message,
+      message: err.message,
     });
   }
 };
@@ -430,99 +321,71 @@ const verifyPayment = async (req, res) => {
        VERIFY SIGNATURE
     ===================================================== */
 
-    const isValid =
-      razorpayService.verifyPaymentSignature(
-        razorpay_order_id,
-        razorpay_payment_id,
-        razorpay_signature
-      );
-
+    const isValid = razorpayService.verifyPaymentSignature(
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+    );
 
     if (!isValid) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid signature",
+        message: "Invalid signature",
       });
     }
-
 
     /* =====================================================
        FETCH RAZORPAY PAYMENT
     ===================================================== */
 
     const razorpayPayment =
-      await razorpayService.fetchRazorpayPayment(
-        razorpay_payment_id
-      );
+      await razorpayService.fetchRazorpayPayment(razorpay_payment_id);
 
-
-    console.log(
-      "RAZORPAY PAYMENT:",
-      JSON.stringify(
-        razorpayPayment,
-        null,
-        2
-      )
-    );
-
+    console.log("RAZORPAY PAYMENT:", JSON.stringify(razorpayPayment, null, 2));
 
     if (!razorpayPayment) {
       return res.status(400).json({
         success: false,
-        message:
-          "Razorpay payment not found",
+        message: "Razorpay payment not found",
       });
     }
-
 
     /* =====================================================
        PAYMENT MUST BE CAPTURED
     ===================================================== */
 
-    if (
-      razorpayPayment.status !==
-      "captured"
-    ) {
+    if (razorpayPayment.status !== "captured") {
       return res.status(400).json({
         success: false,
-        message:
-          `Payment is not captured. Status: ${razorpayPayment.status}`,
+        message: `Payment is not captured. Status: ${razorpayPayment.status}`,
       });
     }
-
 
     /* =====================================================
        FIND LOCAL PAYMENT
     ===================================================== */
 
-    const existingPayment =
-  await pool.query(
-    `
+    const existingPayment = await pool.query(
+      `
       SELECT *
       FROM payments
       WHERE tnx_order_id = $1
       ORDER BY id DESC
       LIMIT 1
     `,
-    [razorpay_order_id]
-  );
+      [razorpay_order_id],
+    );
 
+    const localPayment = existingPayment.rows[0];
 
-const localPayment =
-  existingPayment.rows[0];
+    if (!localPayment) {
+      return res.status(404).json({
+        success: false,
+        message: "Local payment record not found",
+      });
+    }
 
-
-if (!localPayment) {
-  return res.status(404).json({
-    success: false,
-    message:
-      "Local payment record not found",
-  });
-}
-
-
-/* =====================================================
+    /* =====================================================
    VERIFY RAZORPAY AMOUNT
 
    TEST MODE:
@@ -532,188 +395,116 @@ if (!localPayment) {
    order payable amount.
 ===================================================== */
 
-const razorpayAmount =
-  Number(razorpayPayment.amount) /
-  100;
+    const razorpayAmount = Number(razorpayPayment.amount) / 100;
 
+    const expectedAmount = Number(localPayment.payable_amount);
 
-const expectedAmount =
-  Number(localPayment.payable_amount);
+    console.log("Expected Razorpay Amount:", expectedAmount);
 
+    console.log("Razorpay Amount:", razorpayAmount);
 
-console.log(
-  "Expected Razorpay Amount:",
-  expectedAmount
-);
+    if (Math.abs(razorpayAmount - expectedAmount) > 0.01) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment amount mismatch",
+        expectedAmount,
+        razorpayAmount,
+      });
+    }
 
-
-console.log(
-  "Razorpay Amount:",
-  razorpayAmount
-);
-
-
-if (
-  Math.abs(
-    razorpayAmount -
-    expectedAmount
-  ) > 0.01
-) {
-  return res.status(400).json({
-    success: false,
-    message:
-      "Payment amount mismatch",
-    expectedAmount,
-    razorpayAmount,
-  });
-}
-
-
-/* =====================================================
+    /* =====================================================
    RAZORPAY PAYMENT DETAILS
 ===================================================== */
 
-const paymentId =
-  razorpayPayment.id ||
-  razorpay_payment_id;
+    const paymentId = razorpayPayment.id || razorpay_payment_id;
 
+    const method = razorpayPayment.method || null;
 
-const method =
-  razorpayPayment.method ||
-  null;
+    const upiTransactionId =
+      razorpayPayment?.acquirer_data?.upi_transaction_id || null;
 
-
-const upiTransactionId =
-  razorpayPayment
-    ?.acquirer_data
-    ?.upi_transaction_id ||
-  null;
-
-
-/* =====================================================
+    /* =====================================================
    UPDATE LOCAL PAYMENT
 
    IMPORTANT:
    Keep REAL actual/payable amounts.
 ===================================================== */
 
-let payment =
-  await Payment.updateByTnxOrderId(
-    razorpay_order_id,
-    {
+    let payment = await Payment.updateByTnxOrderId(razorpay_order_id, {
       status: "PAID",
 
-      payment_id:
-        paymentId,
+      payment_id: paymentId,
 
-      upi_transaction_id:
-        upiTransactionId,
+      upi_transaction_id: upiTransactionId,
 
       method,
 
-      actual_amount:
-        localPayment.actual_amount,
+      actual_amount: localPayment.actual_amount,
 
-      payable_amount:
-        localPayment.payable_amount,
+      payable_amount: localPayment.payable_amount,
+    });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: "Unable to update payment",
+      });
     }
-  );
 
+    console.log("PAYMENT UPDATED:", payment);
 
-if (!payment) {
-  return res.status(404).json({
-    success: false,
-    message:
-      "Unable to update payment",
-  });
-}
-
-
-console.log(
-  "PAYMENT UPDATED:",
-  payment
-);
-
-
-/* =====================================================
+    /* =====================================================
    PAYMENT SUCCESS NOTIFICATION
 ===================================================== */
 
-try {
-  await Notification.createNotification({
-    userId:
-      userId,
+    try {
+      await Notification.createNotification({
+        userId: userId,
 
-    title:
-      "Payment Successful",
+        title: "Payment Successful",
 
-    message:
-      "Your payment was successfully completed.",
+        message: "Your payment was successfully completed.",
 
-    type:
-      "PAYMENT_SUCCESS",
+        type: "PAYMENT_SUCCESS",
 
-    referenceId:
-      payment.id,
-  });
+        referenceId: payment.id,
+      });
 
+      console.log(`Payment notification created for payment ${payment.id}`);
+    } catch (notificationError) {
+      console.error("Payment Notification Error:", notificationError);
+    }
 
-  console.log(
-    `Payment notification created for payment ${payment.id}`
-  );
+    await Membership.checkAndResetMonthlyBenefits(userId);
 
-} catch (notificationError) {
-  console.error(
-    "Payment Notification Error:",
-    notificationError
-  );
-}
-
-
-await Membership.checkAndResetMonthlyBenefits(
-  userId
-);
-
-
-/* =====================================================
+    /* =====================================================
    MEMBERSHIP BENEFITS
 ===================================================== */
 
-let membershipBenefits =
-  null;
+    let membershipBenefits = null;
 
+    if ((paymentType || "").toUpperCase() !== "MEMBERSHIP") {
+      /*
+       * IMPORTANT:
+       *
+       * Cart.getItems() now accepts the public
+       * MGU user_id.
+       *
+       * userId is the public value received from
+       * the frontend.
+       */
+      let cartItems = [];
 
-if (
-  (paymentType || "").toUpperCase() !==
-  "MEMBERSHIP"
-) {
-
-  /*
-   * IMPORTANT:
-   *
-   * Cart.getItems() now accepts the public
-   * MGU user_id.
-   *
-   * userId is the public value received from
-   * the frontend.
-   */
-  let cartItems = [];
-
-
-  /*
-   * BUY NOW
-   *
-   * Buy Now is not necessarily stored in the cart,
-   * so create the same temporary item structure
-   * used during createOrder().
-   */
-  if (
-    buyNow &&
-    productId
-  ) {
-    const productResult =
-      await pool.query(
-        `
+      /*
+       * BUY NOW
+       *
+       * Buy Now is not necessarily stored in the cart,
+       * so create the same temporary item structure
+       * used during createOrder().
+       */
+      if (buyNow && productId) {
+        const productResult = await pool.query(
+          `
           SELECT
             id,
             name,
@@ -724,130 +515,84 @@ if (
           WHERE id = $1
           LIMIT 1
         `,
-        [productId]
-      );
-
-
-    if (
-      productResult.rows.length
-    ) {
-      const product =
-        productResult.rows[0];
-
-
-      const buyNowQuantity =
-        Math.max(
-          1,
-          Number(quantity || 1)
+          [productId],
         );
 
+        if (productResult.rows.length) {
+          const product = productResult.rows[0];
 
-      cartItems = [
-        {
-          cart_id: null,
+          const buyNowQuantity = Math.max(1, Number(quantity || 1));
 
-          user_id:
-            userId,
+          cartItems = [
+            {
+              cart_id: null,
 
-          product_id:
-            product.id,
+              user_id: userId,
 
-          product_name:
-            product.name,
+              product_id: product.id,
 
-          price:
-            Number(product.price || 0),
+              product_name: product.name,
 
-          weight:
-            Number(product.weight || 0),
+              price: Number(product.price || 0),
 
-          stock:
-            Number(product.stock || 0),
+              weight: Number(product.weight || 0),
 
-          quantity:
-            buyNowQuantity,
+              stock: Number(product.stock || 0),
 
-          total_price:
-            Number(product.price || 0) *
-            buyNowQuantity,
-        },
-      ];
+              quantity: buyNowQuantity,
+
+              total_price: Number(product.price || 0) * buyNowQuantity,
+            },
+          ];
+        }
+      } else {
+        /*
+         * NORMAL CART
+         */
+        cartItems = await Cart.getItems(userId);
+      }
+
+      if (cartItems && cartItems.length > 0) {
+        membershipBenefits = await calculateMembershipBenefits(
+          userId,
+          cartItems,
+        );
+      }
     }
 
-  } else {
-
-    /*
-     * NORMAL CART
-     */
-    cartItems =
-      await Cart.getItems(
-        userId
-      );
-  }
-
-
-  if (
-    cartItems &&
-    cartItems.length > 0
-  ) {
-    membershipBenefits =
-      await calculateMembershipBenefits(
-        userId,
-        cartItems
-      );
-  }
-}
-
-
-/* =====================================================
+    /* =====================================================
    MEMBERSHIP PAYMENT
 ===================================================== */
 
-if (
-  (paymentType || "").toUpperCase() ===
-  "MEMBERSHIP"
-) {
-
-  const planResult =
-    await pool.query(
-      `
+    if ((paymentType || "").toUpperCase() === "MEMBERSHIP") {
+      const planResult = await pool.query(
+        `
         SELECT *
-        FROM subscription_plans
+        FROM lkp_subscription_plans
         WHERE id = $1
       `,
-      [membershipPlanId]
-    );
+        [membershipPlanId],
+      );
 
+      const plan = planResult.rows[0];
 
-  const plan =
-    planResult.rows[0];
+      if (!plan) {
+        return res.status(404).json({
+          success: false,
+          message: "Membership plan not found",
+        });
+      }
 
+      const expiryDate = new Date();
 
-  if (!plan) {
-    return res.status(404).json({
-      success: false,
-      message:
-        "Membership plan not found",
-    });
-  }
+      expiryDate.setFullYear(expiryDate.getFullYear() + 1);
 
-
-  const expiryDate =
-    new Date();
-
-
-  expiryDate.setFullYear(
-    expiryDate.getFullYear() + 1
-  );
-
-
-  /* =================================================
+      /* =================================================
      CUSTOMER
   ================================================= */
 
-  const assignmentResult =
-    await pool.query(
-      `
+      const assignmentResult = await pool.query(
+        `
         SELECT
           ul.id AS numeric_user_id,
           ul.mobile_no AS mobile,
@@ -860,79 +605,56 @@ if (
           AND ul.is_active = 1
         LIMIT 1
       `,
-      [userId]
-    );
+        [userId],
+      );
 
+      const customer = assignmentResult.rows[0];
 
-  const customer =
-    assignmentResult.rows[0];
+      if (!customer) {
+        return res.status(404).json({
+          success: false,
+          message: "Customer account not found",
+        });
+      }
 
-
-  if (!customer) {
-    return res.status(404).json({
-      success: false,
-      message:
-        "Customer account not found",
-    });
-  }
-
-
-  /* =================================================
+      /* =================================================
      DEFAULT ASSIGNMENT
   ================================================= */
 
-  let assignedBy =
-    customer.assigned_by ||
-    customer.created_by ||
-    null;
+      let assignedBy = customer.assigned_by || customer.created_by || null;
 
+      let assignedRoleId = null;
+      let assignedRole = null;
 
-  let assignedRoleId = null;
-  let assignedRole = null;
-
-
-  if (assignedBy) {
-    const assignedUserResult =
-      await pool.query(
-        `
+      if (assignedBy) {
+        const assignedUserResult = await pool.query(
+          `
           SELECT role
           FROM user_login
           WHERE user_id = $1
           LIMIT 1
         `,
-        [assignedBy]
-      );
+          [assignedBy],
+        );
 
+        assignedRoleId =
+          assignedUserResult.rows[0]?.role == null
+            ? null
+            : Number(assignedUserResult.rows[0].role);
+        assignedRole = getRoleName(assignedRoleId);
+      }
 
-    assignedRoleId =
-      assignedUserResult.rows[0]?.role == null
-        ? null
-        : Number(assignedUserResult.rows[0].role);
-    assignedRole = getRoleName(assignedRoleId);
-  }
-
-
-  /* =================================================
+      /* =================================================
      REFERRAL
   ================================================= */
 
-  let validatedReferralCode =
-    null;
+      let validatedReferralCode = null;
 
+      if (typeof referralCode === "string" && referralCode.trim() !== "") {
+        const cleanReferralCode = referralCode.trim();
 
-  if (
-    typeof referralCode ===
-      "string" &&
-    referralCode.trim() !== ""
-  ) {
-
-    const cleanReferralCode =
-      referralCode.trim();
-
-
-    const referralResult =
-      await pool.query(
-        `
+        const referralResult = await pool.query(
+          `
           SELECT
             ul.id AS referrer_user_id,
             ul.user_id AS referral_user_id,
@@ -943,85 +665,59 @@ if (
             AND ul.role IN (3, 4)
           LIMIT 1
         `,
-        [cleanReferralCode]
-      );
+          [cleanReferralCode],
+        );
 
+        const referrer = referralResult.rows[0];
 
-    const referrer =
-      referralResult.rows[0];
+        if (!referrer) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid referral code",
+          });
+        }
 
+        if (String(referrer.referrer_user_id) === String(userId)) {
+          return res.status(400).json({
+            success: false,
+            message: "You cannot use your own referral code",
+          });
+        }
 
-    if (!referrer) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid referral code",
-      });
-    }
+        assignedBy = referrer.referral_user_id;
 
+        assignedRoleId = Number(referrer.role);
+        assignedRole = getRoleName(assignedRoleId);
 
-    if (
-      String(
-        referrer.referrer_user_id
-      ) ===
-      String(userId)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "You cannot use your own referral code",
-      });
-    }
-
-
-    assignedBy =
-      referrer.referral_user_id;
-
-
-    assignedRoleId = Number(referrer.role);
-    assignedRole = getRoleName(assignedRoleId);
-
-
-    validatedReferralCode =
-      referrer.referral_user_id;
-  }
+        validatedReferralCode = referrer.referral_user_id;
+      }
       /* =================================================
          CREATE MEMBERSHIP
       ================================================= */
 
-      const membership =
-        await Membership.createMembership({
-          userId:
-            userId,
+      const membership = await Membership.createMembership({
+        userId: userId,
 
-          planId:
-            plan.id,
+        planId: plan.id,
 
-          paymentId:
-            payment.id,
+        paymentId: payment.id,
 
-          walletBalance:
-            plan.wallet_bonus,
+        walletBalance: plan.wallet_bonus,
 
-          discountPercent:
-            plan.discount_percentage,
+        discountPercent: plan.discount_percentage,
 
-          monthlyClaim:
-            plan.monthly_claim,
+        monthlyClaim: plan.monthly_claim,
 
-          expiryDate,
+        expiryDate,
 
-          termsAndConditions:
-            true,
+        termsAndConditions: true,
 
-          assignedBy,
+        assignedBy,
 
-          assignedRole,
+        assignedRole,
 
-          referralCode:
-            validatedReferralCode,
-        });
-
+        referralCode: validatedReferralCode,
+      });
 
       /* =================================================
          PAYMENT LOG
@@ -1029,43 +725,29 @@ if (
 
       try {
         await Payment.createPaymentLog({
-          user_id:
-            userId,
+          user_id: userId,
 
-          order_id:
-            membership.id,
+          order_id: membership.id,
 
-          order_type:
-            "MEMBERSHIP",
+          order_type: "MEMBERSHIP",
 
           payment_request: {
             razorpay_order_id,
 
             razorpay_payment_id,
 
-            amount:
-              razorpayPayment.amount,
+            amount: razorpayPayment.amount,
 
-            currency:
-              razorpayPayment.currency,
+            currency: razorpayPayment.currency,
           },
 
-          payment_response:
-            razorpayPayment,
+          payment_response: razorpayPayment,
         });
 
-
-        console.log(
-          `Payment log created for membership ${membership.id}`
-        );
-
+        console.log(`Payment log created for membership ${membership.id}`);
       } catch (paymentLogError) {
-        console.error(
-          "MEMBERSHIP PAYMENT LOG ERROR:",
-          paymentLogError.message
-        );
+        console.error("MEMBERSHIP PAYMENT LOG ERROR:", paymentLogError.message);
       }
-
 
       /* =================================================
          WHATSAPP SUBSCRIPTION
@@ -1074,130 +756,94 @@ if (
       try {
         if (customer?.mobile) {
           await sendSubscriptionWhatsApp({
-            mobile:
-              customer.mobile,
+            mobile: customer.mobile,
 
-            customerName:
-              customer.full_name ||
-              "Customer",
+            customerName: customer.full_name || "Customer",
 
-            planName:
-              plan.plan_name ||
-              plan.name ||
-              "Subscription",
+            planName: plan.plan_name || plan.name || "Subscription",
 
-            walletAmount:
-              Number(
-                plan.wallet_bonus || 0
-              ).toFixed(2),
+            walletAmount: Number(plan.wallet_bonus || 0).toFixed(2),
 
-            validity:
-              "1 Year",
+            validity: "1 Year",
           });
 
-
           console.log(
-            `WHATSAPP SUBSCRIPTION SENT FOR MEMBERSHIP ${membership.id}`
+            `WHATSAPP SUBSCRIPTION SENT FOR MEMBERSHIP ${membership.id}`,
           );
         }
-
       } catch (whatsappError) {
-        console.error(
-          "WHATSAPP SUBSCRIPTION FAILED:",
-          whatsappError.message
-        );
+        console.error("WHATSAPP SUBSCRIPTION FAILED:", whatsappError.message);
       }
-
 
       /* =================================================
          CREATE IN-APP MEMBERSHIP NOTIFICATION
       ================================================= */
-try {
-  const notification =
-    await Notification.createNotification({
-      userId: userId,
+      try {
+        const notification = await Notification.createNotification({
+          userId: userId,
 
-      title:
-        "🎉 Membership Activated!",
+          title: "🎉 Membership Activated!",
 
-      message:
-        `Your membership has been activated successfully.\n` +
-        `Plan: ${plan.plan_name || plan.name || "Membership"} 🌱`,
+          message:
+            `Your membership has been activated successfully.\n` +
+            `Plan: ${plan.plan_name || plan.name || "Membership"} 🌱`,
 
-      type:
-        "MEMBERSHIP_ACTIVATED",
+          type: "MEMBERSHIP_ACTIVATED",
 
-      referenceId:
-        membership.id,
-    });
+          referenceId: membership.id,
+        });
 
-  console.log(
-    `MEMBERSHIP NOTIFICATION CREATED FOR USER ${userId}`
-  );
+        console.log(`MEMBERSHIP NOTIFICATION CREATED FOR USER ${userId}`);
 
-  // Send push notification
-  const userResult = await pool.query(
-    `
+        // Send push notification
+        const userResult = await pool.query(
+          `
       SELECT fcm_token
       FROM user_login
       WHERE user_id = $1
         AND is_active = 1
       LIMIT 1
     `,
-    [userId]
-  );
+          [userId],
+        );
 
-  const fcmToken =
-    userResult.rows[0]?.fcm_token;
+        const fcmToken = userResult.rows[0]?.fcm_token;
 
-  if (fcmToken) {
-    await sendPushNotification({
-      fcmToken,
+        if (fcmToken) {
+          await sendPushNotification({
+            fcmToken,
 
-      title:
-        notification.title,
+            title: notification.title,
 
-      body:
-        notification.message,
+            body: notification.message,
 
-      data: {
-        userId:
-          userId,
+            data: {
+              userId: userId,
 
-        type:
-          "MEMBERSHIP_ACTIVATED",
+              type: "MEMBERSHIP_ACTIVATED",
 
-        membershipId:
-          String(membership.id),
-      },
-    });
+              membershipId: String(membership.id),
+            },
+          });
 
-    console.log(
-      `MEMBERSHIP push notification sent for membership ${membership.id}`
-    );
-
-  } else {
-    console.log(
-      `No FCM token found for user ${userId}`
-    );
-  }
-
-} catch (notificationError) {
-  console.error(
-    "MEMBERSHIP NOTIFICATION FAILED:",
-    notificationError.message
-  );
-}
-
+          console.log(
+            `MEMBERSHIP push notification sent for membership ${membership.id}`,
+          );
+        } else {
+          console.log(`No FCM token found for user ${userId}`);
+        }
+      } catch (notificationError) {
+        console.error(
+          "MEMBERSHIP NOTIFICATION FAILED:",
+          notificationError.message,
+        );
+      }
 
       /* =================================================
          UPDATE REFERRAL ASSIGNMENT
       ================================================= */
 
-      if (
-        validatedReferralCode &&
-        assignedBy
-      ) {
+      if (validatedReferralCode && assignedBy) {
         await pool.query(
           `
             UPDATE user_login
@@ -1205,101 +851,73 @@ try {
             WHERE user_id = $2
               AND is_active = 1
           `,
-          [
-            assignedBy,
-            userId,
-          ]
+          [assignedBy, userId],
         );
       }
-
 
       /* =================================================
          PROCESS VENDOR / RESELLER BENEFIT
       ================================================= */
 
-const membershipBenefitResult =
-  await processMembershipBenefit({
-    membershipId:
-      membership.id,
+      const membershipBenefitResult = await processMembershipBenefit({
+        membershipId: membership.id,
 
-    customerId:
-      userId,
+        customerId: userId,
 
-    assignedBy,
+        assignedBy,
 
-    assignedRole: assignedRoleId,
+        assignedRole: assignedRoleId,
 
-    subscriptionAmount:
-      Number(plan.plan_price),
-  });
+        subscriptionAmount: Number(plan.plan_price),
+      });
 
+      console.log("===== MEMBERSHIP WALLET BENEFITS =====");
 
-console.log(
-  "===== MEMBERSHIP WALLET BENEFITS ====="
-);
+      console.log(membershipBenefitResult);
 
-
-console.log(
-  membershipBenefitResult
-);
-
-
-/* =================================================
+      /* =================================================
    VENDOR / RESELLER REFERRAL NOTIFICATION
 ================================================= */
 
-try {
-  /*
-   * No referral/assignment means there is nobody
-   * to notify.
-   */
-  if (
-    assignedBy &&
-    assignedRoleId
-  ) {
+      try {
+        /*
+         * No referral/assignment means there is nobody
+         * to notify.
+         */
+        if (assignedBy && assignedRoleId) {
+          let shouldNotifyReferral = false;
 
-    let shouldNotifyReferral =
-      false;
+          /*
+           * DIRECT VENDOR
+           *
+           * Vendor gets 20% benefit.
+           * Send notification to the Vendor.
+           */
+          if (assignedRoleId === 3) {
+            shouldNotifyReferral = true;
+          }
 
-
-    /*
-     * DIRECT VENDOR
-     *
-     * Vendor gets 20% benefit.
-     * Send notification to the Vendor.
-     */
-    if (
-      assignedRoleId === 3
-    ) {
-      shouldNotifyReferral = true;
-    }
-
-
-    /*
-     * RESELLER
-     *
-     * If this Reseller was created by a Vendor,
-     * the existing benefit split is:
-     *
-     * Vendor    = 10%
-     * Reseller  = 10%
-     *
-     * In this case, do NOT create a referral
-     * notification for either one.
-     *
-     * Otherwise it is a direct Reseller referral:
-     *
-     * Reseller = 15%
-     *
-     * Send notification to the Reseller.
-     */
-    if (
-      assignedRoleId === 4
-    ) {
-
-      const resellerResult =
-        await pool.query(
-          `
+          /*
+           * RESELLER
+           *
+           * If this Reseller was created by a Vendor,
+           * the existing benefit split is:
+           *
+           * Vendor    = 10%
+           * Reseller  = 10%
+           *
+           * In this case, do NOT create a referral
+           * notification for either one.
+           *
+           * Otherwise it is a direct Reseller referral:
+           *
+           * Reseller = 15%
+           *
+           * Send notification to the Reseller.
+           */
+          if (assignedRoleId === 4) {
+            const resellerResult = await pool.query(
+              `
             SELECT
               created_by
             FROM user_login
@@ -1308,23 +926,16 @@ try {
               AND is_active = 1
             LIMIT 1
           `,
-          [assignedBy]
-        );
+              [assignedBy],
+            );
 
+            const reseller = resellerResult.rows[0];
 
-      const reseller =
-        resellerResult.rows[0];
+            let parentVendor = null;
 
-
-      let parentVendor = null;
-
-
-      if (
-        reseller?.created_by
-      ) {
-        const parentVendorResult =
-          await pool.query(
-            `
+            if (reseller?.created_by) {
+              const parentVendorResult = await pool.query(
+                `
               SELECT
                 user_id
               FROM user_login
@@ -1333,105 +944,77 @@ try {
                 AND is_active = 1
               LIMIT 1
             `,
-            [reseller.created_by]
-          );
+                [reseller.created_by],
+              );
 
+              parentVendor = parentVendorResult.rows[0] || null;
+            }
 
-        parentVendor =
-          parentVendorResult.rows[0] || null;
-      }
+            /*
+             * Only notify a direct Reseller.
+             *
+             * Vendor-created Reseller:
+             * parentVendor exists → NO notification.
+             */
+            if (!parentVendor) {
+              shouldNotifyReferral = true;
+            }
+          }
 
+          /*
+           * Create notification only for the person
+           * who directly shared the referral.
+           */
+          if (shouldNotifyReferral) {
+            const referralBenefit = membershipBenefitResult.find(
+              (benefit) => String(benefit.beneficiaryId) === String(assignedBy),
+            );
 
-      /*
-       * Only notify a direct Reseller.
-       *
-       * Vendor-created Reseller:
-       * parentVendor exists → NO notification.
-       */
-      if (!parentVendor) {
-        shouldNotifyReferral = true;
-      }
-    }
+            /*
+             * Safety check:
+             * If there is no matching benefit, do not
+             * create a misleading notification.
+             */
+            if (referralBenefit) {
+              const notification = await Notification.createNotification({
+                userId: assignedBy,
 
+                title: "🎉 New Membership Referral",
 
-    /*
-     * Create notification only for the person
-     * who directly shared the referral.
-     */
-    if (shouldNotifyReferral) {
+                message:
+                  `Customer ${userId} took the ${
+                    plan.plan_name || plan.name || "Membership"
+                  } using your referral.\n` +
+                  `You received ${
+                    referralBenefit.benefitPercent
+                  }% benefit (₹${Number(referralBenefit.benefitAmount).toFixed(
+                    2,
+                  )}) from this membership.`,
 
-      const referralBenefit =
-        membershipBenefitResult.find(
-          (benefit) =>
-            String(
-              benefit.beneficiaryId
-            ) ===
-            String(assignedBy)
-        );
+                type: "MEMBERSHIP_REFERRAL",
 
+                referenceId: membership.id,
+              });
 
-      /*
-       * Safety check:
-       * If there is no matching benefit, do not
-       * create a misleading notification.
-       */
-      if (referralBenefit) {
+              console.log(
+                `MEMBERSHIP REFERRAL NOTIFICATION CREATED FOR ${assignedRole} ${assignedBy}`,
+              );
 
-        const notification =
-          await Notification.createNotification({
-            userId:
-              assignedBy,
-
-            title:
-              "🎉 New Membership Referral",
-
-            message:
-  `Customer ${userId} took the ${
-    plan.plan_name ||
-    plan.name ||
-    "Membership"
-  } using your referral.\n` +
-  `You received ${
-    referralBenefit.benefitPercent
-  }% benefit (₹${
-    Number(
-      referralBenefit.benefitAmount
-    ).toFixed(2)
-  }) from this membership.`,
-
-            type:
-              "MEMBERSHIP_REFERRAL",
-
-            referenceId:
-              membership.id,
-          });
-
-
-        console.log(
-          `MEMBERSHIP REFERRAL NOTIFICATION CREATED FOR ${assignedRole} ${assignedBy}`
-        );
-
-        console.log(
-          "MEMBERSHIP REFERRAL NOTIFICATION:",
-          notification
+              console.log("MEMBERSHIP REFERRAL NOTIFICATION:", notification);
+            }
+          }
+        }
+      } catch (notificationError) {
+        /*
+         * Notification failure must never break
+         * successful membership activation or benefit
+         * processing.
+         */
+        console.error(
+          "MEMBERSHIP REFERRAL NOTIFICATION FAILED:",
+          notificationError.message,
         );
       }
-    }
-  }
-
-} catch (notificationError) {
-
-  /*
-   * Notification failure must never break
-   * successful membership activation or benefit
-   * processing.
-   */
-  console.error(
-    "MEMBERSHIP REFERRAL NOTIFICATION FAILED:",
-    notificationError.message
-  );
-}
-
 
       return res.json({
         success: true,
@@ -1440,26 +1023,17 @@ try {
 
         membership,
 
-        message:
-          "Membership activated successfully.",
+        message: "Membership activated successfully.",
       });
     }
-        /* =====================================================
+    /* =====================================================
        CREATE NORMAL ORDER
     ===================================================== */
 
     let createdOrder = null;
 
-
-    if (
-      (paymentType || "").toUpperCase() !==
-      "MEMBERSHIP"
-    ) {
-
-      console.log(
-        "===== CREATING NORMAL ORDER ====="
-      );
-
+    if ((paymentType || "").toUpperCase() !== "MEMBERSHIP") {
+      console.log("===== CREATING NORMAL ORDER =====");
 
       /* ===================================================
          VALIDATE ADDRESS
@@ -1468,117 +1042,72 @@ try {
       if (!address_id) {
         return res.status(400).json({
           success: false,
-          message:
-            "Delivery address is required",
+          message: "Delivery address is required",
         });
       }
 
-      const addressResult =
-        await pool.query(
-          `
+      const addressResult = await pool.query(
+        `
             SELECT *
             FROM addresses
             WHERE id = $1
               AND user_id = $2
             LIMIT 1
           `,
-          [
-            address_id,
-            userId,
-          ]
-        );
+        [address_id, userId],
+      );
 
-
-      const selectedAddress =
-        addressResult.rows[0];
-
+      const selectedAddress = addressResult.rows[0];
 
       if (!selectedAddress) {
         return res.status(400).json({
           success: false,
-          message:
-            "Selected address does not belong to this user",
+          message: "Selected address does not belong to this user",
         });
       }
 
-
-      console.log(
-        "SELECTED ADDRESS:",
-        selectedAddress
-      );
-
+      console.log("SELECTED ADDRESS:", selectedAddress);
 
       /* ===================================================
          BUY NOW ORDER
       =================================================== */
 
-      if (
-        buyNow &&
-        productId
-      ) {
+      if (buyNow && productId) {
+        const buyNowQuantity = Math.max(1, Number(quantity || 1));
 
-        const buyNowQuantity =
-          Math.max(
-            1,
-            Number(quantity || 1)
-          );
-
-
-        console.log(
-          "===== BUY NOW ORDER ====="
-        );
-
+        console.log("===== BUY NOW ORDER =====");
 
         console.log({
           userId,
           productId,
-          quantity:
-            buyNowQuantity,
+          quantity: buyNowQuantity,
           address_id,
         });
 
-
-        createdOrder =
-  await Order.createBuyNowOrder(
-    userId,
-    address_id,
-    productId,
-    buyNowQuantity
-  );
-
-
+        createdOrder = await Order.createBuyNowOrder(
+          userId,
+          address_id,
+          productId,
+          buyNowQuantity,
+        );
       } else {
-
         /* =================================================
            NORMAL CART ORDER
         ================================================= */
 
-        console.log(
-          "===== CART ORDER ====="
-        );
+        console.log("===== CART ORDER =====");
 
-
-       createdOrder =
-  await Order.createOrder(
-    userId,
-    address_id
-  );
+        createdOrder = await Order.createOrder(userId, address_id);
       }
-
 
       if (!createdOrder) {
         return res.status(500).json({
           success: false,
-          message:
-            "Failed to create order",
+          message: "Failed to create order",
         });
       }
 
-
-      console.log(
-        "ORDER CREATED:",
-        createdOrder
-      );
+      console.log("ORDER CREATED:", createdOrder);
 
       /* ===================================================
          ORDER ID
@@ -1590,63 +1119,34 @@ try {
       if (!createdOrderDbId || !createdOrderId) {
         return res.status(500).json({
           success: false,
-          message:
-            "Order created but order ID was not returned",
+          message: "Order created but order ID was not returned",
         });
       }
-
 
       /* ===================================================
          SAVE ORDER BREAKDOWN
       =================================================== */
 
       const actualAmount =
-        membershipBenefits
-          ?.actualAmount ??
-        Number(
-          localPayment.actual_amount ||
-          0
-        );
+        membershipBenefits?.actualAmount ??
+        Number(localPayment.actual_amount || 0);
 
+      const membershipDiscount = membershipBenefits?.membershipDiscount ?? 0;
 
-      const membershipDiscount =
-        membershipBenefits
-          ?.membershipDiscount ??
-        0;
+      const walletClaim = membershipBenefits?.walletClaim ?? 0;
 
-
-      const walletClaim =
-        membershipBenefits
-          ?.walletClaim ??
-        0;
-
-
-      const deliveryCharge =
-        membershipBenefits
-          ? Number(
-              membershipBenefits.deliveryCharge ||
-              0
-            )
-          : 40;
-
+      const deliveryCharge = membershipBenefits
+        ? Number(membershipBenefits.deliveryCharge || 0)
+        : 40;
 
       const payableAmount =
-        membershipBenefits
-          ?.payableAmount ??
-        (
-          Number(actualAmount) +
-          Number(deliveryCharge)
-        );
+        membershipBenefits?.payableAmount ??
+        Number(actualAmount) + Number(deliveryCharge);
 
-
-      console.log(
-        "===== FINAL ORDER BREAKDOWN ====="
-      );
-
+      console.log("===== FINAL ORDER BREAKDOWN =====");
 
       console.log({
-        orderId:
-          createdOrderId,
+        orderId: createdOrderId,
 
         actualAmount,
 
@@ -1659,13 +1159,11 @@ try {
         payableAmount,
       });
 
-
       /* ===================================================
          INSERT / UPDATE ORDER BREAKDOWN
       =================================================== */
 
       try {
-
         await pool.query(
           `
             UPDATE orders
@@ -1685,20 +1183,12 @@ try {
             deliveryCharge,
             payableAmount,
             createdOrderDbId,
-          ]
+          ],
         );
 
-
-        console.log(
-          `Order breakdown updated for order ${createdOrderId}`
-        );
-
+        console.log(`Order breakdown updated for order ${createdOrderId}`);
       } catch (breakdownError) {
-
-        console.error(
-          "ORDER BREAKDOWN UPDATE ERROR:",
-          breakdownError.message
-        );
+        console.error("ORDER BREAKDOWN UPDATE ERROR:", breakdownError.message);
 
         /*
          * Do not fail an already-created order
@@ -1706,14 +1196,13 @@ try {
          */
       }
 
-/* ===================================================
+      /* ===================================================
    LINK PAYMENT TO ORDER
 =================================================== */
 
-try {
-
-  await pool.query(
-    `
+      try {
+        await pool.query(
+          `
       UPDATE payments
       SET
         order_id = $1,
@@ -1721,36 +1210,29 @@ try {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
     `,
-    [
-      createdOrder.order_id,
-      createdOrder.tnx_order_id || razorpay_order_id,
-      payment.id,
-    ]
-  );
+          [
+            createdOrder.order_id,
+            createdOrder.tnx_order_id || razorpay_order_id,
+            payment.id,
+          ],
+        );
 
-  console.log(
-    `Payment ${payment.id} linked to MGO order ${createdOrder.order_id}`
-  );
+        console.log(
+          `Payment ${payment.id} linked to MGO order ${createdOrder.order_id}`,
+        );
+      } catch (paymentLinkError) {
+        console.error("PAYMENT ORDER LINK ERROR:", paymentLinkError.message);
 
-} catch (paymentLinkError) {
+        throw paymentLinkError;
+      }
 
-  console.error(
-    "PAYMENT ORDER LINK ERROR:",
-    paymentLinkError.message
-  );
-
-  throw paymentLinkError;
-}
-
-
-/* ===================================================
+      /* ===================================================
    UPDATE ORDER PAYMENT STATUS
 =================================================== */
 
-try {
-
-  await pool.query(
-    `
+      try {
+        await pool.query(
+          `
       UPDATE orders
       SET
         tnx_order_id = $1,
@@ -1758,207 +1240,145 @@ try {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $2
     `,
-    [
-      razorpay_order_id,
-      createdOrderDbId,
-    ]
-  );
+          [razorpay_order_id, createdOrderDbId],
+        );
 
-  console.log(
-    `Order ${createdOrderId} marked as PAID`
-  );
+        console.log(`Order ${createdOrderId} marked as PAID`);
 
-  console.log(
-    `Transaction order ID ${razorpay_order_id} saved`
-  );
+        console.log(`Transaction order ID ${razorpay_order_id} saved`);
 
-  /* ===================================================
+        /* ===================================================
    UPDATE MEMBERSHIP USAGE
 =================================================== */
 
-if (membershipBenefits) {
+        if (membershipBenefits) {
+          try {
+            await Membership.updateMembershipUsage({
+              userId,
 
-  try {
+              litresUsed: membershipBenefits.totalLitres,
 
-    await Membership.updateMembershipUsage({
-      userId,
+              walletUsed: membershipBenefits.walletClaim,
 
-      litresUsed:
-        membershipBenefits.totalLitres,
+              orderId: createdOrder.id,
+            });
 
-      walletUsed:
-        membershipBenefits.walletClaim,
+            console.log(
+              `Membership usage updated for order ${createdOrder.order_id}`,
+            );
+          } catch (membershipUsageError) {
+            console.error(
+              "MEMBERSHIP USAGE UPDATE ERROR:",
+              membershipUsageError.message,
+            );
 
-      orderId:
-        createdOrder.id,
-    });
+            throw membershipUsageError;
+          }
+        }
+      } catch (orderPaymentError) {
+        console.error("ORDER PAYMENT STATUS ERROR:", orderPaymentError.message);
 
-    console.log(
-      `Membership usage updated for order ${createdOrder.order_id}`
-    );
+        throw orderPaymentError;
+      }
 
-  } catch (membershipUsageError) {
-
-    console.error(
-      "MEMBERSHIP USAGE UPDATE ERROR:",
-      membershipUsageError.message
-    );
-
-    throw membershipUsageError;
-  }
-}
-
-} catch (orderPaymentError) {
-
-  console.error(
-    "ORDER PAYMENT STATUS ERROR:",
-    orderPaymentError.message
-  );
-
-  throw orderPaymentError;
-}
-
-
-/* ===================================================
+      /* ===================================================
    CREATE ORDER PAYMENT LOG
 =================================================== */
 
-try {
+      try {
+        await Payment.createPaymentLog({
+          user_id: userId,
 
-  await Payment.createPaymentLog({
-    user_id:
-      userId,
+          order_id: createdOrderDbId,
 
-    order_id:
-     createdOrderDbId,
+          order_type: "ORDER",
 
-    order_type:
-      "ORDER",
+          payment_request: {
+            razorpay_order_id,
 
-    payment_request: {
-      razorpay_order_id,
+            razorpay_payment_id,
 
-      razorpay_payment_id,
+            amount: razorpayPayment.amount,
 
-      amount:
-        razorpayPayment.amount,
+            currency: razorpayPayment.currency,
+          },
 
-      currency:
-        razorpayPayment.currency,
-    },
+          payment_response: razorpayPayment,
+        });
 
-    payment_response:
-      razorpayPayment,
-  });
+        console.log(`Order payment log created for order ${createdOrderId}`);
+      } catch (paymentLogError) {
+        console.error("ORDER PAYMENT LOG ERROR:", paymentLogError.message);
+      }
 
-  console.log(
-    `Order payment log created for order ${createdOrderId}`
-  );
-
-} catch (paymentLogError) {
-
-  console.error(
-    "ORDER PAYMENT LOG ERROR:",
-    paymentLogError.message
-  );
-}
-
-
-/* ===================================================
+      /* ===================================================
    ORDER SUCCESS NOTIFICATION
 =================================================== */
-try {
+      try {
+        const notification = await Notification.createNotification({
+          userId: userId,
 
-  const notification =
-    await Notification.createNotification({
-      userId:
-        userId,
+          title: "Order Placed Successfully",
 
-      title:
-        "Order Placed Successfully",
+          message: `Your order #${createdOrderId} has been placed successfully.`,
 
-      message:
-        `Your order #${createdOrderId} has been placed successfully.`,
+          type: "ORDER_PLACED",
 
-      type:
-        "ORDER_PLACED",
+          referenceId: createdOrderDbId,
+        });
 
-      referenceId:
-         createdOrderDbId,
-    });
+        console.log(
+          `ORDER_PLACED notification created for order ${createdOrderId}`,
+        );
 
-  console.log(
-    `ORDER_PLACED notification created for order ${createdOrderId}`
-  );
-
-  // Send push notification
-  const userResult = await pool.query(
-    `
+        // Send push notification
+        const userResult = await pool.query(
+          `
       SELECT fcm_token
       FROM user_login
       WHERE user_id = $1
         AND is_active = 1
       LIMIT 1
     `,
-    [userId]
-  );
+          [userId],
+        );
 
-  const fcmToken =
-    userResult.rows[0]?.fcm_token;
+        const fcmToken = userResult.rows[0]?.fcm_token;
 
-  if (fcmToken) {
+        if (fcmToken) {
+          await sendPushNotification({
+            fcmToken,
 
-    await sendPushNotification({
-      fcmToken,
+            title: notification.title,
 
-      title:
-        notification.title,
+            body: notification.message,
 
-      body:
-        notification.message,
+            data: {
+              userId: userId,
 
-      data: {
-        userId:
-          userId,
+              type: "ORDER_PLACED",
 
-        type:
-          "ORDER_PLACED",
+              orderId: String(createdOrderId),
+            },
+          });
 
-        orderId:
-          String(createdOrderId),
-      },
-    });
+          console.log(
+            `ORDER_PLACED push notification sent for order ${createdOrderId}`,
+          );
+        } else {
+          console.log(`No FCM token found for user ${userId}`);
+        }
+      } catch (notificationError) {
+        console.error("ORDER NOTIFICATION ERROR:", notificationError.message);
+      }
 
-    console.log(
-      `ORDER_PLACED push notification sent for order ${createdOrderId}`
-    );
-
-  } else {
-
-    console.log(
-      `No FCM token found for user ${userId}`
-    );
-
-  }
-
-} catch (notificationError) {
-
-  console.error(
-    "ORDER NOTIFICATION ERROR:",
-    notificationError.message
-  );
-}
-
-
-/* ===================================================
+      /* ===================================================
    WHATSAPP ORDER CONFIRMATION
 =================================================== */
 
-try {
-
-  const customerResult =
-    await pool.query(
-      `
+      try {
+        const customerResult = await pool.query(
+          `
         SELECT
           a.user_id,
           a.phone AS mobile_no,
@@ -1969,120 +1389,80 @@ try {
           AND a.is_active = 1
         LIMIT 1
       `,
-      [createdOrder.address_id, userId]
-    );
+          [createdOrder.address_id, userId],
+        );
 
+        const customer = customerResult.rows[0];
 
-  const customer =
-    customerResult.rows[0];
+        if (customer && customer.mobile_no) {
+          await sendOrderConfirmation({
+            mobile: customer.mobile_no,
 
+            customerName: customer.full_name || "Customer",
 
-  if (
-    customer &&
-    customer.mobile_no
-  ) {
+            orderId: createdOrderId,
 
-    await sendOrderConfirmation({
-      mobile:
-        customer.mobile_no,
+            amount: Number(payableAmount).toFixed(2),
 
-      customerName:
-        customer.full_name ||
-        "Customer",
+            orderSummary: "Order placed successfully",
+          });
 
-      orderId:
-        createdOrderId,
+          console.log(`ORDER WHATSAPP SENT FOR ORDER ${createdOrderId}`);
+        }
+      } catch (whatsappError) {
+        console.error("ORDER WHATSAPP FAILED:", whatsappError.message);
+      }
 
-      amount:
-        Number(
-          payableAmount
-        ).toFixed(2),
-
-      orderSummary:
-        "Order placed successfully",
-    });
-
-
-    console.log(
-      `ORDER WHATSAPP SENT FOR ORDER ${createdOrderId}`
-    );
-  }
-
-} catch (whatsappError) {
-
-  console.error(
-    "ORDER WHATSAPP FAILED:",
-    whatsappError.message
-  );
-}
-
-
-/* ===================================================
+      /* ===================================================
    FINAL NORMAL ORDER RESPONSE
 =================================================== */
 
-return res.json({
-  success: true,
+      return res.json({
+        success: true,
 
-  payment,
+        payment,
 
-  order:
-    createdOrder,
+        order: createdOrder,
 
-  orderId:
-    createdOrderId,
+        orderId: createdOrderId,
 
-  membershipBenefits,
+        membershipBenefits,
 
-  actualAmount,
+        actualAmount,
 
-  membershipDiscount,
+        membershipDiscount,
 
-  walletClaim,
+        walletClaim,
 
-  deliveryCharge,
+        deliveryCharge,
 
-  payableAmount,
+        payableAmount,
 
-  message:
-    "Payment verified and order created successfully.",
-});
+        message: "Payment verified and order created successfully.",
+      });
     }
 
-
-
-/* =====================================================
+    /* =====================================================
    FALLBACK RESPONSE
 ===================================================== */
 
-return res.json({
-  success: true,
+    return res.json({
+      success: true,
 
-  payment,
+      payment,
 
-  message:
-    "Payment verified successfully.",
-});
+      message: "Payment verified successfully.",
+    });
+  } catch (error) {
+    console.error("VERIFY PAYMENT ERROR:", error);
 
+    return res.status(500).json({
+      success: false,
 
-} catch (error) {
-
-  console.error(
-    "VERIFY PAYMENT ERROR:",
-    error
-  );
-
-
-  return res.status(500).json({
-    success: false,
-
-    message:
-      error.message ||
-      "Payment verification failed",
-  });
-}
+      message: error.message || "Payment verification failed",
+    });
+  }
 };
-
 
 /* =========================================================
    GET PAYMENTS
@@ -2090,59 +1470,31 @@ return res.json({
 
 const getPayments = async (req, res) => {
   try {
-
-    const {
-      user_id,
-      order_id,
-    } = req.query;
-
+    const { user_id, order_id } = req.query;
 
     let payments;
 
-
     if (user_id) {
-
-      payments =
-        await Payment.getPaymentsByUserId(
-          user_id
-        );
-
+      payments = await Payment.getPaymentsByUserId(user_id);
     } else if (order_id) {
-
-      payments =
-        await Payment.getPaymentsByOrderId(
-          order_id
-        );
-
+      payments = await Payment.getPaymentsByOrderId(order_id);
     } else {
-
-      payments =
-        await Payment.getAllPayments();
+      payments = await Payment.getAllPayments();
     }
-
 
     return res.json({
       success: true,
       data: payments,
     });
-
   } catch (error) {
-
-    console.error(
-      "GET PAYMENTS ERROR:",
-      error
-    );
-
+    console.error("GET PAYMENTS ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message:
-        error.message ||
-        "Failed to fetch payments",
+      message: error.message || "Failed to fetch payments",
     });
   }
 };
-
 
 /* =========================================================
    CHECKOUT SUMMARY
@@ -2150,25 +1502,16 @@ const getPayments = async (req, res) => {
 
 const checkoutSummary = async (req, res) => {
   try {
-
-    const {
-      user_id,
-      buyNow,
-      productId,
-      quantity,
-    } = req.body;
+    const { user_id, buyNow, productId, quantity } = req.body;
 
     const publicUserId = user_id;
-
 
     if (!publicUserId) {
       return res.status(400).json({
         success: false,
-        message:
-          "User ID is required",
+        message: "User ID is required",
       });
     }
-
 
     /* =====================================================
        CART ITEMS
@@ -2176,19 +1519,13 @@ const checkoutSummary = async (req, res) => {
 
     let cartItems = [];
 
-
     /* =====================================================
        BUY NOW
     ===================================================== */
 
-    if (
-      buyNow &&
-      productId
-    ) {
-
-      const productResult =
-        await pool.query(
-          `
+    if (buyNow && productId) {
+      const productResult = await pool.query(
+        `
             SELECT
               id,
               name,
@@ -2199,32 +1536,19 @@ const checkoutSummary = async (req, res) => {
             WHERE id = $1
             LIMIT 1
           `,
-          [productId]
-        );
+        [productId],
+      );
 
-
-      if (
-        productResult.rows.length === 0
-      ) {
-
+      if (productResult.rows.length === 0) {
         return res.status(404).json({
           success: false,
-          message:
-            "Product not found",
+          message: "Product not found",
         });
       }
 
+      const product = productResult.rows[0];
 
-      const product =
-        productResult.rows[0];
-
-
-      const buyNowQuantity =
-        Math.max(
-          1,
-          Number(quantity || 1)
-        );
-
+      const buyNowQuantity = Math.max(1, Number(quantity || 1));
 
       /*
        * Create the same in-memory cart
@@ -2237,143 +1561,87 @@ const checkoutSummary = async (req, res) => {
         {
           cart_id: null,
 
-          user_id:
-            publicUserId,
+          user_id: publicUserId,
 
-          product_id:
-            product.id,
+          product_id: product.id,
 
-          product_name:
-            product.name,
+          product_name: product.name,
 
-          price:
-            Number(
-              product.price || 0
-            ),
+          price: Number(product.price || 0),
 
-          weight:
-            Number(
-              product.weight || 0
-            ),
+          weight: Number(product.weight || 0),
 
-          stock:
-            Number(
-              product.stock || 0
-            ),
+          stock: Number(product.stock || 0),
 
-          quantity:
-            buyNowQuantity,
+          quantity: buyNowQuantity,
 
-          total_price:
-            Number(
-              product.price || 0
-            ) *
-            buyNowQuantity,
+          total_price: Number(product.price || 0) * buyNowQuantity,
         },
       ];
-
     } else {
-
       /* =================================================
          NORMAL CART
       ================================================= */
 
-      cartItems =
-        await Cart.getItems(
-          publicUserId
-        );
+      cartItems = await Cart.getItems(publicUserId);
     }
-
 
     /* =====================================================
        EMPTY CART
     ===================================================== */
 
-    if (
-      !cartItems ||
-      cartItems.length === 0
-    ) {
-
+    if (!cartItems || cartItems.length === 0) {
       return res.status(400).json({
         success: false,
-        message:
-          "Cart is empty",
+        message: "Cart is empty",
       });
     }
-
 
     /* =====================================================
        MEMBERSHIP BENEFITS
     ===================================================== */
 
-    const membershipBenefits =
-      await calculateMembershipBenefits(
-        publicUserId,
-        cartItems
-      );
-
+    const membershipBenefits = await calculateMembershipBenefits(
+      publicUserId,
+      cartItems,
+    );
 
     /* =====================================================
        SUBTOTAL
     ===================================================== */
 
-    const subtotal =
-      cartItems.reduce(
-        (
-          total,
-          item
-        ) =>
-          total +
-          (
-            Number(
-              item.price || 0
-            ) *
-            Number(
-              item.quantity || 0
-            )
-          ),
-        0
-      );
-
+    const subtotal = cartItems.reduce(
+      (total, item) =>
+        total + Number(item.price || 0) * Number(item.quantity || 0),
+      0,
+    );
 
     /* =====================================================
        MEMBERSHIP DISCOUNT
     ===================================================== */
 
-    const membershipDiscount =
-      Number(
-        membershipBenefits
-          ?.membershipDiscount || 0
-      );
-
+    const membershipDiscount = Number(
+      membershipBenefits?.membershipDiscount || 0,
+    );
 
     /* =====================================================
        WALLET CLAIM
     ===================================================== */
 
-    const walletClaim =
-      Number(
-        membershipBenefits
-          ?.walletClaim || 0
-      );
-
+    const walletClaim = Number(membershipBenefits?.walletClaim || 0);
 
     /* =====================================================
        DELIVERY CHARGE
     ===================================================== */
 
-    const totalLitres =
-      cartItems.reduce(
-        (total, item) =>
-          total +
-          Number(item.weight || 0) *
-          Number(item.quantity || 0),
-        0
-      );
+    const totalLitres = cartItems.reduce(
+      (total, item) =>
+        total + Number(item.weight || 0) * Number(item.quantity || 0),
+      0,
+    );
 
-    const deliveryRuleResult =
-      await pool.query(
-        `
+    const deliveryRuleResult = await pool.query(
+      `
           SELECT
             delivery_cart_count,
             delivery_charges,
@@ -2382,57 +1650,37 @@ const checkoutSummary = async (req, res) => {
           WHERE is_active = 1
           ORDER BY id DESC
           LIMIT 1
-        `
-      );
+        `,
+    );
 
-    if (
-      !deliveryRuleResult.rows.length
-    ) {
+    if (!deliveryRuleResult.rows.length) {
       return res.status(500).json({
         success: false,
-        message:
-          "Delivery charge configuration not found",
+        message: "Delivery charge configuration not found",
       });
     }
 
-    const deliveryCartCount =
-      Number(
-        deliveryRuleResult.rows[0]
-          .delivery_cart_count
-      );
+    const deliveryCartCount = Number(
+      deliveryRuleResult.rows[0].delivery_cart_count,
+    );
 
-    const configuredDeliveryCharge =
-      Number(
-        deliveryRuleResult.rows[0]
-          .delivery_charges
-      );
+    const configuredDeliveryCharge = Number(
+      deliveryRuleResult.rows[0].delivery_charges,
+    );
 
     const expectedDeliveryDays =
-      deliveryRuleResult.rows[0]
-        .expected_delivery_days;
+      deliveryRuleResult.rows[0].expected_delivery_days;
 
     const deliveryCharge =
-      totalLitres >= deliveryCartCount
-        ? 0
-        : configuredDeliveryCharge;
+      totalLitres >= deliveryCartCount ? 0 : configuredDeliveryCharge;
 
-    const deliverySavings =
-      deliveryCharge === 0
-        ? configuredDeliveryCharge
-        : 0;
-
+    const deliverySavings = deliveryCharge === 0 ? configuredDeliveryCharge : 0;
 
     /* =====================================================
        ACTUAL AMOUNT
     ===================================================== */
 
-    const actualAmount =
-      Number(
-        membershipBenefits
-          ?.actualAmount ??
-        subtotal
-      );
-
+    const actualAmount = Number(membershipBenefits?.actualAmount ?? subtotal);
 
     /* =====================================================
        PAYABLE AMOUNT
@@ -2444,24 +1692,16 @@ const checkoutSummary = async (req, res) => {
       Number(walletClaim) +
       Number(deliveryCharge);
 
-
-    console.log(
-      "===== CHECKOUT SUMMARY ====="
-    );
-
+    console.log("===== CHECKOUT SUMMARY =====");
 
     console.log({
-      user_id:
-        publicUserId,
+      user_id: publicUserId,
 
-      buyNow:
-        !!buyNow,
+      buyNow: !!buyNow,
 
-      productId:
-        productId || null,
+      productId: productId || null,
 
-      quantity:
-        quantity || null,
+      quantity: quantity || null,
 
       subtotal,
 
@@ -2477,7 +1717,6 @@ const checkoutSummary = async (req, res) => {
 
       payableAmount,
     });
-
 
     /* =====================================================
        RESPONSE
@@ -2506,25 +1745,16 @@ const checkoutSummary = async (req, res) => {
 
       payableAmount,
     });
-
   } catch (error) {
-
-    console.error(
-      "CHECKOUT SUMMARY ERROR:",
-      error
-    );
-
+    console.error("CHECKOUT SUMMARY ERROR:", error);
 
     return res.status(500).json({
       success: false,
 
-      message:
-        error.message ||
-        "Failed to calculate checkout summary",
+      message: error.message || "Failed to calculate checkout summary",
     });
   }
 };
-
 
 /* =========================================================
    MODULE EXPORTS

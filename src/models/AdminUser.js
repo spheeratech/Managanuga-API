@@ -47,22 +47,20 @@ const AdminUser = {
   // --------------------------------------------------
   // CREATE USER
   // --------------------------------------------------
-    async createUser(client, loginData, infoData) {
-    // Resolve the numeric role ID from user_roles
+  async createUser(client, loginData, infoData) {
+    // Resolve the numeric role ID from lkp_user_roles
     const roleResult = await client.query(
       `
       SELECT id
-      FROM user_roles
+      FROM lkp_user_roles
       WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
       LIMIT 1
       `,
-      [loginData.role]
+      [loginData.role],
     );
 
     if (roleResult.rows.length === 0) {
-      throw new Error(
-        `Role "${loginData.role}" not found in user_roles`
-      );
+      throw new Error(`Role "${loginData.role}" not found in lkp_user_roles`);
     }
 
     const roleId = roleResult.rows[0].id;
@@ -95,7 +93,7 @@ const AdminUser = {
         loginData.createdBy || null,
         loginData.assignedBy || null,
         loginData.relationshipType || null,
-      ]
+      ],
     );
 
     console.log("========================================");
@@ -146,7 +144,7 @@ const AdminUser = {
         infoData.bankName || null,
         infoData.contactPersonName || null,
         infoData.contactPersonNumber || null,
-      ]
+      ],
     );
 
     return {
@@ -192,7 +190,7 @@ const AdminUser = {
 
       LEFT JOIN user_info i
         ON l.user_id = i.user_id
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = l.role
 
       ORDER BY l.created_at DESC
@@ -210,22 +208,31 @@ const AdminUser = {
   // --------------------------------------------------
   // GET USERS BY VENDOR
   // --------------------------------------------------
+  // async getUsersByVendorId(vendorUserId) {
+  //   const result = await pool.query(
+  //     `
+  //     SELECT *
+  //     FROM public.get_users_by_vendor_id($1)
+  //     `,
+  //     [vendorUserId],
+  //   );
+
+  //   return result.rows.map((user) => {
+  //     const roleName = getRoleName(user.role);
+  //     if (!roleName) {
+  //       throw new Error(`Unknown role returned for user ${user.user_id}`);
+  //     }
+  //     return { ...user, role: roleName };
+  //   });
+  // },
+
   async getUsersByVendorId(vendorUserId) {
     const result = await pool.query(
-      `
-      SELECT *
-      FROM public.get_users_by_vendor_id($1)
-      `,
+      `SELECT * FROM public.get_users_by_vendor_id($1)`,
       [vendorUserId],
     );
 
-    return result.rows.map((user) => {
-      const roleName = getRoleName(user.role);
-      if (!roleName) {
-        throw new Error(`Unknown role returned for user ${user.user_id}`);
-      }
-      return { ...user, role: roleName };
-    });
+    return result.rows;
   },
 
   // --------------------------------------------------
@@ -266,7 +273,7 @@ const AdminUser = {
 
       LEFT JOIN user_info i
         ON l.user_id = i.user_id
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = l.role
 
       WHERE l.user_id = $1
@@ -307,7 +314,7 @@ const AdminUser = {
         updated.deleted_at,
         updated.deleted_by
       FROM updated
-      LEFT JOIN user_roles ur
+      LEFT JOIN lkp_user_roles ur
         ON ur.id = updated.role
       `,
       [isActive, userId],
@@ -325,7 +332,7 @@ const AdminUser = {
       const roleResult = await client.query(
         `
         SELECT id
-        FROM user_roles
+        FROM lkp_user_roles
         WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
         LIMIT 1
         `,
@@ -333,7 +340,7 @@ const AdminUser = {
       );
 
       if (roleResult.rows.length === 0) {
-        throw new Error(`Role "${data.role}" not found in user_roles`);
+        throw new Error(`Role "${data.role}" not found in lkp_user_roles`);
       }
 
       roleId = roleResult.rows[0].id;
