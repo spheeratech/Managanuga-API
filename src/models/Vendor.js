@@ -91,6 +91,12 @@ const getOrders = async (vendorId) => {
 
 
 const getBenefits = async (vendorId) => {
+  const cleanVendorId = String(vendorId || "").trim();
+
+  if (!cleanVendorId) {
+    return [];
+  }
+
   const result = await pool.query(
     `
     SELECT
@@ -105,24 +111,30 @@ const getBenefits = async (vendorId) => {
       wt.benefit_percentage AS benefit_percent,
       wt.benefit_amount,
       'CREDITED' AS status,
-      wt.created_at
-    FROM wallet_transactions wt
-    INNER JOIN user_wallet uw
+      wt.created_at,
+      wt.benefit_type,
+      wt.description
+    FROM public.wallet_transactions wt
+    INNER JOIN public.user_wallet uw
       ON uw.wallet_id = wt.wallet_id
      AND uw.user_id = wt.user_id
     WHERE wt.user_id = $1
       AND wt.transaction_type = 'CREDIT'
-      AND wt.benefit_type = 'MEMBERSHIP_COMMISSION'
+      AND wt.benefit_type IN (
+        'REFERRAL',
+        'MEMBERSHIP_COMMISSION'
+      )
       AND wt.status = 'COMPLETED'
       AND wt.is_active = 1
       AND uw.is_active = 1
     ORDER BY wt.created_at DESC, wt.id DESC;
     `,
-    [String(vendorId).trim()]
+    [cleanVendorId]
   );
 
   return result.rows;
 };
+
 
 
 
