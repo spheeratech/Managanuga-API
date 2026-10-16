@@ -4,152 +4,160 @@ const pool = require("../../db");
 const getStates = async () => {
   try {
     const result = await pool.query(`
-      SELECT 
-        MIN("StateCode") AS id, 
-        TRIM("StateName") AS name 
-      FROM "StateList" 
-      WHERE "StateName" IS NOT NULL
-      GROUP BY TRIM("StateName")
-      ORDER BY name ASC
+      SELECT
+        state_id AS id,
+        TRIM("state_name") AS name
+      FROM public.lkp_states      
+        WHERE is_active = 1
+      ORDER BY state_id ASC
     `);
+
     return result.rows;
   } catch (err) {
     console.error("Model getStates error:", err.message);
     return [];
   }
 };
-
-// 2. DISTRICTS - Dynamic from DistrictList
+// 2. DISTRICTS - Dynamic from lkp_districts
 const getDistrictsByState = async (stateId) => {
   try {
-    const term = String(stateId).trim();
+    const term = String(stateId ?? "").trim();
+
+    console.log("DISTRICT API - Received stateId:", term);
+
+    if (!term) return [];
+
     const result = await pool.query(
       `
-      SELECT 
-        "DistCode" AS id, 
-        TRIM("DistName") AS name, 
-        "StateCode" AS state_id 
-      FROM "DistrictList" 
-      WHERE "StateCode"::text = $1::text
-      ORDER BY name ASC
+      SELECT DISTINCT
+        d.dist_id AS id,
+        TRIM(d.dist_name) AS name,
+        d.state_id
+      FROM public.lkp_districts d
+      INNER JOIN public.lkp_states s ON d.state_id = s.state_id
+      WHERE d.state_id = $1
+      ORDER BY dist_id ASC
     `,
       [term],
     );
+
+    console.log("DISTRICT API - Returned:", result.rows.length);
+    console.log("DISTRICT API - Sample:", result.rows.slice(0, 5));
+
     return result.rows;
   } catch (error) {
-    console.error("Model getDistrictsByState error:", error.message);
-    return [];
-  }
-};
-
-// 3. CITIES - Queries distname or matches via distcode
-// 3. CITIES - 100% Dynamic matching with ZERO hardcoded names
-// const getCitiesByDistrict = async (districtName) => {
-//   try {
-//     const term = String(districtName || "").trim();
-//     if (!term) return [];
-
-//     const result = await pool.query(
-//       `
-//       SELECT DISTINCT
-//         c."CityCode" AS id,
-//         c."CityCode" AS name
-//       FROM "CityList" c
-//       WHERE
-//         -- Matches if distname is populated:
-//         (c.distname IS NOT NULL AND LOWER(TRIM(c.distname)) = LOWER(TRIM($1::text)))
-//         -- Or matches dynamically against PinRegion if distname is NULL:
-//         OR (
-//           c.distname IS NULL
-//           AND (
-//             c."PinRegion" ILIKE '%' || $1::text || '%'
-//             OR $1::text ILIKE '%' || c."PinRegion" || '%'
-//           )
-//         )
-//       ORDER BY c."CityCode" ASC
-//     `,
-//       [term],
-//     );
-
-//     return result.rows;
-//   } catch (error) {
-//     console.error("Model getCitiesByDistrict error:", error.message);
-//     return [];
-//   }
-// };
-const getCitiesByDistrict = async (districtName, stateId) => {
-  try {
-    const name = String(districtName || "")
-      .trim()
-      .toLowerCase();
-
-    console.log("================================");
-    console.log("GET CITIES MODEL");
-    console.log("District Name:", name);
-    console.log("State ID:", stateId);
-    console.log("================================");
-
-    if (!name) {
-      return [];
-    }
-
-    // Hyderabad:
-    // Get all Hyderabad areas directly from pincodeList.
-    // Do NOT use city_list.district_id.
-    // Do NOT depend on state_id here.
-    if (name === "hyderabad") {
-      const result = await pool.query(`
-        SELECT DISTINCT
-          TRIM("PinArea") AS id,
-          TRIM("PinArea") AS name
-        FROM "pincodeList"
-        WHERE "PinArea" IS NOT NULL
-          AND TRIM("PinArea") <> ''
-          AND "pincode" LIKE '500%'
-        ORDER BY TRIM("PinArea") ASC
-      `);
-
-      console.log("HYDERABAD PINCODE AREAS FOUND:", result.rows.length);
-
-      console.log(result.rows);
-
-      return result.rows;
-    }
-
-    return [];
-  } catch (error) {
-    console.error("getCitiesByDistrict ERROR:", error);
+    console.error("getDistrictsByState error:", error.message);
     throw error;
   }
 };
 
-// 4. PINCODES - Dynamic from pincodeList
-const getPincodesByCity = async (cityName) => {
+// 3. CITIES - Queries distname or matches via distcode
+
+const getCitiesByDistrict = async (stateId, distId) => {
+  const result = await pool.query(
+    `
+    SELECT DISTINCT
+      c.city_id AS id,
+      TRIM(c.city_name) AS name
+    FROM public.lkp_cities c
+    WHERE c.state_id = $1
+      AND c.dist_id = $2
+    ORDER BY c.city_id ASC
+    `,
+    [stateId, distId],
+  );
+
+  return result.rows;
+};
+
+// 4. PINCODES - Dynamic from lkp_area_pincode
+
+const getPincodesByCity = async (stateId, distId, cityId) => {
   try {
-    const city = String(cityName || "").trim();
-    if (!city) return [];
+    const stateTerm = String(stateId ?? "").trim();
+    const districtTerm = String(distId ?? "").trim();
+    const cityTerm = String(cityId ?? "").trim();
+
+    console.log("GET PINCODES - State ID:", stateTerm);
+    console.log("GET PINCODES - District ID:", districtTerm);
+    console.log("GET PINCODES - City ID:", cityTerm);
+
+    if (!stateTerm || !districtTerm || !cityTerm) {
+      return [];
+    }
 
     const result = await pool.query(
       `
-      SELECT 
-        ROW_NUMBER() OVER () AS id,
-        "pincode" AS pincode,
-        "PinArea" AS city_name,
-        "HubCode" AS hub_code
-      FROM "pincodeList"
-      WHERE LOWER(TRIM("PinArea")) = LOWER(TRIM($1::text))
-      ORDER BY "pincode" ASC
-    `,
-      [city],
+      SELECT DISTINCT
+        p.area_id AS id,
+        
+
+        p.area_name AS name,
+        p.pincode As pincode
+      FROM public.lkp_area_pincode p
+      WHERE p.state_id = $1
+        AND p.district_id = $2
+        AND p.city_id = $3
+        AND p.is_active = 1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM hubs h
+          WHERE h.hubpincode = p.pincode
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM hubroute hr
+          WHERE hr.hubroutepincode = p.pincode
+        )
+      ORDER BY p.pincode ASC
+      `,
+      [stateTerm, districtTerm, cityTerm],
     );
+
+    console.log("GET PINCODES - Returned:", result.rows.length);
+    console.log("GET PINCODES - Sample:", result.rows.slice(0, 5));
+
     return result.rows;
   } catch (error) {
     console.error("Model getPincodesByCity error:", error.message);
-    return [];
+    throw error;
   }
 };
 
 // 5. HUBS & HUBROUTE CRUD
+// const getHubs = async () => {
+//   try {
+//     const result = await pool.query(`
+//       SELECT
+//         h.hubid AS id,
+//         h.hubname AS hub_name,
+//         h.hubpincode AS pincode,
+//         h.is_active,
+//         h.created_at,
+//         h.updated_at,
+//         COALESCE(
+//           (
+//             SELECT json_agg(
+//               json_build_object(
+//                 'route_id', hr.hubrouteid,
+//                 'pincode', hr.hubroutepincode,
+//                 'city_name', hr.hubroutename
+//               )
+//             )
+//             FROM hubroute hr
+//             WHERE hr.hubid = h.hubid
+//           ),
+//           '[]'::json
+//         ) AS routes
+//       FROM hubs h
+//       ORDER BY h.created_at DESC
+//     `);
+//     return result.rows;
+//   } catch (error) {
+//     console.error("Model getHubs error:", error.message);
+//     return [];
+//   }
+// };
 const getHubs = async () => {
   try {
     const result = await pool.query(`
@@ -158,29 +166,14 @@ const getHubs = async () => {
         h.hubname AS hub_name,
         h.hubpincode AS pincode,
         h.is_active,
-        h.created_at,
-        h.updated_at,
-        COALESCE(
-          (
-            SELECT json_agg(
-              json_build_object(
-                'route_id', hr.hubrouteid,
-                'pincode', hr.hubroutepincode,
-                'city_name', hr.hubroutename
-              )
-            )
-            FROM hubroute hr
-            WHERE hr.hubid = h.hubid
-          ),
-          '[]'::json
-        ) AS routes
+        '[]'::json AS routes
       FROM hubs h
-      ORDER BY h.created_at DESC
+      ORDER BY h.hubid DESC
     `);
     return result.rows;
   } catch (error) {
     console.error("Model getHubs error:", error.message);
-    return [];
+    throw error;
   }
 };
 
@@ -233,8 +226,7 @@ const createHub = async (hubData) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // const { hubName, pincodes, isActive = 1 } = hubData;
-    const { hubName, pincodes, isActive = 1 } = hubData;
+    const { hubName: requestedHubName, pincodes, isActive = 1 } = hubData;
 
     const activeValue =
       isActive === true || isActive === "true"
@@ -243,28 +235,33 @@ const createHub = async (hubData) => {
           ? 0
           : Number(isActive);
 
-    if (!hubName || !hubName.trim()) throw new Error("Hub name is required");
     if (!pincodes || !Array.isArray(pincodes) || pincodes.length === 0) {
       throw new Error("At least one pincode must be selected");
     }
 
-    const primaryPincode = String(pincodes[0].pincode).trim();
+    const areaName = String(pincodes[0].name ?? "").trim();
+    const hubName = areaName || String(requestedHubName ?? "").trim();
+    if (!hubName) throw new Error("Hub name or pincode area name is required");
+
+    const primaryPincode = String(pincodes[0].pincode ?? "").trim();
+    if (!primaryPincode) throw new Error("Selected pincode is required");
     const nonPrimaryPincodes = pincodes.slice(1);
 
     const existingCheck = await client.query(
       `
-      SELECT hubid, hubname, hubpincode 
-      FROM hubs 
-      WHERE hubpincode = $1 OR LOWER(TRIM(hubname)) = LOWER(TRIM($2))
+      SELECT h.hubid, h.hubname, h.hubpincode
+      FROM hubs h
+      LEFT JOIN hubroute hr ON hr.hubid = h.hubid
+      WHERE h.hubpincode = $1 OR hr.hubroutepincode = $1
       LIMIT 1
     `,
-      [primaryPincode, hubName.trim()],
+      [primaryPincode],
     );
 
     if (existingCheck.rows.length > 0) {
       const existing = existingCheck.rows[0];
       throw new Error(
-        `Hub already exists! Hub "${existing.hubname}" (${existing.hubid}) is already assigned to pincode ${existing.hubpincode}.`,
+        `Pincode ${primaryPincode} is already assigned to hub "${existing.hubname}" (${existing.hubid}).`,
       );
     }
 
@@ -276,16 +273,15 @@ const createHub = async (hubData) => {
       VALUES ($1, $2, $3, $4, NOW(), NOW())
       RETURNING hubid AS id, hubname AS hub_name, hubpincode AS pincode, is_active, created_at, updated_at
     `,
-      // [hubId, hubName.trim(), primaryPincode, isActive],
       [hubId, hubName.trim(), primaryPincode, activeValue],
     );
 
-    try {
-      await client.query(
-        `UPDATE "pincodeList" SET "HubCode" = $1 WHERE "pincode" = $2`,
-        [hubId, primaryPincode],
-      );
-    } catch (err) {}
+    // try {
+    //   await client.query(
+    //     `UPDATE "pincodeList" SET "HubCode" = $1 WHERE "pincode" = $2`,
+    //     [hubId, primaryPincode],
+    //   );
+    // } catch (err) {}
 
     if (nonPrimaryPincodes.length > 0) {
       let baseRouteCount = 1;
@@ -301,7 +297,8 @@ const createHub = async (hubData) => {
       for (let i = 0; i < nonPrimaryPincodes.length; i++) {
         const routeItem = nonPrimaryPincodes[i];
         const routeId = `HR${String(baseRouteCount + i).padStart(3, "0")}`;
-        const routeName = routeItem.city_name || `${hubName} Route ${i + 1}`;
+        const routeName =
+          routeItem.name || routeItem.city_name || `${hubName} Route ${i + 1}`;
         const routePincode = String(routeItem.pincode).trim();
 
         await client.query(
@@ -309,7 +306,6 @@ const createHub = async (hubData) => {
           INSERT INTO hubroute (hubrouteid, hubroutename, hubroutepincode, hubid, is_active, created_at, updated_at)
           VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
         `,
-          // [routeId, routeName, routePincode, hubId, isActive],
           [routeId, routeName, routePincode, hubId, activeValue],
         );
 
@@ -323,9 +319,14 @@ const createHub = async (hubData) => {
     }
 
     await client.query("COMMIT");
+    console.log(
+      "SUCCESSFULLY COMMITTED HUB TO DATABASE:",
+      hubResult.rows[0].id,
+    ); // <-- ADD THIS
     return hubResult.rows[0];
   } catch (error) {
     await client.query("ROLLBACK");
+    console.error("CREATE HUB TRANSACTION FAILED:", error.message); // <-- ADD THIS
     throw error;
   } finally {
     client.release();
@@ -336,8 +337,7 @@ const updateHub = async (hubId, hubData) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // const { hubName, pincodes, isActive = 1 } = hubData;
-    const { hubName, pincodes, isActive = 1 } = hubData;
+    const { hubName: requestedHubName, pincodes, isActive = 1 } = hubData;
 
     const activeValue =
       isActive === true || isActive === "true"
@@ -346,28 +346,33 @@ const updateHub = async (hubId, hubData) => {
           ? 0
           : Number(isActive);
 
-    if (!hubName || !hubName.trim()) throw new Error("Hub name is required");
     if (!pincodes || !Array.isArray(pincodes) || pincodes.length === 0) {
       throw new Error("At least one pincode must be selected");
     }
 
-    const primaryPincode = String(pincodes[0].pincode).trim();
+    const areaName = String(pincodes[0].name ?? "").trim();
+    const hubName = areaName || String(requestedHubName ?? "").trim();
+    if (!hubName) throw new Error("Hub name or pincode area name is required");
+
+    const primaryPincode = String(pincodes[0].pincode ?? "").trim();
+    if (!primaryPincode) throw new Error("Selected pincode is required");
     const nonPrimaryPincodes = pincodes.slice(1);
 
     const existingCheck = await client.query(
       `
-      SELECT hubid, hubname, hubpincode 
-      FROM hubs 
-      WHERE (hubpincode = $1 OR LOWER(TRIM(hubname)) = LOWER(TRIM($2))) AND hubid != $3
+      SELECT h.hubid, h.hubname, h.hubpincode
+      FROM hubs h
+      LEFT JOIN hubroute hr ON hr.hubid = h.hubid
+      WHERE (h.hubpincode = $1 OR hr.hubroutepincode = $1) AND h.hubid != $2
       LIMIT 1
     `,
-      [primaryPincode, hubName.trim(), hubId],
+      [primaryPincode, hubId],
     );
 
     if (existingCheck.rows.length > 0) {
       const existing = existingCheck.rows[0];
       throw new Error(
-        `Another hub "${existing.hubname}" (${existing.hubid}) is already using pincode ${existing.hubpincode}.`,
+        `Pincode ${primaryPincode} is already assigned to another hub "${existing.hubname}" (${existing.hubid}).`,
       );
     }
 
@@ -413,7 +418,8 @@ const updateHub = async (hubId, hubData) => {
       for (let i = 0; i < nonPrimaryPincodes.length; i++) {
         const routeItem = nonPrimaryPincodes[i];
         const routeId = `HR${String(baseRouteCount + i).padStart(3, "0")}`;
-        const routeName = routeItem.city_name || `${hubName} Route ${i + 1}`;
+        const routeName =
+          routeItem.name || routeItem.city_name || `${hubName} Route ${i + 1}`;
         const routePincode = String(routeItem.pincode).trim();
 
         await client.query(
@@ -421,7 +427,6 @@ const updateHub = async (hubId, hubData) => {
           INSERT INTO hubroute (hubrouteid, hubroutename, hubroutepincode, hubid, is_active, created_at, updated_at)
           VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
         `,
-          // [routeId, routeName, routePincode, hubId, isActive],
           [routeId, routeName, routePincode, hubId, activeValue],
         );
 

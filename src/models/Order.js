@@ -1,5 +1,5 @@
 const pool = require("../../db");
-const xpressbeesService = require("../services/xpressbeesService");
+// const xpressbeesService = require("../services/xpressbeesService");
 const Membership = require("./Membership");
 const {
   calculateCheckoutTotals,
@@ -35,8 +35,7 @@ const verifyOrderSnapshot = (
     );
   }
 };
-
-
+const shiprocketService = require("../services/shiprocketService");
 
 /* =========================================================
    GENERATE MGO ORDER ID
@@ -59,7 +58,7 @@ const generateMgoOrderId = async (client = pool) => {
       CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
       'YYMMDD'
     ) AS date_part
-    `
+    `,
   );
 
   const datePart = dateResult.rows[0].date_part;
@@ -74,7 +73,7 @@ const generateMgoOrderId = async (client = pool) => {
       hashtext($1)
     )
     `,
-    [`MGO${datePart}`]
+    [`MGO${datePart}`],
   );
 
   const result = await client.query(
@@ -89,23 +88,16 @@ const generateMgoOrderId = async (client = pool) => {
     FROM orders
     WHERE order_id LIKE $1
     `,
-    [`MGO${datePart}%`]
+    [`MGO${datePart}%`],
   );
 
-  const nextNumber = Number(
-    result.rows[0].next_number
-  );
+  const nextNumber = Number(result.rows[0].next_number);
 
   if (nextNumber > 99) {
-    throw new Error(
-      `Daily MGO order limit reached for ${datePart}`
-    );
+    throw new Error(`Daily MGO order limit reached for ${datePart}`);
   }
 
-  return `MGO${datePart}${String(nextNumber).padStart(
-    2,
-    "0"
-  )}`;
+  return `MGO${datePart}${String(nextNumber).padStart(2, "0")}`;
 };
 
 /* =========================================================
@@ -171,29 +163,22 @@ if (!userId) {
         AND p.is_active = 1
       ORDER BY c.id DESC
       `,
-      [userId]
+      [userId],
     );
 
     let cartItems = cartResult.rows;
 
-    console.log(
-      "Cart row count:",
-      cartResult.rowCount
-    );
+    console.log("Cart row count:", cartResult.rowCount);
 
-    console.log(
-      "Cart items:",
-      cartResult.rows
-    );
+    console.log("Cart items:", cartResult.rows);
 
     /* -----------------------------------------------------
        BUY NOW
     ----------------------------------------------------- */
 
     if (buyNow) {
-      const productResult =
-        await pool.query(
-          `
+      const productResult = await pool.query(
+        `
           SELECT
             id AS item_id,
             price,
@@ -203,8 +188,8 @@ if (!userId) {
           WHERE id = $1
             AND is_active = 1
           `,
-          [productId]
-        );
+        [productId],
+      );
 
       if (productResult.rowCount === 0) {
         return null;
@@ -212,8 +197,7 @@ if (!userId) {
 
       cartItems = [
         {
-          item_id:
-            productResult.rows[0].item_id,
+          item_id: productResult.rows[0].item_id,
 
           quantity: Number(quantity),
 
@@ -273,20 +257,11 @@ if (!userId) {
        unit_price = {210,310,500}
     ----------------------------------------------------- */
 
-    const itemIds =
-      cartItems.map((item) =>
-        Number(item.item_id)
-      );
+    const itemIds = cartItems.map((item) => Number(item.item_id));
 
-    const quantities =
-      cartItems.map((item) =>
-        Number(item.quantity)
-      );
+    const quantities = cartItems.map((item) => Number(item.quantity));
 
-    const unitPrices =
-      cartItems.map((item) =>
-        Number(item.price)
-      );
+    const unitPrices = cartItems.map((item) => Number(item.price));
 
     /* -----------------------------------------------------
        START TRANSACTION
@@ -389,21 +364,16 @@ if (!userId) {
        GENERATE MGO ORDER ID
     ----------------------------------------------------- */
 
-    const mgoOrderId =
-      await generateMgoOrderId(client);
+    const mgoOrderId = await generateMgoOrderId(client);
 
-    console.log(
-      "Generated MGO Order ID:",
-      mgoOrderId
-    );
+    console.log("Generated MGO Order ID:", mgoOrderId);
 
     /* -----------------------------------------------------
        CREATE ORDER
     ----------------------------------------------------- */
 
-    const orderResult =
-      await client.query(
-        `
+    const orderResult = await client.query(
+      `
         INSERT INTO orders
         (
           user_id,
@@ -462,8 +432,7 @@ if (!userId) {
         ]
       );
 
-    const order =
-      orderResult.rows[0];
+    const order = orderResult.rows[0];
 
     /* -----------------------------------------------------
        CLEAR CART
@@ -476,30 +445,22 @@ if (!userId) {
       DELETE FROM cart_items
       WHERE user_id = $1
       `,
-      [userId]
+      [userId],
     );
 
     await client.query("COMMIT");
 
-    console.log(
-      "MGO ORDER CREATED:",
-      order.order_id
-    );
+    console.log("MGO ORDER CREATED:", order.order_id);
 
     return order;
-
   } catch (error) {
     if (client) {
       await client.query("ROLLBACK");
     }
 
-    console.error(
-      "CREATE ORDER ERROR:",
-      error
-    );
+    console.error("CREATE ORDER ERROR:", error);
 
     throw error;
-
   } finally {
     if (client) {
       client.release();
@@ -546,9 +507,8 @@ if (!userId) {
        GET PRODUCT
     ----------------------------------------------------- */
 
-    const productResult =
-      await pool.query(
-        `
+    const productResult = await pool.query(
+      `
         SELECT
           id,
           price,
@@ -558,18 +518,16 @@ if (!userId) {
         WHERE id = $1
           AND is_active = 1
         `,
-        [productId]
-      );
+      [productId],
+    );
 
     if (productResult.rowCount === 0) {
       return null;
     }
 
-    const product =
-      productResult.rows[0];
+    const product = productResult.rows[0];
 
-    const orderQuantity =
-      Number(quantity);
+    const orderQuantity = Number(quantity);
 
     const snapshotItem = checkoutSnapshot?.cartItems?.[0];
     if (
@@ -623,24 +581,17 @@ if (!userId) {
        ARRAYS
     ----------------------------------------------------- */
 
-    const itemIds = [
-      Number(product.id),
-    ];
+    const itemIds = [Number(product.id)];
 
-    const quantities = [
-      orderQuantity,
-    ];
+    const quantities = [orderQuantity];
 
-    const unitPrices = [
-      Number(product.price),
-    ];
+    const unitPrices = [Number(product.price)];
 
     /* -----------------------------------------------------
        START TRANSACTION
     ----------------------------------------------------- */
 
-    client =
-      await pool.connect();
+    client = await pool.connect();
 
     await client.query("BEGIN");
 
@@ -698,21 +649,16 @@ if (!userId) {
        GENERATE MGO ORDER ID
     ----------------------------------------------------- */
 
-    const mgoOrderId =
-      await generateMgoOrderId(client);
+    const mgoOrderId = await generateMgoOrderId(client);
 
-    console.log(
-      "Generated MGO Buy Now Order ID:",
-      mgoOrderId
-    );
+    console.log("Generated MGO Buy Now Order ID:", mgoOrderId);
 
     /* -----------------------------------------------------
        CREATE ORDER
     ----------------------------------------------------- */
 
-    const orderResult =
-      await client.query(
-        `
+    const orderResult = await client.query(
+      `
         INSERT INTO orders
         (
           user_id,
@@ -768,30 +714,21 @@ if (!userId) {
         ]
       );
 
-    const order =
-      orderResult.rows[0];
+    const order = orderResult.rows[0];
 
     await client.query("COMMIT");
 
-    console.log(
-      "MGO BUY NOW ORDER CREATED:",
-      order.order_id
-    );
+    console.log("MGO BUY NOW ORDER CREATED:", order.order_id);
 
     return order;
-
   } catch (error) {
     if (client) {
       await client.query("ROLLBACK");
     }
 
-    console.error(
-      "CREATE BUY NOW ORDER ERROR:",
-      error
-    );
+    console.error("CREATE BUY NOW ORDER ERROR:", error);
 
     throw error;
-
   } finally {
     if (client) {
       client.release();
@@ -804,14 +741,13 @@ if (!userId) {
 ========================================================= */
 
 const getOrders = async () => {
-  const result =
-    await pool.query(
-      `
+  const result = await pool.query(
+    `
       SELECT *
       FROM orders
       ORDER BY id DESC
-      `
-    );
+      `,
+  );
 
   return result.rows;
 };
@@ -826,9 +762,8 @@ const getOrders = async () => {
 ========================================================= */
 
 const getOrderById = async (id) => {
-  const result =
-    await pool.query(
-      `
+  const result = await pool.query(
+    `
       SELECT
         o.*,
 
@@ -855,8 +790,8 @@ const getOrderById = async (id) => {
 
       LIMIT 1
       `,
-      [String(id)]
-    );
+    [String(id)],
+  );
 
   return result.rows[0];
 };
@@ -865,12 +800,9 @@ const getOrderById = async (id) => {
    GET ORDERS BY PUBLIC USER ID
 ========================================================= */
 
-const getOrdersByUserId = async (
-  userId
-) => {
-  const result =
-    await pool.query(
-      `
+const getOrdersByUserId = async (userId) => {
+  const result = await pool.query(
+    `
       SELECT
         o.id,
         o.user_id,
@@ -920,8 +852,8 @@ const getOrdersByUserId = async (
 
       ORDER BY o.id DESC
       `,
-      [String(userId).trim()]
-    );
+    [String(userId).trim()],
+  );
 
   return result.rows;
 };
@@ -937,12 +869,9 @@ const getOrdersByUserId = async (
    unit_price[]
 ========================================================= */
 
-const getOrderItems = async (
-  orderId
-) => {
-  const result =
-    await pool.query(
-      `
+const getOrderItems = async (orderId) => {
+  const result = await pool.query(
+    `
       SELECT
         x.item_index AS id,
 
@@ -998,8 +927,8 @@ const getOrderItems = async (
 
       ORDER BY x.item_index
       `,
-      [String(orderId)]
-    );
+    [String(orderId)],
+  );
 
   return result.rows;
 };
@@ -1008,23 +937,16 @@ const getOrderItems = async (
    UPDATE ORDER STATUS
 ========================================================= */
 
-const updateOrder = async (
-  id,
-  status
-) => {
-  const result =
-    await pool.query(
-      `
+const updateOrder = async (id, status) => {
+  const result = await pool.query(
+    `
       UPDATE orders
       SET status = $1
       WHERE id = $2
       RETURNING *
       `,
-      [
-        status,
-        id,
-      ]
-    );
+    [status, id],
+  );
 
   return result.rows[0];
 };
@@ -1033,18 +955,15 @@ const updateOrder = async (
    DELETE ORDER
 ========================================================= */
 
-const deleteOrder = async (
-  id
-) => {
-  const result =
-    await pool.query(
-      `
+const deleteOrder = async (id) => {
+  const result = await pool.query(
+    `
       DELETE FROM orders
       WHERE id = $1
       RETURNING *
       `,
-      [id]
-    );
+    [id],
+  );
 
   return result.rows[0];
 };
@@ -1053,14 +972,9 @@ const deleteOrder = async (
    SHIP ORDER
 ========================================================= */
 
-const shipOrder = async (
-  orderId,
-  trackingNumber,
-  courierName
-) => {
-  const result =
-    await pool.query(
-      `
+const shipOrder = async (orderId, trackingNumber, courierName) => {
+  const result = await pool.query(
+    `
       UPDATE orders
       SET
         tracking_number = $2,
@@ -1069,12 +983,8 @@ const shipOrder = async (
       WHERE id = $1
       RETURNING *
       `,
-      [
-        orderId,
-        trackingNumber,
-        courierName,
-      ]
-    );
+    [orderId, trackingNumber, courierName],
+  );
 
   return result.rows[0];
 };
@@ -1088,15 +998,11 @@ const shipOrder = async (
    /tracking/MGO26092707
 ========================================================= */
 
-const trackOrder = async (
-  req,
-  res
-) => {
+const trackOrder = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const order =
-      await getOrderById(id);
+    const order = await getOrderById(id);
 
     if (!order) {
       return res.status(404).json({
@@ -1108,23 +1014,21 @@ const trackOrder = async (
     if (!order.tracking_number) {
       return res.status(400).json({
         success: false,
-        message:
-          "Tracking number not found",
+        message: "Tracking number not found",
       });
     }
 
-    const tracking =
-      await xpressbeesService.trackShipment(
-        order.tracking_number
-      );
+    // const tracking =
+    //   await xpressbeesService.trackShipment(
+    //     order.tracking_number
+    //   );
+    const tracking = await shiprocketService.trackShipment(
+      order.tracking_number,
+    );
 
     return res.json(tracking);
-
   } catch (err) {
-    console.error(
-      "TRACK ORDER ERROR:",
-      err
-    );
+    console.error("TRACK ORDER ERROR:", err);
 
     return res.status(500).json({
       success: false,

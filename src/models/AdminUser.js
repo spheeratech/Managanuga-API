@@ -56,7 +56,7 @@ const AdminUser = {
       WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
       LIMIT 1
       `,
-      [loginData.role]
+      [loginData.role],
     );
 
     if (roleResult.rows.length === 0) {
@@ -95,7 +95,7 @@ const AdminUser = {
         loginData.createdBy || null,
         loginData.assignedBy || null,
         loginData.relationshipType || null,
-      ]
+      ],
     );
 
     console.log("========================================");
@@ -146,7 +146,7 @@ const AdminUser = {
         infoData.bankName || null,
         infoData.contactPersonName || null,
         infoData.contactPersonNumber || null,
-      ]
+      ],
     );
 
     return {
@@ -210,22 +210,31 @@ const AdminUser = {
   // --------------------------------------------------
   // GET USERS BY VENDOR
   // --------------------------------------------------
+  // async getUsersByVendorId(vendorUserId) {
+  //   const result = await pool.query(
+  //     `
+  //     SELECT *
+  //     FROM public.get_users_by_vendor_id($1)
+  //     `,
+  //     [vendorUserId],
+  //   );
+
+  //   return result.rows.map((user) => {
+  //     const roleName = getRoleName(user.role);
+  //     if (!roleName) {
+  //       throw new Error(`Unknown role returned for user ${user.user_id}`);
+  //     }
+  //     return { ...user, role: roleName };
+  //   });
+  // },
+
   async getUsersByVendorId(vendorUserId) {
     const result = await pool.query(
-      `
-      SELECT *
-      FROM public.get_users_by_vendor_id($1)
-      `,
+      `SELECT * FROM public.get_users_by_vendor_id($1)`,
       [vendorUserId],
     );
 
-    return result.rows.map((user) => {
-      const roleName = getRoleName(user.role);
-      if (!roleName) {
-        throw new Error(`Unknown role returned for user ${user.user_id}`);
-      }
-      return { ...user, role: roleName };
-    });
+    return result.rows;
   },
 
   // --------------------------------------------------

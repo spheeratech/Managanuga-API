@@ -25,7 +25,6 @@ const sendSMS = async (mobile, message, templateId) => {
     console.log("==================================");
 
     return response.data;
-
   } catch (error) {
     console.log("========== SMS ERROR ==========");
     console.log("Status:", error.response?.status);

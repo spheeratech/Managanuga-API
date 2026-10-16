@@ -1,10 +1,9 @@
 const Order = require("../models/Order");
 
-const {
-  sendOrderConfirmation,
-} = require("../services/whatsappService");
+const { sendOrderConfirmation } = require("../services/whatsappService");
 
-const xpressbeesService = require("../services/xpressbeesService");
+// const xpressbeesService = require("../services/xpressbeesService");
+const shiprocketService = require("../services/shiprocketService");
 
 /* --------------------------------
    CREATE ORDER
@@ -14,27 +13,27 @@ const createOrder = async (req, res) => {
   console.log("ORDER BODY:", req.body);
 
   try {
-   const {
-  user_id,
-  address_id,
-  buyNow = false,
-  productId = null,
-  quantity = 1,
-} = req.body;
+    const {
+      user_id,
+      address_id,
+      buyNow = false,
+      productId = null,
+      quantity = 1,
+    } = req.body;
 
-if (!user_id) {
-  return res.status(400).json({
-    success: false,
-    message: "User ID is required",
-  });
-}
- const order = await Order.createOrder(
-  user_id,
-  address_id,
-  buyNow,
-  productId,
-  quantity
-);
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+    const order = await Order.createOrder(
+      user_id,
+      address_id,
+      buyNow,
+      productId,
+      quantity,
+    );
 
     if (!order) {
       return res.status(404).json({
@@ -42,27 +41,22 @@ if (!user_id) {
         message: "Cart is empty",
       });
     }
-  
+
     // --------------------------------
     // WHATSAPP ORDER CONFIRMATION
     // --------------------------------
 
     try {
-      const orderDetails =
-        await Order.getOrderById(order.id);
+      const orderDetails = await Order.getOrderById(order.id);
 
-      const orderItems =
-        await Order.getOrderItems(order.id);
+      const orderItems = await Order.getOrderItems(order.id);
 
       /* --------------------------------
          PRODUCT SUMMARY
       -------------------------------- */
 
       const productNames = orderItems
-        .map(
-          (item) =>
-            `${item.product_name} x${item.quantity}`
-        )
+        .map((item) => `${item.product_name} x${item.quantity}`)
         .join(", ");
 
       /* --------------------------------
@@ -70,13 +64,11 @@ if (!user_id) {
       -------------------------------- */
 
       const totalItems = orderItems.reduce(
-        (sum, item) =>
-          sum + Number(item.quantity || 0),
-        0
+        (sum, item) => sum + Number(item.quantity || 0),
+        0,
       );
 
-      const itemLabel =
-        totalItems === 1 ? "Item" : "Items";
+      const itemLabel = totalItems === 1 ? "Item" : "Items";
 
       /* --------------------------------
          EXISTING ORDER PRICE BREAKDOWN
@@ -85,25 +77,15 @@ if (!user_id) {
          fields used by the Order Summary.
       -------------------------------- */
 
-      const itemsCost = Number(
-        orderDetails?.actual_amount ?? 0
-      );
+      const itemsCost = Number(orderDetails?.actual_amount ?? 0);
 
-      const membershipDiscount = Number(
-        orderDetails?.membership_discount || 0
-      );
+      const membershipDiscount = Number(orderDetails?.membership_discount || 0);
 
-      const walletClaim = Number(
-        orderDetails?.wallet_claim || 0
-      );
+      const walletClaim = Number(orderDetails?.wallet_claim || 0);
 
-      const deliveryCharge = Number(
-        orderDetails?.delivery_charge || 0
-      );
+      const deliveryCharge = Number(orderDetails?.delivery_charge || 0);
 
-      const paymentStatus =
-        orderDetails?.payment_status ||
-        "PAID";
+      const paymentStatus = orderDetails?.payment_status || "PAID";
 
       /* --------------------------------
          MEMBERSHIP ORDER
@@ -113,26 +95,17 @@ if (!user_id) {
          claim exists.
       -------------------------------- */
 
-      const isMembershipOrder =
-        membershipDiscount > 0 ||
-        walletClaim > 0;
+      const isMembershipOrder = membershipDiscount > 0 || walletClaim > 0;
 
       let orderSummary;
 
       if (isMembershipOrder) {
         const deliveryText =
-          deliveryCharge > 0
-            ? `₹${deliveryCharge.toFixed(2)}`
-            : "FREE";
+          deliveryCharge > 0 ? `₹${deliveryCharge.toFixed(2)}` : "FREE";
 
         const payableAmount = Number(
           orderDetails?.payable_amount ??
-          (
-            itemsCost -
-            membershipDiscount -
-            walletClaim +
-            deliveryCharge
-          )
+            itemsCost - membershipDiscount - walletClaim + deliveryCharge,
         );
 
         orderSummary =
@@ -152,8 +125,7 @@ if (!user_id) {
         -------------------------------- */
 
         const totalAmount = Number(
-          orderDetails?.payable_amount ??
-          (itemsCost + deliveryCharge)
+          orderDetails?.payable_amount ?? itemsCost + deliveryCharge,
         );
 
         orderSummary =
@@ -178,12 +150,10 @@ if (!user_id) {
 
         console.log(
           "WHATSAPP ORDER CONFIRMATION SENT FOR ORDER:",
-         order.order_id
+          order.order_id,
         );
       } else {
-        console.log(
-          "WhatsApp skipped: customer mobile number not found."
-        );
+        console.log("WhatsApp skipped: customer mobile number not found.");
       }
     } catch (whatsappError) {
       /* --------------------------------
@@ -193,20 +163,17 @@ if (!user_id) {
 
       console.error(
         "WHATSAPP ORDER CONFIRMATION FAILED:",
-        whatsappError.message
+        whatsappError.message,
       );
     }
-  
+
     return res.status(201).json({
       success: true,
       message: "Order created successfully",
       data: order,
     });
   } catch (error) {
-    console.error(
-      "CREATE ORDER ERROR:",
-      error
-    );
+    console.error("CREATE ORDER ERROR:", error);
 
     return res.status(500).json({
       success: false,
@@ -255,10 +222,7 @@ const getOrders = async (req, res) => {
 
 const getOrderById = async (req, res) => {
   try {
-    const order =
-      await Order.getOrderById(
-        req.params.id
-      );
+    const order = await Order.getOrderById(req.params.id);
 
     if (!order) {
       return res.status(404).json({
@@ -285,10 +249,7 @@ const getOrderById = async (req, res) => {
 
 const getOrderItems = async (req, res) => {
   try {
-    const items =
-      await Order.getOrderItems(
-        req.params.id
-      );
+    const items = await Order.getOrderItems(req.params.id);
 
     res.json({
       success: true,
@@ -309,11 +270,7 @@ const getOrderItems = async (req, res) => {
 
 const updateOrder = async (req, res) => {
   try {
-    const order =
-      await Order.updateOrder(
-        req.params.id,
-        req.body.status
-      );
+    const order = await Order.updateOrder(req.params.id, req.body.status);
 
     res.json({
       success: true,
@@ -334,10 +291,7 @@ const updateOrder = async (req, res) => {
 
 const deleteOrder = async (req, res) => {
   try {
-    const order =
-      await Order.deleteOrder(
-        req.params.id
-      );
+    const order = await Order.deleteOrder(req.params.id);
 
     res.json({
       success: true,
@@ -360,8 +314,7 @@ const trackOrder = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const order =
-      await Order.getOrderById(id);
+    const order = await Order.getOrderById(id);
 
     if (!order) {
       return res.status(404).json({
@@ -377,24 +330,20 @@ const trackOrder = async (req, res) => {
       });
     }
 
-    const tracking =
-      await xpressbeesService.trackShipment(
-        order.tracking_number
-      );
+    // const tracking = await xpressbeesService.trackShipment(
+    //   order.tracking_number,
+    // );
+    const tracking = await shiprocketService.trackShipment(
+      order.tracking_number,
+    );
 
     res.json(tracking);
   } catch (err) {
-    console.error(
-      "Tracking Error:",
-      err.response?.data ||
-        err.message
-    );
+    console.error("Tracking Error:", err.response?.data || err.message);
 
     res.status(500).json({
       success: false,
-      message:
-        err.response?.data ||
-        err.message,
+      message: err.response?.data || err.message,
     });
   }
 };

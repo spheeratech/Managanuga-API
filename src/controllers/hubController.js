@@ -19,68 +19,66 @@ const getDistricts = async (req, res) => {
   }
 };
 
-// const getCities = async (req, res) => {
+const getCities = async (req, res) => {
+  try {
+    const state_id = String(req.query.state_id || "").trim();
+    const dist_id = String(req.query.dist_id || "").trim();
+
+    console.log("GET CITIES");
+    console.log("State ID:", state_id);
+    console.log("District ID:", dist_id);
+
+    if (!state_id || !dist_id) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // IMPORTANT: state_id first, dist_id second
+    const data = await Hub.getCitiesByDistrict(state_id, dist_id);
+
+    console.log("Cities returned:", data.length);
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error("GET CITIES ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch cities",
+    });
+  }
+};
+
+const getPincodes = async (req, res) => {
+  try {
+    const { state_id, dist_id, city_id } = req.query;
+    const data = await Hub.getPincodesByCity(
+      state_id || "",
+      dist_id || "",
+      city_id || "",
+    );
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// const getHubs = async (req, res) => {
 //   try {
-//     const districtName = req.query.district_name || req.query.district_id || "";
-//     const data = await Hub.getCitiesByDistrict(districtName);
+//     const data = await Hub.getHubs();
 //     res.json({ success: true, data });
 //   } catch (error) {
 //     res.status(500).json({ success: false, message: error.message });
 //   }
 // };
-const getCities = async (req, res) => {
-  try {
-    const districtName = String(req.query.district_name || "").trim();
-
-    const stateId = String(req.query.state_id || "").trim();
-
-    console.log("================================");
-    console.log("GET CITIES");
-    console.log("District:", districtName);
-    console.log("State ID:", stateId);
-    console.log("================================");
-
-    if (!districtName || !stateId) {
-      return res.json({
-        success: true,
-        data: [],
-      });
-    }
-
-    const data = await Hub.getCitiesByDistrict(districtName, stateId);
-
-    return res.json({
-      success: true,
-      data,
-    });
-  } catch (error) {
-    console.error("GET CITIES ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-const getPincodes = async (req, res) => {
-  try {
-    const { city_id } = req.query;
-    const data = await Hub.getPincodesByCity(city_id || "");
-    res.json({ success: true, data });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
 const getHubs = async (req, res) => {
   try {
     const data = await Hub.getHubs();
-    res.json({ success: true, data });
+    // Always return an explicit object containing the array under 'data'
+    return res.status(200).json({ success: true, data });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("GET HUBS CONTROLLER ERROR:", error.message);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
-
 const getHubById = async (req, res) => {
   try {
     const data = await Hub.getHubById(req.params.id);
