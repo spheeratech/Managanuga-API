@@ -38,22 +38,56 @@ const getCustomers = async (userId) => {
    * Only customers who actually purchased an ACTIVE membership
    * through this reseller's referral code.
    */
-  if (Number(currentUser.role) === 4) {
-    const result = await pool.query(
-      `
-      SELECT * FROM get_customers_by_referalid($1)
-      `,
-      [cleanUserId]
-    );
+ 
+if (Number(currentUser.role) === 4) {
+  const result = await pool.query(
+    `
+    SELECT
+      ul.user_id,
+      ul.username,
+      ul.mobile_no,
+      ur.role_name AS role,
 
-    return result.rows.map((user) => {
-      const roleName = getRoleName(user.role);
-      if (!roleName) {
-        throw new Error(`Unknown role returned for user ${user.user_id}`);
-      }
-      return { ...user, role: roleName };
-    });
-  }
+      COUNT(o.id)::INTEGER AS total_orders,
+
+      COALESCE(
+        SUM(
+          COALESCE(o.items_cost, o.total_amount, 0)
+          - COALESCE(o.membership_discount, 0)
+          - COALESCE(o.wallet_claim, 0)
+          + COALESCE(o.delivery_charge, 0)
+        ),
+        0
+      ) AS total_paid_amount
+
+    FROM user_login ul
+
+    LEFT JOIN orders o
+      ON o.user_id = ul.user_id
+
+    LEFT JOIN lkp_user_roles ur
+      ON ur.id = ul.role
+
+    WHERE
+      ul.assigned_by = $1
+      AND ul.role IN (5, 6)
+      AND ul.is_active = 1
+
+    GROUP BY
+      ul.user_id,
+      ul.username,
+      ul.mobile_no,
+      ur.role_name
+
+    ORDER BY
+      ul.username ASC;
+    `,
+    [cleanUserId]
+  );
+
+  return result.rows;
+}
+
 
 
   /*
@@ -136,10 +170,9 @@ const getCustomers = async (userId) => {
 
 
 
+
 /*
- * ============================================================
  * GET RESELLER BENEFITS
- * ============================================================
  */
 const getBenefits = async (userId) => {
   const result = await pool.query(
@@ -158,15 +191,11 @@ const getBenefits = async (userId) => {
       'CREDITED' AS status,
       wt.created_at
     FROM wallet_transactions wt
-    INNER JOIN user_wallet uw
-      ON uw.wallet_id = wt.wallet_id
-     AND uw.user_id = wt.user_id
     WHERE wt.user_id = $1
       AND wt.transaction_type = 'CREDIT'
-      AND wt.benefit_type = 'MEMBERSHIP_COMMISSION'
+      AND wt.benefit_type IN ('REFERRAL', 'MEMBERSHIP_COMMISSION')
       AND wt.status = 'COMPLETED'
       AND wt.is_active = 1
-      AND uw.is_active = 1
     ORDER BY wt.created_at DESC, wt.id DESC;
     `,
     [String(userId).trim()]
