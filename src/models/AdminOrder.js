@@ -460,9 +460,9 @@ const getAdminOrderById = async (id) => {
       oi.item_position::integer AS id,
       oi.item_id AS product_id,
       p.name AS product_name,
-      item.quantity,
-      item.unit_price,
-      (item.quantity * item.unit_price) AS subtotal
+      oi.quantity,
+      oi.unit_price,
+      (oi.quantity * oi.unit_price) AS subtotal
 
     FROM orders o
     CROSS JOIN LATERAL
