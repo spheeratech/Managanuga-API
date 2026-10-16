@@ -57,8 +57,10 @@ const createAdminOrder = async ({
         name,
         price,
         stock
-      FROM public.lkp_products
+      FROM lkp_public.lkp_products
       WHERE id = $1::integer
+        AND is_active = 1
+      FOR UPDATE
       `,
       [Number(productId)],
     );
@@ -103,23 +105,36 @@ const createAdminOrder = async ({
       (
         user_id,
         actual_amount,
+        membership_discount,
+        wallet_claim,
+        delivery_charge,
+        item_id,
+        quantity,
+        unit_price,
+        payable_amount,
         warehouse_id,
         item_id,
         quantity,
         unit_price,
         status,
-        payment_status
+        payment_status,
+        is_active
       )
       VALUES
       (
         $1::varchar,
         $2::numeric,
+        0,
+        0,
+        0,
+        ARRAY[$4::integer],
+        ARRAY[$5::integer],
+        ARRAY[$6::numeric],
+        $2::numeric,
         $3::integer,
-        $4::integer[],
-        $5::integer[],
-        $6::numeric[],
         'PENDING',
-        'PENDING'
+        'PENDING',
+        1
       )
       RETURNING *
       `,
@@ -127,6 +142,9 @@ const createAdminOrder = async ({
         String(user_id),
         totalAmount,
         warehouse_id === null ? null : Number(warehouse_id),
+        Number(product.id),
+        orderQuantity,
+        Number(product.price),
         [Number(product.id)],
         [orderQuantity],
         [Number(product.price)],
@@ -139,14 +157,20 @@ const createAdminOrder = async ({
     // DEDUCT STOCK
     // --------------------------------
 
-    await client.query(
+    const stockUpdate = await client.query(
       `
-      UPDATE public.lkp_products
+      UPDATE lkp_products
       SET stock = stock - $1::integer
       WHERE id = $2::integer
+        AND is_active = 1
+        AND stock >= $1::integer
+      RETURNING id
       `,
       [orderQuantity, Number(product.id)],
     );
+    if (!stockUpdate.rows[0]) {
+      throw new Error("Product stock changed; admin order was not created");
+    }
 
     // --------------------------------
     // COMMIT
@@ -433,28 +457,23 @@ const getAdminOrderById = async (id) => {
   const itemsResult = await pool.query(
     `
     SELECT
-      item.item_index AS id,
-      item.item_id AS product_id,
+      oi.item_position::integer AS id,
+      oi.item_id AS product_id,
       p.name AS product_name,
       item.quantity,
       item.unit_price,
       (item.quantity * item.unit_price) AS subtotal
 
-    FROM public.orders o
-
-    CROSS JOIN LATERAL unnest(
-      o.item_id,
-      o.quantity,
-      o.unit_price
-    ) WITH ORDINALITY
-      AS item(item_id, quantity, unit_price, item_index)
-
-    JOIN public.lkp_products p
-      ON p.id = item.item_id
+    FROM orders o
+    CROSS JOIN LATERAL
+      unnest(o.item_id, o.quantity, o.unit_price)
+      WITH ORDINALITY AS oi(item_id, quantity, unit_price, item_position)
+    JOIN lkp_products p
+      ON p.id = oi.item_id
 
     WHERE o.id = $1::integer
 
-    ORDER BY item.item_index
+    ORDER BY oi.item_position
     `,
     [Number(id)],
   );
@@ -589,65 +608,10 @@ const updateAdminOrder = async (
 -------------------------------- */
 
 const deleteAdminOrder = async (id) => {
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
-    // --------------------------------
-    // GET ORDER ITEMS
-    // --------------------------------
-
-    const orderItemsResult = await client.query(
-      `
-      SELECT
-        item.item_id,
-        item.quantity
-      FROM orders o
-      CROSS JOIN LATERAL unnest(o.item_id, o.quantity)
-        AS item(item_id, quantity)
-      WHERE o.id = $1::integer
-      `,
-      [Number(id)],
-    );
-
-    // --------------------------------
-    // RESTORE PRODUCT STOCK
-    // --------------------------------
-
-    for (const item of orderItemsResult.rows) {
-      await client.query(
-        `
-        UPDATE public.lkp_products
-        SET stock = stock + $1::integer
-        WHERE id = $2::integer
-        `,
-        [Number(item.quantity), Number(item.item_id)],
-      );
-    }
-
-    // --------------------------------
-    // DELETE ORDER
-    // --------------------------------
-
-    const result = await client.query(
-      `
-      DELETE FROM orders
-      WHERE id = $1::integer
-      RETURNING *
-      `,
-      [Number(id)],
-    );
-
-    await client.query("COMMIT");
-
-    return result.rows[0] || null;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+  void id;
+  throw new Error(
+    "Admin order deletion is unavailable because orders do not record whether inventory was deducted"
+  );
 };
 
 /* --------------------------------
@@ -655,61 +619,9 @@ const deleteAdminOrder = async (id) => {
 -------------------------------- */
 
 const deleteAllAdminOrders = async () => {
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
-    // --------------------------------
-    // GET ALL ORDER ITEMS
-    // --------------------------------
-
-    const orderItemsResult = await client.query(`
-      SELECT
-        item.item_id,
-        item.quantity
-      FROM orders o
-      CROSS JOIN LATERAL unnest(o.item_id, o.quantity)
-        AS item(item_id, quantity)
-    `);
-
-    // --------------------------------
-    // RESTORE PRODUCT STOCK
-    // --------------------------------
-
-    for (const item of orderItemsResult.rows) {
-      await client.query(
-        `
-        UPDATE public.lkp_products
-        SET stock = stock + $1::integer
-        WHERE id = $2::integer
-        `,
-        [Number(item.quantity), Number(item.item_id)],
-      );
-    }
-
-    // --------------------------------
-    // DELETE ALL ORDERS
-    // --------------------------------
-
-    const result = await client.query(`
-      DELETE FROM orders
-      RETURNING *
-    `);
-
-    // --------------------------------
-    // COMMIT
-    // --------------------------------
-
-    await client.query("COMMIT");
-
-    return result.rows;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+  throw new Error(
+    "Bulk admin order deletion is unavailable because orders do not record whether inventory was deducted"
+  );
 };
 
 /* --------------------------------

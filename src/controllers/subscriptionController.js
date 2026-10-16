@@ -802,6 +802,7 @@ if (currentUserResult.rows.length === 0) {
 const getMembershipWallet = async (req, res) => {
   try {
     const userId =
+      req.authenticatedUser?.id ||
       req.user?.user_id ||
       req.user?.id ||
       req.query.userId;

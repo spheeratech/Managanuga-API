@@ -170,6 +170,30 @@ const UserLogin = {
 
       const createdLoginUser = loginResult.rows[0];
 
+      if (
+        ["CUSTOMER", "USER"].includes(
+          String(roleName).trim().toUpperCase()
+        )
+      ) {
+        await client.query(
+          `
+          INSERT INTO user_wallet
+          (
+            user_id,
+            wallet_amount,
+            prev_balance,
+            current_balance,
+            created_by,
+            updated_by,
+            is_active
+          )
+          VALUES ($1, 0, 0, 0, $1, $1, 1)
+          ON CONFLICT (user_id) DO NOTHING
+          `,
+          [createdLoginUser.user_id]
+        );
+      }
+
       await client.query("COMMIT");
 
       return {

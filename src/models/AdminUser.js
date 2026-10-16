@@ -47,7 +47,7 @@ const AdminUser = {
   // --------------------------------------------------
   // CREATE USER
   // --------------------------------------------------
-  async createUser(client, loginData, infoData) {
+    async createUser(client, loginData, infoData) {
     // Resolve the numeric role ID from lkp_user_roles
     const roleResult = await client.query(
       `
@@ -60,7 +60,9 @@ const AdminUser = {
     );
 
     if (roleResult.rows.length === 0) {
-      throw new Error(`Role "${loginData.role}" not found in lkp_user_roles`);
+      throw new Error(
+        `Role "${loginData.role}" not found in lkp_user_roles`
+      );
     }
 
     const roleId = roleResult.rows[0].id;

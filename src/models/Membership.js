@@ -1,4 +1,58 @@
 const pool = require("../../db");
+const { getUnitLitres } = require("../services/membershipCheckoutService");
+
+const calculateOrderLitres = async (itemIds, quantities, client = pool) => {
+  if (
+    !Array.isArray(itemIds) ||
+    !Array.isArray(quantities) ||
+    itemIds.length === 0 ||
+    itemIds.length !== quantities.length
+  ) {
+    throw new Error("Order item snapshot is invalid for membership usage");
+  }
+
+  const result = await client.query(
+    `
+    SELECT
+      item.item_id,
+      item.quantity,
+      product.weight
+    FROM unnest($1::integer[], $2::integer[])
+      WITH ORDINALITY AS item(item_id, quantity, ordinality)
+    LEFT JOIN lkp_products product
+      ON product.id = item.item_id
+    ORDER BY item.ordinality
+    `,
+    [itemIds, quantities]
+  );
+
+  if (
+    result.rows.length !== itemIds.length ||
+    result.rows.some((row) => row.weight === null)
+  ) {
+    throw new Error(
+      "Order products are unavailable; membership usage cannot be reconciled"
+    );
+  }
+
+  return result.rows.reduce(
+    (total, row) =>
+      total + Number(row.quantity) * getUnitLitres(row.weight),
+    0
+  );
+};
+
+const extractMembershipOrderId = (description) => {
+  const match = String(description || "").match(
+    /\[membership-order:([^\]]+)\]/
+  );
+
+  if (!match) {
+    throw new Error("Membership transaction is missing its order reference");
+  }
+
+  return decodeURIComponent(match[1]);
+};
 
 /**
  * Resolve any supported user identifier to the PUBLIC user_login.user_id.
@@ -77,74 +131,6 @@ const resolvePublicUserId = async (userId, client = pool) => {
 
 
 /**
- * Resolve any supported user identifier to the INTERNAL
- * user_login.id.
- *
- * This is ONLY used where the database still requires the
- * internal numeric ID.
- *
- * Currently:
- * membership_wallet_transactions.user_id
- *     -> FK -> user_login.id
- */
-const resolveInternalUserId = async (
-  userId,
-  client = pool
-) => {
-  if (
-    userId === null ||
-    userId === undefined ||
-    userId === ""
-  ) {
-    return null;
-  }
-
-  const value = String(userId).trim();
-
-  /*
-   * First try the value as a PUBLIC user_login.user_id.
-   */
-  const publicResult = await client.query(
-    `
-    SELECT id
-    FROM user_login
-    WHERE user_id = $1
-      AND is_active = 1
-    LIMIT 1
-    `,
-    [value]
-  );
-
-  if (publicResult.rows[0]) {
-    return publicResult.rows[0].id;
-  }
-
-  /*
-   * Backward compatibility:
-   * caller may already be passing user_login.id.
-   */
-  if (/^\d+$/.test(value)) {
-    const internalResult = await client.query(
-      `
-      SELECT id
-      FROM user_login
-      WHERE id = $1
-        AND is_active = 1
-      LIMIT 1
-      `,
-      [Number(value)]
-    );
-
-    if (internalResult.rows[0]) {
-      return internalResult.rows[0].id;
-    }
-  }
-
-  return null;
-};
-
-
-/**
  * Create a new membership.
  *
  * user_memberships.user_id stores PUBLIC user_login.user_id.
@@ -162,70 +148,108 @@ const createMembership = async ({
   assignedRole = null,
   referralCode = null
 }) => {
-  const resolvedPublicUserId =
-    await resolvePublicUserId(userId);
+  const client = await pool.connect();
 
-  if (!resolvedPublicUserId) {
-    throw new Error("User not found");
+  try {
+    await client.query("BEGIN");
+    const resolvedPublicUserId = await resolvePublicUserId(
+      userId,
+      client
+    );
+
+    if (!resolvedPublicUserId) {
+      throw new Error("User not found");
+    }
+
+    if (paymentId !== null && paymentId !== undefined) {
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtext($1))",
+        [`MEMBERSHIP_PAYMENT:${paymentId}`]
+      );
+
+      const existingResult = await client.query(
+        `
+        SELECT *
+        FROM user_memberships
+        WHERE payment_id = $1
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [paymentId]
+      );
+      const existingMembership = existingResult.rows[0];
+
+      if (existingMembership) {
+        if (
+          existingMembership.user_id !== resolvedPublicUserId ||
+          Number(existingMembership.plan_id) !== Number(planId)
+        ) {
+          throw new Error(
+            "Payment is already associated with a different membership"
+          );
+        }
+
+        await client.query("COMMIT");
+        return existingMembership;
+      }
+    }
+
+    await client.query(
+      `
+      UPDATE user_memberships
+      SET
+        status = 'EXPIRED',
+        is_active = 0,
+        updated_at = NOW()
+      WHERE user_id = $1
+        AND status = 'ACTIVE'
+      `,
+      [resolvedPublicUserId]
+    );
+
+    const result = await client.query(
+      `
+      INSERT INTO user_memberships
+      (
+        user_id,
+        plan_id,
+        payment_id,
+        wallet_balance,
+        discount_percent,
+        monthly_claim,
+        expiry_date,
+        terms_and_conditions,
+        assigned_by,
+        assigned_role,
+        referral_code,
+        is_active
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1)
+      RETURNING *
+      `,
+      [
+        resolvedPublicUserId,
+        planId,
+        paymentId,
+        walletBalance,
+        discountPercent,
+        monthlyClaim,
+        expiryDate,
+        termsAndConditions,
+        assignedBy,
+        assignedRole,
+        referralCode,
+      ]
+    );
+
+    await client.query("COMMIT");
+    return result.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
-
-  /*
-   * Expire previous active membership.
-   */
-  await pool.query(
-    `
-    UPDATE user_memberships
-    SET
-      status = 'EXPIRED',
-       is_active = 0,
-      updated_at = NOW()
-    WHERE
-      user_id = $1
-      AND status = 'ACTIVE'
-    `,
-    [resolvedPublicUserId]
-  );
-
-  /*
-   * Create new membership using PUBLIC user ID.
-   */
-  const result = await pool.query(
-    `
-    INSERT INTO user_memberships
-    (
-      user_id,
-      plan_id,
-      payment_id,
-      wallet_balance,
-      discount_percent,
-      monthly_claim,
-      expiry_date,
-      terms_and_conditions,
-      assigned_by,
-      assigned_role,
-      referral_code,
-      is_active
-    )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-    RETURNING *;
-    `,
-    [
-      resolvedPublicUserId,
-      planId,
-      paymentId,
-      walletBalance,
-      discountPercent,
-      monthlyClaim,
-      expiryDate,
-      termsAndConditions,
-      assignedBy,
-      assignedRole,
-      referralCode,
-      1
-    ]
-  );
-
-  return result.rows[0];
 };
 
 
@@ -270,6 +294,7 @@ const getActiveMembership = async (userId) => {
     WHERE
       um.user_id = $1
       AND um.status = 'ACTIVE'
+      AND um.is_active = 1
 
     ORDER BY um.id DESC
 
@@ -425,28 +450,31 @@ const getMembershipWallet = async (userId) => {
   const membership =
     membershipResult.rows[0];
 
-  const transactionResult = await pool.query(
-    `
-    SELECT
-      mwt.id,
-      mwt.order_id,
-      mwt.transaction_type,
-      mwt.amount,
-      mwt.balance_after,
-      mwt.description,
-      mwt.created_at
-
-    FROM membership_wallet_transactions mwt
-
-    WHERE
-      mwt.membership_id = $1
-
-    ORDER BY
-      mwt.created_at DESC,
-      mwt.id DESC
-    `,
-    [membership.membership_id]
-  );
+  const membershipMarker =
+    `[membership-id:${membership.membership_id}]`;
+  const transactionRows = (
+    await pool.query(
+      `
+      SELECT
+        wt.id,
+        wt.transaction_type,
+        wt.benefit_amount AS amount,
+        wt.wallet_balance_after AS balance_after,
+        wt.description,
+        wt.created_at
+      FROM wallet_transactions wt
+      WHERE wt.user_id = $1
+        AND wt.benefit_type = 'MEMBERSHIP_CLAIM'
+        AND wt.transaction_type = 'DEBIT'
+        AND wt.status = 'COMPLETED'
+        AND wt.is_active = 1
+        AND wt.benefit_amount > 0
+        AND POSITION($2 IN wt.description) > 0
+      ORDER BY wt.created_at DESC, wt.id DESC
+      `,
+      [resolvedPublicUserId, membershipMarker]
+    )
+  ).rows;
 
   const walletBonus =
     Number(membership.wallet_bonus || 0);
@@ -503,13 +531,13 @@ const getMembershipWallet = async (userId) => {
         membership.expiry_date
     },
 
+    historyAvailable: true,
     transactions:
-      transactionResult.rows.map(
+      transactionRows.map(
         (transaction) => ({
           id: transaction.id,
 
-          orderId:
-            transaction.order_id,
+          orderId: extractMembershipOrderId(transaction.description),
 
           type:
             transaction.transaction_type,
@@ -539,19 +567,47 @@ const getMembershipWallet = async (userId) => {
  * user_memberships.user_id:
  *     PUBLIC ID
  *
- * membership_wallet_transactions.user_id:
- *     INTERNAL user_login.id
+ * wallet_transactions.user_id stores the PUBLIC user_login.user_id.
  */
 const updateMembershipUsage = async ({
   userId,
+  membershipId,
   litresUsed,
   walletUsed,
-  orderId
+  orderId,
+  client: suppliedClient = null
 }) => {
-  const client = await pool.connect();
+  const cleanMembershipId = Number(membershipId);
+  const cleanLitresUsed = Number(litresUsed);
+  const cleanWalletUsed = Number(walletUsed);
+  const cleanOrderId = String(orderId ?? "").trim();
+
+  if (!Number.isInteger(cleanMembershipId) || cleanMembershipId <= 0) {
+    throw new Error(
+      "The membership used at checkout must be explicitly identified"
+    );
+  }
+
+  if (
+    !Number.isFinite(cleanLitresUsed) ||
+    cleanLitresUsed < 0 ||
+    !Number.isFinite(cleanWalletUsed) ||
+    cleanWalletUsed < 0
+  ) {
+    throw new Error("Membership usage amounts must be non-negative numbers");
+  }
+
+  if ((cleanLitresUsed > 0 || cleanWalletUsed > 0) && !cleanOrderId) {
+    throw new Error("Order ID is required for membership usage history");
+  }
+
+  const ownsClient = suppliedClient === null;
+  const client = suppliedClient || await pool.connect();
 
   try {
-    await client.query("BEGIN");
+    if (ownsClient) {
+      await client.query("BEGIN");
+    }
 
     /*
      * Resolve PUBLIC membership ID inside the same
@@ -576,16 +632,19 @@ const updateMembershipUsage = async ({
         `
         SELECT
           id,
-          wallet_balance
+          wallet_balance,
+          monthly_claim,
+          monthly_claim_used
         FROM user_memberships
         WHERE
-          user_id = $1
+          id = $1
+          AND
+          user_id = $2
           AND status = 'ACTIVE'
-        ORDER BY id DESC
-        LIMIT 1
+          AND is_active = 1
         FOR UPDATE
         `,
-        [resolvedPublicUserId]
+        [cleanMembershipId, resolvedPublicUserId]
       );
 
     if (
@@ -598,6 +657,87 @@ const updateMembershipUsage = async ({
 
     const membership =
       membershipResult.rows[0];
+
+    if (!membership) {
+      throw new Error(
+        "The membership used at checkout is not active for this user"
+      );
+    }
+
+    const referenceMarker =
+      ` [membership-reference:${JSON.stringify([
+        cleanMembershipId,
+        cleanOrderId,
+      ])}]`;
+    const usageMarker =
+      ` [membership-usage:${JSON.stringify([
+        cleanLitresUsed,
+        cleanWalletUsed,
+      ])}]`;
+    const membershipMarker =
+      `[membership-id:${cleanMembershipId}]`;
+    const orderMarker =
+      `[membership-order:${encodeURIComponent(cleanOrderId)}]`;
+    const benefitType =
+      cleanWalletUsed > 0
+        ? "MEMBERSHIP_CLAIM"
+        : "MEMBERSHIP_USAGE";
+
+    if (cleanLitresUsed > 0 || cleanWalletUsed > 0) {
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtext($1))",
+        [
+          `MEMBERSHIP_USAGE:${JSON.stringify([
+            resolvedPublicUserId,
+            cleanMembershipId,
+            cleanOrderId,
+          ])}`,
+        ]
+      );
+
+      const duplicateResult = await client.query(
+        `
+        SELECT id, benefit_type, benefit_amount, description
+        FROM wallet_transactions
+        WHERE user_id = $1
+          AND benefit_type IN ('MEMBERSHIP_CLAIM', 'MEMBERSHIP_USAGE')
+          AND transaction_type = 'DEBIT'
+          AND status = 'COMPLETED'
+          AND is_active = 1
+          AND RIGHT(description, LENGTH($2)) = $2
+        LIMIT 1
+        `,
+        [resolvedPublicUserId, referenceMarker]
+      );
+
+      const existingUsage = duplicateResult.rows[0];
+      if (existingUsage) {
+        if (
+          existingUsage.benefit_type !== benefitType ||
+          Number(existingUsage.benefit_amount) !== cleanWalletUsed ||
+          !String(existingUsage.description || "").includes(usageMarker)
+        ) {
+          throw new Error(
+            "Membership usage retry does not match the recorded order usage"
+          );
+        }
+
+        if (ownsClient) {
+          await client.query("COMMIT");
+        }
+        return membership;
+      }
+    }
+
+    const remainingClaim =
+      Number(membership.monthly_claim || 0) -
+      Number(membership.monthly_claim_used || 0);
+    if (
+      cleanWalletUsed > Number(membership.wallet_balance || 0) ||
+      cleanWalletUsed > remainingClaim
+    ) {
+      throw new Error("Membership wallet claim is no longer available");
+    }
 
     /*
      * Update membership usage.
@@ -616,73 +756,78 @@ const updateMembershipUsage = async ({
           wallet_balance =
             wallet_balance - $2,
 
-          updated_at = NOW()
+          updated_at = NOW(),
+          updated_by = $4
 
         WHERE id = $3
+          AND is_active = 1
 
         RETURNING *;
         `,
         [
-          litresUsed,
-          walletUsed,
-          membership.id
+          cleanLitresUsed,
+          cleanWalletUsed,
+          membership.id,
+          resolvedPublicUserId
         ]
       );
 
     const updatedMembership =
       result.rows[0];
 
-    /*
-     * Create wallet transaction.
-     *
-     * IMPORTANT:
-     * This table still has FK:
-     *
-     * membership_wallet_transactions.user_id
-     *     -> user_login.id
-     *
-     * Therefore we intentionally store the
-     * INTERNAL numeric ID here.
-     */
-    if (Number(walletUsed) > 0) {
+    if (!updatedMembership) {
+      throw new Error("Membership usage update failed");
+    }
+
+    if (cleanLitresUsed > 0 || cleanWalletUsed > 0) {
+      // The shared ledger has no membership/order columns; retain both IDs in a stable marker.
       await client.query(
         `
-        INSERT INTO membership_wallet_transactions
+        INSERT INTO wallet_transactions
         (
-          membership_id,
-          user_id,
-          order_id,
           transaction_type,
-          amount,
-          balance_after,
-          description
+          description,
+          created_by,
+          user_id,
+          wallet_id,
+          benefit_percentage,
+          benefit_amount,
+          benefited_by,
+          benefit_type,
+          status,
+          wallet_balance_after,
+          is_active
         )
-        VALUES
-        ($1, $2, $3, 'DEBIT', $4, $5, $6)
+        VALUES ($1, $2, $3, $4, NULL, 0, $5, NULL, $6, 'COMPLETED', $7, 1)
         `,
         [
-          updatedMembership.id,
+          "DEBIT",
+          `Membership usage ${membershipMarker} ${orderMarker}${usageMarker}${referenceMarker}`,
           resolvedPublicUserId,
-          orderId,
-          Number(walletUsed),
-          Number(
-            updatedMembership.wallet_balance
-          ),
-          `Used for Order #${orderId}`
+          resolvedPublicUserId,
+          cleanWalletUsed,
+          benefitType,
+          Number(updatedMembership.wallet_balance),
         ]
       );
     }
 
-    await client.query("COMMIT");
+    if (ownsClient) {
+      await client.query("COMMIT");
+    }
 
     return updatedMembership;
 
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (ownsClient) {
+      await client.query("ROLLBACK");
+    }
     throw error;
 
   } finally {
-    client.release();
+    if (ownsClient) {
+      client.release();
+    }
   }
 };
 
@@ -784,6 +929,7 @@ module.exports = {
   createMembership,
   getActiveMembership,
   getMembershipWallet,
+  calculateOrderLitres,
   updateMembershipUsage,
   acceptTerms,
   resetMonthlyBenefits,

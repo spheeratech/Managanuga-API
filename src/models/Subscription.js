@@ -15,10 +15,18 @@ const getPlans = async () => {
 const acceptTerms = async (userId) => {
   const result = await pool.query(
     `
-    UPDATE membership
-    SET terms_conditions = 1
-    WHERE user_id = $1
-    RETURNING *
+    UPDATE user_memberships
+    SET terms_and_conditions = TRUE
+    WHERE id = (
+      SELECT id
+      FROM user_memberships
+      WHERE user_id = $1
+        AND status = 'ACTIVE'
+        AND is_active = 1
+      ORDER BY id DESC
+      LIMIT 1
+    )
+    RETURNING *, terms_and_conditions AS terms_conditions
     `,
     [userId],
   );
@@ -90,7 +98,7 @@ const togglePlanStatus = async (planId) => {
     `
     UPDATE lkp_subscription_plans
     SET
-      is_active = NOT is_active,
+      is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = $1
     RETURNING *

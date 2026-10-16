@@ -1,4 +1,5 @@
 const express = require("express");
+const requireAuthenticatedRole = require("../middleware/requireAuthenticatedRole");
 
 console.log("RESELLER ROUTE LOADED");
 
@@ -24,7 +25,11 @@ router.get("/customers", getCustomers);
  * RESELLER BENEFITS
  * ============================================================
  */
-router.get("/benefits", getBenefits);
+router.get(
+  "/benefits",
+  requireAuthenticatedRole("RESELLER", "resellerId"),
+  getBenefits
+);
 
 
 /*

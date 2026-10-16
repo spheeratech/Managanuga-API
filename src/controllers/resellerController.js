@@ -45,12 +45,14 @@ const getCustomers = async (req, res) => {
  */
 const getBenefits = async (req, res) => {
   try {
-    const { resellerId } = req.query;
+    const resellerId = String(
+      req.authenticatedUser?.id || ""
+    ).trim();
 
     if (!resellerId) {
       return res.status(400).json({
         success: false,
-        message: "resellerId is required",
+        message: "Authenticated reseller identity is required",
       });
     }
 

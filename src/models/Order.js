@@ -1,5 +1,40 @@
 const pool = require("../../db");
 // const xpressbeesService = require("../services/xpressbeesService");
+const Membership = require("./Membership");
+const {
+  calculateCheckoutTotals,
+} = require("../services/membershipCheckoutService");
+
+const verifyOrderSnapshot = (
+  order,
+  cartItems,
+  checkoutTotals,
+  membershipId = null
+) => {
+  const arraysMatch = (left, right) =>
+    Array.isArray(left) &&
+    left.length === right.length &&
+    left.every((value, index) => Number(value) === Number(right[index]));
+
+  const itemIds = cartItems.map((item) =>
+    Number(item.item_id ?? item.product_id)
+  );
+  const quantities = cartItems.map((item) => Number(item.quantity));
+  const unitPrices = cartItems.map((item) => Number(item.price));
+
+  if (
+    Number(order.actual_amount) !== Number(checkoutTotals.actualAmount) ||
+    Number(order.payable_amount) !== Number(checkoutTotals.payableAmount) ||
+    Number(order.membership_id || 0) !== Number(membershipId || 0) ||
+    !arraysMatch(order.item_id, itemIds) ||
+    !arraysMatch(order.quantity, quantities) ||
+    !arraysMatch(order.unit_price, unitPrices)
+  ) {
+    throw new Error(
+      "Existing order does not match the captured payment snapshot"
+    );
+  }
+};
 const shiprocketService = require("../services/shiprocketService");
 
 /* =========================================================
@@ -75,31 +110,58 @@ const createOrder = async (
   buyNow = false,
   productId = null,
   quantity = 1,
+  checkoutSnapshot = null
 ) => {
   let client;
 
   try {
     const userId = String(user_id).trim();
 
-    if (!userId) {
-      throw new Error("User ID is required");
+if (!userId) {
+  throw new Error("User ID is required");
+}
+
+    const addressResult = await pool.query(
+      `
+      SELECT id
+      FROM user_address
+      WHERE id = $1
+        AND user_id = $2
+        AND is_active = 1
+      LIMIT 1
+      `,
+      [address_id, userId]
+    );
+    if (!addressResult.rows[0]) {
+      throw new Error("Active delivery address does not belong to this user");
     }
+
 
     /* -----------------------------------------------------
        GET CART ITEMS
     ----------------------------------------------------- */
 
-    const cartResult = await pool.query(
+    const cartResult = checkoutSnapshot?.cartItems
+      ? {
+          rows: checkoutSnapshot.cartItems,
+          rowCount: checkoutSnapshot.cartItems.length,
+        }
+      : await pool.query(
       `
       SELECT
+        c.id AS cart_id,
         c.item_id,
         c.quantity,
-        p.price
+        p.price,
+        p.weight,
+        p.stock
       FROM cart_items c
-      JOIN products p
+      JOIN lkp_products p
         ON p.id = c.item_id
       WHERE c.user_id = $1
         AND c.is_active = 1
+        AND p.is_active = 1
+      ORDER BY c.id DESC
       `,
       [userId],
     );
@@ -119,9 +181,12 @@ const createOrder = async (
         `
           SELECT
             id AS item_id,
-            price
-          FROM products
+            price,
+            weight,
+            stock
+          FROM lkp_products
           WHERE id = $1
+            AND is_active = 1
           `,
         [productId],
       );
@@ -136,7 +201,14 @@ const createOrder = async (
 
           quantity: Number(quantity),
 
-          price: productResult.rows[0].price,
+          price:
+            productResult.rows[0].price,
+
+          weight:
+            productResult.rows[0].weight,
+
+          stock:
+            productResult.rows[0].stock,
         },
       ];
     } else {
@@ -152,10 +224,30 @@ const createOrder = async (
        product total BEFORE discount/wallet/delivery
     ----------------------------------------------------- */
 
-    const actualAmount = cartItems.reduce(
-      (sum, item) => sum + Number(item.quantity) * Number(item.price),
-      0,
-    );
+    await Membership.checkAndResetMonthlyBenefits(userId);
+
+    const checkoutTotals =
+      checkoutSnapshot?.checkoutTotals ||
+      await calculateCheckoutTotals(
+        userId,
+        cartItems,
+        checkoutSnapshot?.membershipId
+      );
+    const membershipId =
+      checkoutTotals.membershipBenefits?.membership?.id ?? null;
+    if (
+      checkoutSnapshot?.membershipId !== undefined &&
+      Number(checkoutSnapshot.membershipId || 0) !== Number(membershipId || 0)
+    ) {
+      throw new Error(
+        "Selected membership changed after payment creation"
+      );
+    }
+    const actualAmount = checkoutTotals.actualAmount;
+    const membershipDiscount = checkoutTotals.membershipDiscount;
+    const walletClaim = checkoutTotals.walletClaim;
+    const deliveryCharge = checkoutTotals.deliveryCharge;
+    const payableAmount = checkoutTotals.payableAmount;
 
     /* -----------------------------------------------------
        PREPARE ARRAY VALUES
@@ -178,6 +270,95 @@ const createOrder = async (
     client = await pool.connect();
 
     await client.query("BEGIN");
+
+    if (!buyNow) {
+      const lockedCartResult = await client.query(
+        `
+        SELECT id AS cart_id, item_id, quantity
+        FROM cart_items
+        WHERE user_id = $1
+          AND is_active = 1
+        ORDER BY id DESC
+        FOR UPDATE
+        `,
+        [userId]
+      );
+
+      if (
+        lockedCartResult.rows.length !== cartItems.length ||
+        lockedCartResult.rows.some(
+          (item, index) =>
+            Number(item.cart_id) !== Number(cartItems[index].cart_id) ||
+            Number(item.item_id) !== Number(cartItems[index].item_id) ||
+            Number(item.quantity) !== Number(cartItems[index].quantity)
+        )
+      ) {
+        throw new Error(
+          "Cart changed during checkout; order was not created"
+        );
+      }
+    }
+
+    const gatewayOrderId = checkoutSnapshot?.gatewayOrderId || null;
+    if (gatewayOrderId) {
+      const existingOrderResult = await client.query(
+        `
+        SELECT *
+        FROM orders
+        WHERE tnx_order_id = $1
+          AND user_id = $2
+          AND is_active = 1
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [gatewayOrderId, userId]
+      );
+      const existingOrder = existingOrderResult.rows[0];
+
+      if (existingOrder) {
+        verifyOrderSnapshot(
+          existingOrder,
+          cartItems,
+          checkoutTotals,
+          membershipId
+        );
+        await client.query("COMMIT");
+        return existingOrder;
+      }
+    }
+
+    const productResult = await client.query(
+      `
+      SELECT id, price, weight, stock
+      FROM lkp_products
+      WHERE id = ANY($1::int[])
+        AND is_active = 1
+      FOR SHARE
+      `,
+      [cartItems.map((item) => Number(item.item_id ?? item.product_id))]
+    );
+    const productsById = new Map(
+      productResult.rows.map((product) => [
+        Number(product.id),
+        product,
+      ])
+    );
+
+    for (const item of cartItems) {
+      const product = productsById.get(
+        Number(item.item_id ?? item.product_id)
+      );
+      if (
+        !product ||
+        Number(product.price) !== Number(item.price) ||
+        Number(product.weight || 0) !== Number(item.weight || 0) ||
+        Number(item.quantity) > Number(product.stock)
+      ) {
+        throw new Error(
+          "Product changed or is unavailable; order was not created"
+        );
+      }
+    }
 
     /* -----------------------------------------------------
        GENERATE MGO ORDER ID
@@ -202,10 +383,12 @@ const createOrder = async (
           membership_discount,
           wallet_claim,
           delivery_charge,
+          membership_id,
           item_id,
           quantity,
           unit_price,
           payable_amount,
+          coupon_discount,
           status,
           payment_status,
           address_id
@@ -214,32 +397,40 @@ const createOrder = async (
         (
           $1,
           $2,
-          NULL,
           $3,
-          0,
-          0,
-          0,
           $4,
           $5,
           $6,
           $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
+          $13,
           'PLACED',
           'PENDING',
-          $8
+          $14
         )
         RETURNING *
         `,
-      [
-        userId,
-        mgoOrderId,
-        actualAmount,
-        itemIds,
-        quantities,
-        unitPrices,
-        actualAmount,
-        address_id,
-      ],
-    );
+        [
+          userId,
+          mgoOrderId,
+          gatewayOrderId,
+          actualAmount,
+          membershipDiscount,
+          walletClaim,
+          deliveryCharge,
+          membershipId,
+          itemIds,
+          quantities,
+          unitPrices,
+          payableAmount,
+          Number(checkoutTotals.couponDiscount || 0),
+          address_id,
+        ]
+      );
 
     const order = orderResult.rows[0];
 
@@ -286,14 +477,30 @@ const createBuyNowOrder = async (
   address_id,
   productId,
   quantity = 1,
+  checkoutSnapshot = null
 ) => {
   let client;
 
   try {
     const userId = String(user_id).trim();
 
-    if (!userId) {
-      throw new Error("User ID is required");
+if (!userId) {
+  throw new Error("User ID is required");
+}
+
+    const addressResult = await pool.query(
+      `
+      SELECT id
+      FROM user_address
+      WHERE id = $1
+        AND user_id = $2
+        AND is_active = 1
+      LIMIT 1
+      `,
+      [address_id, userId]
+    );
+    if (!addressResult.rows[0]) {
+      throw new Error("Active delivery address does not belong to this user");
     }
 
     /* -----------------------------------------------------
@@ -304,9 +511,12 @@ const createBuyNowOrder = async (
       `
         SELECT
           id,
-          price
-        FROM products
+          price,
+          weight,
+          stock
+        FROM lkp_products
         WHERE id = $1
+          AND is_active = 1
         `,
       [productId],
     );
@@ -319,7 +529,53 @@ const createBuyNowOrder = async (
 
     const orderQuantity = Number(quantity);
 
-    const actualAmount = Number(product.price) * orderQuantity;
+    const snapshotItem = checkoutSnapshot?.cartItems?.[0];
+    if (
+      snapshotItem &&
+      (
+        Number(snapshotItem.product_id ?? snapshotItem.item_id) !==
+          Number(product.id) ||
+        Number(snapshotItem.quantity) !== orderQuantity ||
+        Number(snapshotItem.price) !== Number(product.price) ||
+        Number(snapshotItem.weight || 0) !== Number(product.weight || 0)
+      )
+    ) {
+      throw new Error(
+        "Product pricing changed after checkout; captured payment requires reconciliation"
+      );
+    }
+
+    if (
+    !Number.isInteger(orderQuantity) ||
+    orderQuantity <= 0 ||
+      orderQuantity > Number(product.stock)
+    ) {
+      throw new Error("Invalid product quantity or insufficient stock");
+    }
+
+    await Membership.checkAndResetMonthlyBenefits(userId);
+    const checkoutTotals =
+      checkoutSnapshot?.checkoutTotals ||
+      await calculateCheckoutTotals(userId, [
+        {
+          item_id: product.id,
+          quantity: orderQuantity,
+          price: product.price,
+          weight: product.weight,
+          stock: product.stock,
+        },
+      ], checkoutSnapshot?.membershipId);
+    const membershipId =
+      checkoutTotals.membershipBenefits?.membership?.id ?? null;
+    if (
+      checkoutSnapshot?.membershipId !== undefined &&
+      Number(checkoutSnapshot.membershipId || 0) !== Number(membershipId || 0)
+    ) {
+      throw new Error(
+        "Selected membership changed after payment creation"
+      );
+    }
+    const actualAmount = checkoutTotals.actualAmount;
 
     /* -----------------------------------------------------
        ARRAYS
@@ -338,6 +594,56 @@ const createBuyNowOrder = async (
     client = await pool.connect();
 
     await client.query("BEGIN");
+
+    const gatewayOrderId = checkoutSnapshot?.gatewayOrderId || null;
+    if (gatewayOrderId) {
+      const existingOrderResult = await client.query(
+        `
+        SELECT *
+        FROM orders
+        WHERE tnx_order_id = $1
+          AND user_id = $2
+          AND is_active = 1
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [gatewayOrderId, userId]
+      );
+      const existingOrder = existingOrderResult.rows[0];
+
+      if (existingOrder) {
+        verifyOrderSnapshot(
+          existingOrder,
+          checkoutSnapshot.cartItems,
+          checkoutTotals,
+          membershipId
+        );
+        await client.query("COMMIT");
+        return existingOrder;
+      }
+    }
+
+    const lockedProductResult = await client.query(
+      `
+      SELECT price, weight, stock
+      FROM lkp_products
+      WHERE id = $1
+        AND is_active = 1
+      FOR SHARE
+      `,
+      [product.id]
+    );
+    const lockedProduct = lockedProductResult.rows[0];
+    if (
+      !lockedProduct ||
+      Number(lockedProduct.price) !== Number(product.price) ||
+      Number(lockedProduct.weight || 0) !== Number(product.weight || 0) ||
+      orderQuantity > Number(lockedProduct.stock)
+    ) {
+      throw new Error(
+        "Product changed or is unavailable; order was not created"
+      );
+    }
 
     /* -----------------------------------------------------
        GENERATE MGO ORDER ID
@@ -362,6 +668,7 @@ const createBuyNowOrder = async (
           membership_discount,
           wallet_claim,
           delivery_charge,
+          membership_id,
           item_id,
           quantity,
           unit_price,
@@ -374,32 +681,38 @@ const createBuyNowOrder = async (
         (
           $1,
           $2,
-          NULL,
           $3,
-          0,
-          0,
-          0,
           $4,
           $5,
           $6,
           $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
           'PLACED',
           'PENDING',
-          $8
+          $13
         )
         RETURNING *
         `,
-      [
-        userId,
-        mgoOrderId,
-        actualAmount,
-        itemIds,
-        quantities,
-        unitPrices,
-        actualAmount,
-        address_id,
-      ],
-    );
+        [
+          userId,
+          mgoOrderId,
+          gatewayOrderId,
+          actualAmount,
+          checkoutTotals.membershipDiscount,
+          checkoutTotals.walletClaim,
+          checkoutTotals.deliveryCharge,
+          membershipId,
+          itemIds,
+          quantities,
+          unitPrices,
+          checkoutTotals.payableAmount,
+          address_id,
+        ]
+      );
 
     const order = orderResult.rows[0];
 
@@ -465,7 +778,7 @@ const getOrderById = async (id) => {
 
       FROM orders o
 
-      LEFT JOIN addresses a
+      LEFT JOIN user_address a
         ON a.id = o.address_id
 
       WHERE
@@ -532,7 +845,7 @@ const getOrdersByUserId = async (userId) => {
 
       FROM orders o
 
-      LEFT JOIN products p
+      LEFT JOIN lkp_products p
         ON p.id = o.item_id[1]
 
       WHERE o.user_id = $1
@@ -602,7 +915,7 @@ const getOrderItems = async (orderId) => {
           item_index
         )
 
-      JOIN products p
+      JOIN lkp_products p
         ON p.id = x.item_id
 
       WHERE
