@@ -135,6 +135,7 @@ const getCustomers = async (userId) => {
 };
 
 
+
 /*
  * ============================================================
  * GET RESELLER BENEFITS
@@ -151,21 +152,21 @@ const getBenefits = async (userId) => {
       )::INTEGER AS membership_id,
       wt.benefited_by AS customer_id,
       wt.user_id AS beneficiary_id,
-      w.wallet_type AS beneficiary_role,
+      'RESELLER' AS beneficiary_role,
       wt.benefit_percentage AS benefit_percent,
       wt.benefit_amount,
       'CREDITED' AS status,
       wt.created_at
     FROM wallet_transactions wt
-    INNER JOIN wallets w
-      ON w.id = wt.wallet_id
-     AND w.user_id = wt.user_id
+    INNER JOIN user_wallet uw
+      ON uw.wallet_id = wt.wallet_id
+     AND uw.user_id = wt.user_id
     WHERE wt.user_id = $1
-      AND UPPER(TRIM(w.wallet_type)) = 'RESELLER'
       AND wt.transaction_type = 'CREDIT'
       AND wt.benefit_type = 'MEMBERSHIP_COMMISSION'
       AND wt.status = 'COMPLETED'
       AND wt.is_active = 1
+      AND uw.is_active = 1
     ORDER BY wt.created_at DESC, wt.id DESC;
     `,
     [String(userId).trim()]
@@ -173,6 +174,7 @@ const getBenefits = async (userId) => {
 
   return result.rows;
 };
+
 
 
 /*
