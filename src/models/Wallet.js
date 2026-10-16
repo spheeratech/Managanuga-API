@@ -411,18 +411,28 @@ const Wallet = {
 
     const result = await pool.query(
       `
-      SELECT
-        w.id,
-        w.user_id,
-        w.wallet_type,
-        w.balance,
-        w.created_at,
-        w.updated_at
-      FROM wallets w
-      WHERE w.user_id = $1
-        AND UPPER(TRIM(w.wallet_type)) = $2
-        AND w.is_active = 1
-      LIMIT 1
+      
+SELECT
+  uw.wallet_id AS id,
+  uw.user_id,
+  UPPER(TRIM(ur.role_name)) AS wallet_type,
+  uw.current_balance AS balance,
+  uw.wallet_amount,
+  uw.prev_balance,
+  uw.current_balance,
+  uw.created_at,
+  uw.updated_at
+FROM user_wallet uw
+INNER JOIN user_login ul
+  ON ul.user_id = uw.user_id
+INNER JOIN lkp_user_roles ur
+  ON ur.id = ul.role
+WHERE uw.user_id = $1
+  AND UPPER(TRIM(ur.role_name)) = $2
+  AND ul.is_active = 1
+  AND uw.is_active = 1
+LIMIT 1
+
       `,
       [walletUserId, user.role_name]
     );
@@ -467,7 +477,7 @@ const Wallet = {
         AND UPPER(TRIM(ur.role_name)) = ANY($2::text[])
       ORDER BY wt.created_at DESC, wt.id DESC
       `,
-      [walletUserId, CUSTOMER_ROLES]
+     [walletUserId, ["CUSTOMER", "USER", "VENDOR", "RESELLER"]]
     );
 
     return result.rows;
@@ -499,34 +509,35 @@ const Wallet = {
 
     try {
       await client.query("BEGIN");
-
-      const orderResult = await client.query(
-        `
-        SELECT
-          o.id,
-          o.order_id,
-          o.user_id,
-          o.actual_amount,
-          o.payable_amount,
-          o.payment_status,
-          o.membership_discount,
-          o.wallet_claim,
-          o.delivery_charge,
-          o.quantity
-        FROM orders o
-        INNER JOIN user_login ul
-          ON ul.user_id = o.user_id
-        INNER JOIN lkp_user_roles ur
-          ON ur.id = ul.role
-        WHERE (o.order_id = $1 OR o.id::text = $1)
-          AND o.user_id = $2
-          AND o.is_active = 1
-          AND ul.is_active = 1
-          AND UPPER(TRIM(ur.role_name)) = ANY($3::text[])
-        FOR UPDATE OF o
-        `,
-        [cleanOrderIdentifier, cleanUserId, CUSTOMER_ROLES]
-      );
+const orderResult = await client.query(
+  `
+  SELECT
+    o.id,
+    o.order_id,
+    o.user_id,
+    o.item_id,
+    o.actual_amount,
+    o.payable_amount,
+    o.payment_status,
+    o.membership_id,
+    o.membership_discount,
+    o.wallet_claim,
+    o.delivery_charge,
+    o.quantity
+  FROM orders o
+  INNER JOIN user_login ul
+    ON ul.user_id = o.user_id
+  INNER JOIN lkp_user_roles ur
+    ON ur.id = ul.role
+  WHERE (o.order_id = $1 OR o.id::text = $1)
+    AND o.user_id = $2
+    AND o.is_active = 1
+    AND ul.is_active = 1
+    AND UPPER(TRIM(ur.role_name)) = ANY($3::text[])
+  FOR UPDATE OF o
+  `,
+  [cleanOrderIdentifier, cleanUserId, CUSTOMER_ROLES]
+);
 
       const order = orderResult.rows[0];
 
@@ -744,138 +755,191 @@ const Wallet = {
     }
   },
 
-  async createRedeemRequest(userId, requestedAmount) {
-    const client = await pool.connect();
 
-    try {
-      await client.query("BEGIN");
+async createRedeemRequest(userId, requestedAmount) {
+  const client = await pool.connect();
 
-      const walletUserId = String(userId || "").trim();
+  try {
+    await client.query("BEGIN");
 
-      if (!walletUserId) {
-        throw new Error("User ID is required");
-      }
+    const walletUserId = String(userId || "").trim();
 
-      const redeemAmount = Number(requestedAmount);
-
-      if (!Number.isFinite(redeemAmount)) {
-        throw new Error("Redeem amount must be a valid number");
-      }
-
-      if (redeemAmount < 1000) {
-        throw new Error("Minimum redeem amount is ₹1,000");
-      }
-
-      const normalizedRedeemAmount =
-        Math.round(redeemAmount * 100) / 100;
-
-      const walletResult = await client.query(
-        `
-        SELECT
-          w.id,
-          w.user_id,
-          w.wallet_type,
-          w.balance
-        FROM wallets w
-        INNER JOIN user_login ul
-          ON ul.user_id = w.user_id
-        INNER JOIN lkp_user_roles ur
-          ON ur.id = ul.role
-        WHERE w.user_id = $1
-          AND ul.is_active = 1
-          AND w.is_active = 1
-          AND UPPER(TRIM(ur.role_name)) = UPPER(TRIM(w.wallet_type))
-        FOR UPDATE OF w
-        `,
-        [walletUserId]
-      );
-
-      const wallet = walletResult.rows[0];
-
-      if (!wallet) {
-        throw new Error("Wallet not found");
-      }
-
-      if (!["VENDOR", "RESELLER"].includes(wallet.wallet_type.toUpperCase())) {
-        throw new Error(
-          "Redeem is available only for Vendor or Reseller wallets"
-        );
-      }
-
-      const walletAmount =
-        Math.round(Number(wallet.balance) * 100) / 100;
-
-      if (walletAmount < 1000) {
-        throw new Error(
-          "Minimum wallet balance of ₹1,000 is required for redemption"
-        );
-      }
-
-      if (normalizedRedeemAmount > walletAmount) {
-        throw new Error(
-          `Redeem amount cannot exceed your wallet balance of ₹${walletAmount.toFixed(2)}`
-        );
-      }
-
-      const redeemResult = await client.query(
-        `
-        INSERT INTO redeem
-        (
-          user_id,
-          user_type,
-          wallet_amount,
-          redeem_status,
-          redeem_created_date,
-          created_by
-        )
-        VALUES ($1, $2, $3, 'IN_PROGRESS', NOW(), $1)
-        RETURNING
-          id,
-          user_id,
-          user_type,
-          wallet_amount,
-          redeem_status,
-          redeem_created_date,
-          created_by
-        `,
-        [
-          wallet.user_id,
-          wallet.wallet_type,
-          normalizedRedeemAmount,
-        ]
-      );
-
-      const newBalance =
-        Math.round(
-          (walletAmount - normalizedRedeemAmount) * 100
-        ) / 100;
-
-      await client.query(
-        `
-        UPDATE wallets
-        SET
-          balance = $1,
-          updated_at = NOW(),
-          updated_by = $2
-        WHERE id = $3
-          AND is_active = 1
-        `,
-        [newBalance, wallet.user_id, wallet.id]
-      );
-
-      await client.query("COMMIT");
-
-      return {
-        redeem: redeemResult.rows[0],
-        walletBalance: newBalance,
-      };
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
+    if (!walletUserId) {
+      throw new Error("User ID is required");
     }
-  },
+
+    const redeemAmount = Number(requestedAmount);
+
+    if (!Number.isFinite(redeemAmount)) {
+      throw new Error("Redeem amount must be a valid number");
+    }
+
+    if (redeemAmount < 1000) {
+      throw new Error("Minimum redeem amount is ₹1,000");
+    }
+
+    const normalizedRedeemAmount =
+      Math.round(redeemAmount * 100) / 100;
+
+    const walletResult = await client.query(
+      `
+      SELECT
+        uw.wallet_id AS id,
+        uw.user_id,
+        UPPER(TRIM(ur.role_name)) AS wallet_type,
+        uw.current_balance AS balance,
+        uw.wallet_amount,
+        uw.prev_balance,
+        uw.current_balance
+      FROM user_wallet uw
+      INNER JOIN user_login ul
+        ON ul.user_id = uw.user_id
+      INNER JOIN lkp_user_roles ur
+        ON ur.id = ul.role
+      WHERE uw.user_id = $1
+        AND ul.is_active = 1
+        AND uw.is_active = 1
+        AND UPPER(TRIM(ur.role_name)) IN ('VENDOR', 'RESELLER')
+      FOR UPDATE OF uw
+      `,
+      [walletUserId]
+    );
+
+    const wallet = walletResult.rows[0];
+
+    if (!wallet) {
+      throw new Error("Wallet not found");
+    }
+
+    if (!["VENDOR", "RESELLER"].includes(wallet.wallet_type)) {
+      throw new Error(
+        "Redeem is available only for Vendor or Reseller wallets"
+      );
+    }
+
+    const walletAmount = Math.round(Number(wallet.balance) * 100) / 100;
+
+    if (!Number.isFinite(walletAmount) || walletAmount < 1000) {
+      throw new Error(
+        "Minimum wallet balance of ₹1,000 is required for redemption"
+      );
+    }
+
+    if (normalizedRedeemAmount > walletAmount) {
+      throw new Error(
+        `Redeem amount cannot exceed your wallet balance of ₹${walletAmount.toFixed(2)}`
+      );
+    }
+
+    const redeemResult = await client.query(
+      `
+      INSERT INTO redeem
+      (
+        user_id,
+        user_type,
+        wallet_amount,
+        redeem_status,
+        redeem_created_date,
+        created_by
+      )
+      VALUES ($1, $2, $3, 'IN_PROGRESS', NOW(), $1)
+      RETURNING
+        id,
+        user_id,
+        user_type,
+        wallet_amount,
+        redeem_status,
+        redeem_created_date,
+        created_by
+      `,
+      [
+        wallet.user_id,
+        wallet.wallet_type,
+        normalizedRedeemAmount,
+      ]
+    );
+
+    const redeem = redeemResult.rows[0];
+
+    const newBalance =
+      Math.round((walletAmount - normalizedRedeemAmount) * 100) / 100;
+
+    const balanceResult = await client.query(
+      `
+      UPDATE user_wallet
+      SET
+        prev_balance = current_balance,
+        current_balance = $1,
+        wallet_amount = $1,
+        updated_at = NOW(),
+        updated_by = $2
+      WHERE wallet_id = $3
+        AND user_id = $2
+        AND is_active = 1
+      RETURNING wallet_id, user_id, current_balance
+      `,
+      [newBalance, wallet.user_id, wallet.id]
+    );
+
+    if (!balanceResult.rows[0]) {
+      throw new Error("Wallet balance update failed");
+    }
+
+    await client.query(
+      `
+      INSERT INTO wallet_transactions
+      (
+        transaction_type,
+        description,
+        created_by,
+        user_id,
+        wallet_id,
+        benefit_percentage,
+        benefit_amount,
+        benefited_by,
+        benefit_type,
+        status,
+        wallet_balance_after,
+        is_active
+      )
+      VALUES (
+        'DEBIT',
+        $1,
+        $2,
+        $2,
+        $3,
+        0,
+        $4,
+        NULL,
+        'WALLET_REDEMPTION',
+        'COMPLETED',
+        $5,
+        1
+      )
+      `,
+      [
+        `Wallet redemption request [redeem_id=${redeem.id}]`,
+        wallet.user_id,
+        wallet.id,
+        normalizedRedeemAmount,
+        newBalance,
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      redeem,
+      walletBalance: newBalance,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+},
+
 
   async updateRedeemStatus(redeemId, redeemStatus) {
     const cleanStatus = String(redeemStatus || "").trim().toUpperCase();

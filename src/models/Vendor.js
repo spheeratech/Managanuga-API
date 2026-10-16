@@ -89,6 +89,7 @@ const getOrders = async (vendorId) => {
 };
 
 
+
 const getBenefits = async (vendorId) => {
   const result = await pool.query(
     `
@@ -100,21 +101,21 @@ const getBenefits = async (vendorId) => {
       )::INTEGER AS membership_id,
       wt.benefited_by AS customer_id,
       wt.user_id AS beneficiary_id,
-      w.wallet_type AS beneficiary_role,
+      'VENDOR' AS beneficiary_role,
       wt.benefit_percentage AS benefit_percent,
       wt.benefit_amount,
       'CREDITED' AS status,
       wt.created_at
     FROM wallet_transactions wt
-    INNER JOIN wallets w
-      ON w.id = wt.wallet_id
-     AND w.user_id = wt.user_id
+    INNER JOIN user_wallet uw
+      ON uw.wallet_id = wt.wallet_id
+     AND uw.user_id = wt.user_id
     WHERE wt.user_id = $1
-      AND UPPER(TRIM(w.wallet_type)) = 'VENDOR'
       AND wt.transaction_type = 'CREDIT'
       AND wt.benefit_type = 'MEMBERSHIP_COMMISSION'
       AND wt.status = 'COMPLETED'
       AND wt.is_active = 1
+      AND uw.is_active = 1
     ORDER BY wt.created_at DESC, wt.id DESC;
     `,
     [String(vendorId).trim()]
@@ -122,6 +123,7 @@ const getBenefits = async (vendorId) => {
 
   return result.rows;
 };
+
 
 
 const getProfile = async (userId) => {

@@ -243,77 +243,97 @@ const processMembershipBenefitInTransaction = async ({
   }
 
 
-    /*
+
+  /*
    * ==========================================================
    * CREDIT BENEFITS
    * ==========================================================
    */
 
-  /*
-   * A vendor/reseller can receive a commission from a customer
-   * only once, regardless of how many memberships are activated.
-   * The advisory lock and wallet row lock serialize concurrent
-   * attempts using only the existing wallet and ledger tables.
-   */
   for (const benefit of benefits) {
     const beneficiaryId = String(benefit.beneficiaryId).trim();
     const cleanCustomerId = String(customerId).trim();
+    const beneficiaryRole = String(benefit.beneficiaryRole)
+      .trim()
+      .toUpperCase();
+
     const creditAmount =
       Math.round(Number(benefit.benefitAmount) * 100) / 100;
 
-    if (!Number.isFinite(creditAmount) || creditAmount < 0) {
+    if (
+      !Number.isFinite(creditAmount) ||
+      creditAmount < 0 ||
+      !["VENDOR", "RESELLER"].includes(beneficiaryRole)
+    ) {
       throw new Error(
-        `Invalid membership commission amount for ${beneficiaryId}`
+        `Invalid membership commission for ${beneficiaryId}`
       );
     }
 
+    // Serialize commission attempts for this customer and beneficiary.
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtext($1))`,
       [
         `MEMBERSHIP_BENEFIT:${cleanCustomerId}:` +
-          `${beneficiaryId}:${benefit.beneficiaryRole}`,
+          `${beneficiaryId}:${beneficiaryRole}`,
       ]
     );
 
+    // Confirm that the beneficiary is an active user with the expected role.
+    const beneficiaryResult = await client.query(
+      `
+      SELECT ul.user_id
+      FROM user_login ul
+      JOIN lkp_user_roles lur
+        ON lur.id = ul.role
+      WHERE ul.user_id = $1
+        AND UPPER(TRIM(lur.role_name)) = $2
+        AND ul.is_active = 1
+      LIMIT 1
+      `,
+      [beneficiaryId, beneficiaryRole]
+    );
+
+    if (beneficiaryResult.rows.length === 0) {
+      throw new Error(
+        `Active ${beneficiaryRole} user not found for ${beneficiaryId}`
+      );
+    }
+
+    // Create the wallet only if this user does not already have one.
     await client.query(
       `
-      INSERT INTO wallets
-      (
-        user_id,
-        wallet_type,
-        balance
-      )
-      VALUES
-      ($1, $2, 0)
-      ON CONFLICT (user_id)
-      DO NOTHING
+      INSERT INTO user_wallet
+        (user_id, wallet_amount, prev_balance, current_balance,
+         created_at, updated_at, created_by, is_active)
+      VALUES ($1, 0, 0, 0, NOW(), NOW(), $2, 1)
+      ON CONFLICT (user_id) DO NOTHING
       `,
-      [
-        beneficiaryId,
-        benefit.beneficiaryRole,
-      ]
+      [beneficiaryId, cleanCustomerId]
     );
 
+    // Lock the wallet row before checking and updating its balance.
     const walletResult = await client.query(
       `
-      SELECT id, user_id, wallet_type, balance
-      FROM wallets
+      SELECT wallet_id, user_id, wallet_amount, current_balance
+      FROM user_wallet
       WHERE user_id = $1
-        AND UPPER(TRIM(wallet_type)) = $2
         AND is_active = 1
       FOR UPDATE
       `,
-      [beneficiaryId, benefit.beneficiaryRole]
+      [beneficiaryId]
     );
 
     const wallet = walletResult.rows[0];
 
     if (!wallet) {
       throw new Error(
-        `Active ${benefit.beneficiaryRole} wallet not found for ${beneficiaryId}`
+        `Active wallet not found for ${beneficiaryId}`
       );
     }
 
+    // Keep the existing rule: commission is credited once per
+    // customer, beneficiary and role.
     const existingTransactionResult = await client.query(
       `
       SELECT 1
@@ -327,32 +347,36 @@ const processMembershipBenefitInTransaction = async ({
         AND is_active = 1
       LIMIT 1
       `,
-      [beneficiaryId, wallet.id, cleanCustomerId]
+      [beneficiaryId, wallet.wallet_id, cleanCustomerId]
     );
 
     if (existingTransactionResult.rows.length > 0) {
       console.log(
-        `Benefit already exists for customer ${cleanCustomerId} -> ${beneficiaryId} (${benefit.beneficiaryRole}). Skipping.`
+        `Benefit already exists for customer ${cleanCustomerId} -> ` +
+          `${beneficiaryId} (${beneficiaryRole}). Skipping.`
       );
       continue;
     }
 
     const updatedWalletResult = await client.query(
       `
-      UPDATE wallets
+      UPDATE user_wallet
       SET
-        balance = balance + $1,
+        prev_balance = current_balance,
+        current_balance = current_balance + $1,
+        wallet_amount = current_balance + $1,
         updated_at = NOW(),
-        updated_by = $3
-      WHERE
-        id = $2
+        updated_by = $2
+      WHERE wallet_id = $3
+        AND user_id = $4
         AND is_active = 1
-      RETURNING id, user_id, wallet_type, balance
+      RETURNING wallet_id, user_id, current_balance
       `,
       [
         creditAmount,
-        wallet.id,
         cleanCustomerId,
+        wallet.wallet_id,
+        beneficiaryId,
       ]
     );
 
@@ -360,10 +384,11 @@ const processMembershipBenefitInTransaction = async ({
 
     if (!updatedWallet) {
       throw new Error(
-        `Unable to credit ${benefit.beneficiaryRole} wallet for ${beneficiaryId}`
+        `Unable to credit ${beneficiaryRole} wallet for ${beneficiaryId}`
       );
     }
 
+    // Record the credit against the new wallet_id.
     await client.query(
       `
       INSERT INTO wallet_transactions
@@ -378,28 +403,30 @@ const processMembershipBenefitInTransaction = async ({
         benefited_by,
         benefit_type,
         status,
-        wallet_balance_after
+        wallet_balance_after,
+        created_at,
+        is_active
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), 1)
       `,
       [
         "CREDIT",
-        `Membership commission [membership_id=${membershipId}; customer_id=${cleanCustomerId}; role=${benefit.beneficiaryRole}]`,
+        `Membership commission [membership_id=${membershipId}; customer_id=${cleanCustomerId}; role=${beneficiaryRole}]`,
         cleanCustomerId,
         beneficiaryId,
-        updatedWallet.id,
+        updatedWallet.wallet_id,
         benefit.benefitPercent,
         creditAmount,
         cleanCustomerId,
         "MEMBERSHIP_COMMISSION",
         "COMPLETED",
-        updatedWallet.balance,
+        updatedWallet.current_balance,
       ]
     );
   }
 
-
   return benefits;
+
 };
 
 const processMembershipBenefit = async ({
