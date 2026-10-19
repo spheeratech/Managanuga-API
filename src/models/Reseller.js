@@ -1,13 +1,16 @@
-const pool = require("../../db");
-const { getRoleName } = require("../utils/userRoles");
 
+const pool = require("../../db");
+
+/*
+ * ============================================================
+ * GET CUSTOMERS
+ * ============================================================
+ */
 const getCustomers = async (userId) => {
   const cleanUserId = String(userId).trim();
 
   /*
-   * ------------------------------------------------------------
    * Find the requesting user's role.
-   * ------------------------------------------------------------
    */
   const roleResult = await pool.query(
     `
@@ -29,87 +32,39 @@ const getCustomers = async (userId) => {
     return [];
   }
 
-
   /*
    * ============================================================
-   * RESELLER CUSTOMERS
+   * RESELLER CUSTOMERS — ROLE 4
    * ============================================================
    *
-   * Only customers who actually purchased an ACTIVE membership
-   * through this reseller's referral code.
+   * Uses the corrected database function:
+   * public.get_customers_by_referalid(character varying)
+   *
+   * The function returns customers, their membership plan,
+   * and membership status.
    */
- 
-if (Number(currentUser.role) === 4) {
-  const result = await pool.query(
-    `
-    SELECT
-      ul.user_id,
-      ul.username,
-      ul.mobile_no,
-      ur.role_name AS role,
+  if (Number(currentUser.role) === 4) {
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM public.get_customers_by_referalid($1);
+      `,
+      [cleanUserId]
+    );
 
-      COUNT(o.id)::INTEGER AS total_orders,
-
-      COALESCE(
-        SUM(
-          COALESCE(o.items_cost, o.total_amount, 0)
-          - COALESCE(o.membership_discount, 0)
-          - COALESCE(o.wallet_claim, 0)
-          + COALESCE(o.delivery_charge, 0)
-        ),
-        0
-      ) AS total_paid_amount
-
-    FROM user_login ul
-
-    LEFT JOIN orders o
-      ON o.user_id = ul.user_id
-
-    LEFT JOIN lkp_user_roles ur
-      ON ur.id = ul.role
-
-    WHERE
-      ul.assigned_by = $1
-      AND ul.role IN (5, 6)
-      AND ul.is_active = 1
-
-    GROUP BY
-      ul.user_id,
-      ul.username,
-      ul.mobile_no,
-      ur.role_name
-
-    ORDER BY
-      ul.username ASC;
-    `,
-    [cleanUserId]
-  );
-
-  return result.rows;
-}
-
-
+    return result.rows;
+  }
 
   /*
    * ============================================================
-   * VENDOR CUSTOMERS
+   * VENDOR CUSTOMERS — ROLE 3
    * ============================================================
-   *
-   * Vendor customers are users assigned to this vendor.
    *
    * Customer relationship:
+   * user_login.assigned_by = vendor.user_id
    *
-   *   user_login.assigned_by = vendor.user_id
-   *
-   * TOTAL PAID AMOUNT:
-   *
-   *   items_cost
-   *   - membership_discount
-   *   - wallet_claim
-   *   + delivery_charge
-   *
-   * This represents the actual payable/paid amount for each order,
-   * rather than the original item/order total.
+   * Uses payable_amount from orders, avoiding references to
+   * nonexistent columns items_cost and total_amount.
    */
   if (Number(currentUser.role) === 3) {
     const result = await pool.query(
@@ -123,20 +78,16 @@ if (Number(currentUser.role) === 4) {
         COUNT(o.id)::INTEGER AS total_orders,
 
         COALESCE(
-          SUM(
-            COALESCE(o.items_cost, o.total_amount, 0)
-            - COALESCE(o.membership_discount, 0)
-            - COALESCE(o.wallet_claim, 0)
-            + COALESCE(o.delivery_charge, 0)
-          ),
+          SUM(COALESCE(o.payable_amount, 0)),
           0
         ) AS total_paid_amount
 
-      FROM user_login ul
+      FROM public.user_login ul
 
-      LEFT JOIN orders o
+      LEFT JOIN public.orders o
         ON o.user_id = ul.user_id
-      LEFT JOIN lkp_user_roles ur
+
+      LEFT JOIN public.lkp_user_roles ur
         ON ur.id = ul.role
 
       WHERE
@@ -159,20 +110,16 @@ if (Number(currentUser.role) === 4) {
     return result.rows;
   }
 
-
   /*
-   * ============================================================
-   * UNKNOWN / UNSUPPORTED ROLE
-   * ============================================================
+   * Unsupported role.
    */
   return [];
 };
 
-
-
-
 /*
+ * ============================================================
  * GET RESELLER BENEFITS
+ * ============================================================
  */
 const getBenefits = async (userId) => {
   const result = await pool.query(
@@ -190,21 +137,24 @@ const getBenefits = async (userId) => {
       wt.benefit_amount,
       'CREDITED' AS status,
       wt.created_at
-    FROM wallet_transactions wt
+    FROM public.wallet_transactions wt
     WHERE wt.user_id = $1
       AND wt.transaction_type = 'CREDIT'
-      AND wt.benefit_type IN ('REFERRAL', 'MEMBERSHIP_COMMISSION')
+      AND wt.benefit_type IN (
+        'REFERRAL',
+        'MEMBERSHIP_COMMISSION'
+      )
       AND wt.status = 'COMPLETED'
       AND wt.is_active = 1
-    ORDER BY wt.created_at DESC, wt.id DESC;
+    ORDER BY
+      wt.created_at DESC,
+      wt.id DESC;
     `,
     [String(userId).trim()]
   );
 
   return result.rows;
 };
-
-
 
 /*
  * ============================================================
@@ -231,9 +181,9 @@ const getProfile = async (userId) => {
       ui.bank_name,
       ui.bank_holder_name
 
-    FROM user_login ul
+    FROM public.user_login ul
 
-    INNER JOIN user_info ui
+    INNER JOIN public.user_info ui
       ON ui.user_id = ul.user_id
 
     WHERE
@@ -248,7 +198,6 @@ const getProfile = async (userId) => {
 
   return result.rows[0] || null;
 };
-
 
 module.exports = {
   getCustomers,
