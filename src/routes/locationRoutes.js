@@ -18,26 +18,43 @@ router.get("/search", async (req, res) => {
         message: "Google Places API key is not configured on backend.",
       });
     }
-    const response = await axios.get(
-      "https://maps.googleapis.com/maps/api/place/autocomplete/json",
+
+    const response = await axios.post(
+      "https://places.googleapis.com/v1/places:autocomplete",
       {
-        params: {
-          input,
-          components: "country:in",
-          key: GOOGLE_API_KEY,
+        input,
+        includedRegionCodes: ["IN"],
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": GOOGLE_API_KEY,
+          "X-Goog-FieldMask":
+            "suggestions.placePrediction.placeId," +
+            "suggestions.placePrediction.text.text," +
+            "suggestions.placePrediction.structuredFormat.mainText.text," +
+            "suggestions.placePrediction.structuredFormat.secondaryText.text," +
+            "suggestions.placePrediction.types",
         },
       },
     );
 
-    const data = response.data;
+    const suggestions = response.data?.suggestions || [];
 
-    if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
-      return res.status(400).json({
-        message: data.error_message || `Google Places error: ${data.status}`,
-      });
-    }
+    const predictions = suggestions
+      .filter((item) => item.placePrediction)
+      .map(({ placePrediction }) => ({
+        place_id: placePrediction.placeId,
+        description: placePrediction.text?.text || "",
+        structured_formatting: {
+          main_text: placePrediction.structuredFormat?.mainText?.text || "",
+          secondary_text:
+            placePrediction.structuredFormat?.secondaryText?.text || "",
+        },
+        types: placePrediction.types || [],
+      }));
 
-    return res.json(data.predictions || []);
+    return res.json(predictions);
   } catch (error) {
     console.error(
       "Google Places search error:",
@@ -68,25 +85,33 @@ router.get("/details", async (req, res) => {
     }
 
     const response = await axios.get(
-      "https://maps.googleapis.com/maps/api/place/details/json",
+      `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`,
       {
-        params: {
-          place_id: placeId,
-          fields: "formatted_address,address_components,geometry",
-          key: GOOGLE_API_KEY,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": GOOGLE_API_KEY,
+          "X-Goog-FieldMask": "id,formattedAddress,addressComponents,location",
         },
       },
     );
 
-    const data = response.data;
+    const place = response.data;
 
-    if (data.status !== "OK") {
-      return res.status(400).json({
-        message: data.error_message || `Google Places error: ${data.status}`,
-      });
-    }
-
-    return res.json(data.result);
+    return res.json({
+      place_id: place.id || placeId,
+      formatted_address: place.formattedAddress || "",
+      address_components: (place.addressComponents || []).map((component) => ({
+        long_name: component.longText || "",
+        short_name: component.shortText || "",
+        types: component.types || [],
+      })),
+      geometry: {
+        location: {
+          lat: place.location?.latitude ?? null,
+          lng: place.location?.longitude ?? null,
+        },
+      },
+    });
   } catch (error) {
     console.error(
       "Google Place details error:",
