@@ -226,6 +226,7 @@ const getAdminOrders = async () => {
   const result = await pool.query(`
     SELECT
       o.id,
+      o.order_id,
       o.user_id,
       o.address_id,
       o.actual_amount AS total_amount,
@@ -610,7 +611,7 @@ const updateAdminOrder = async (
 const deleteAdminOrder = async (id) => {
   void id;
   throw new Error(
-    "Admin order deletion is unavailable because orders do not record whether inventory was deducted"
+    "Admin order deletion is unavailable because orders do not record whether inventory was deducted",
   );
 };
 
@@ -620,7 +621,7 @@ const deleteAdminOrder = async (id) => {
 
 const deleteAllAdminOrders = async () => {
   throw new Error(
-    "Bulk admin order deletion is unavailable because orders do not record whether inventory was deducted"
+    "Bulk admin order deletion is unavailable because orders do not record whether inventory was deducted",
   );
 };
 

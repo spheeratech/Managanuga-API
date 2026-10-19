@@ -360,32 +360,32 @@ const verifyAdminOrder = async (req, res) => {
         message: "Order not found",
       });
     }
-    try {
-      const customerPhone = existingOrder.customer_phone;
+    // try {
+    //   const customerPhone = existingOrder.customer_phone;
 
-      if (customerPhone) {
-        const confirmationMessage = `ManaGanuga: Order ${order.id} confirmed successfully. Thank you for shopping with us.`;
+    //   if (customerPhone) {
+    //     const confirmationMessage = `ManaGanuga: Order ${order.id} confirmed successfully. Thank you for shopping with us.`;
 
-        await sendSMS(
-          String(customerPhone),
-          confirmationMessage,
-          process.env.SMS_ORDER_CONFIRMED_TEMPLATE_ID,
-        );
+    //     await sendSMS(
+    //       String(customerPhone),
+    //       confirmationMessage,
+    //       process.env.SMS_ORDER_CONFIRMED_TEMPLATE_ID,
+    //     );
 
-        console.log(
-          `ORDER CONFIRMATION SMS SENT: Order ${order.id} -> ${customerPhone}`,
-        );
-      } else {
-        console.warn(
-          `ORDER CONFIRMATION SMS SKIPPED: No mobile number for order ${order.id}`,
-        );
-      }
-    } catch (smsError) {
-      console.error(
-        `ORDER CONFIRMATION SMS FAILED FOR ORDER ${order.id}:`,
-        smsError.message,
-      );
-    }
+    //     console.log(
+    //       `ORDER CONFIRMATION SMS SENT: Order ${order.id} -> ${customerPhone}`,
+    //     );
+    //   } else {
+    //     console.warn(
+    //       `ORDER CONFIRMATION SMS SKIPPED: No mobile number for order ${order.id}`,
+    //     );
+    //   }
+    // } catch (smsError) {
+    //   console.error(
+    //     `ORDER CONFIRMATION SMS FAILED FOR ORDER ${order.id}:`,
+    //     smsError.message,
+    //   );
+    // }
 
     // --------------------------------
     // MANAGANUGA DELIVERY
@@ -476,6 +476,25 @@ const verifyAdminOrder = async (req, res) => {
       // }
 
       const hub = await findActiveHubForPincode(existingOrder.pincode);
+
+      const hubUpdateResult = await pool.query(
+        `
+  UPDATE public.orders
+  SET hubcode = $1
+  WHERE id = $2
+  RETURNING hubcode
+  `,
+        [hub.id, order.id],
+      );
+
+      if (hubUpdateResult.rowCount === 0) {
+        throw new Error(`Could not save hubcode for order ${order.id}`);
+      }
+
+      console.log("ORDER HUBCODE SAVED:", {
+        orderId: order.id,
+        hubcode: hubUpdateResult.rows[0].hubcode,
+      });
 
       // Find the registered Shiprocket pickup location using
       // the selected hub's PRIMARY pincode.
@@ -710,7 +729,6 @@ const verifyAdminOrder = async (req, res) => {
         shipment?.awb?.response?.data?.awb_code ||
         shipment?.awb?.awb_code ||
         shipment?.order?.awb_code;
-
       if (!awbNumber) {
         console.error(
           "Shiprocket order response did not contain an AWB:",
@@ -722,10 +740,61 @@ const verifyAdminOrder = async (req, res) => {
         );
       }
 
+      console.log(
+        `SHIPROCKET AWB VERIFIED: Order ${order.id}, AWB ${awbNumber}`,
+      );
+
+      // Save shipment details before sending the confirmation SMS.
       const updatedOrder = await AdminOrder.updateShipmentDetails(order.id, {
         tracking_number: String(awbNumber),
         courier_name: "Shiprocket",
       });
+
+      // Send order-confirmation SMS only after AWB verification.
+      try {
+        const customerPhone = existingOrder.customer_phone;
+
+        if (customerPhone) {
+          const confirmationMessage =
+            `ManaGanuga: Order ${order.id} confirmed successfully. ` +
+            `AWB: ${awbNumber}. Thank you for shopping with us.`;
+
+          await sendSMS(
+            String(customerPhone),
+            confirmationMessage,
+            process.env.SMS_ORDER_CONFIRMED_TEMPLATE_ID,
+          );
+
+          console.log(
+            `ORDER CONFIRMATION SMS SENT: Order ${order.id}, AWB ${awbNumber}`,
+          );
+        } else {
+          console.warn(
+            `ORDER CONFIRMATION SMS SKIPPED: No mobile number for order ${order.id}`,
+          );
+        }
+      } catch (smsError) {
+        console.error(
+          `ORDER CONFIRMATION SMS FAILED FOR ORDER ${order.id}:`,
+          smsError.message,
+        );
+      }
+
+      // if (!awbNumber) {
+      //   console.error(
+      //     "Shiprocket order response did not contain an AWB:",
+      //     shipment,
+      //   );
+
+      //   throw new Error(
+      //     "Shiprocket order may have been created, but an AWB was not returned. Check Shiprocket before retrying.",
+      //   );
+      // }
+
+      // const updatedOrder = await AdminOrder.updateShipmentDetails(order.id, {
+      //   tracking_number: String(awbNumber),
+      //   courier_name: "Shiprocket",
+      // });
 
       return res.status(200).json({
         success: true,
