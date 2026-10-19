@@ -712,15 +712,26 @@ const verifyAdminOrder = async (req, res) => {
           JSON.stringify(shipment, null, 2),
         );
       } catch (shipmentError) {
+        const shiprocketError = shipmentError.response?.data;
         console.error(
           "SHIPROCKET ADMIN SHIPMENT ERROR:",
-          shipmentError.response?.data || shipmentError.message,
+          shiprocketError || shipmentError.message,
         );
 
+        const shiprocketDetails =
+          shiprocketError?.message ||
+          (shiprocketError?.errors
+            ? JSON.stringify(shiprocketError.errors)
+            : shiprocketError
+              ? JSON.stringify(shiprocketError)
+              : shipmentError.message);
+
         throw new Error(
-          shipmentError.response?.data?.message ||
-            shipmentError.message ||
-            "Shiprocket shipment creation failed",
+          `Shiprocket request failed${
+            shipmentError.response?.status
+              ? ` (${shipmentError.response.status})`
+              : ""
+          }: ${shiprocketDetails || "Unknown provider error"}`,
         );
       }
 
