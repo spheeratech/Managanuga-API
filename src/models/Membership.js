@@ -464,11 +464,10 @@ const getMembershipWallet = async (userId) => {
         wt.created_at
       FROM wallet_transactions wt
       WHERE wt.user_id = $1
-        AND wt.benefit_type = 'MEMBERSHIP_CLAIM'
+        AND wt.benefit_type IN ('MEMBERSHIP_CLAIM', 'MEMBERSHIP_USAGE')
         AND wt.transaction_type = 'DEBIT'
         AND wt.status = 'COMPLETED'
         AND wt.is_active = 1
-        AND wt.benefit_amount > 0
         AND POSITION($2 IN wt.description) > 0
       ORDER BY wt.created_at DESC, wt.id DESC
       `,
