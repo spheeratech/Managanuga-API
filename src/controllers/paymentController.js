@@ -214,7 +214,7 @@ const createOrder = async (req, res) => {
       const planResult = await pool.query(
         `
             SELECT *
-            FROM lkp_lkp_subscription_plans
+            FROM lkp_subscription_plans
             WHERE id = $1
           `,
         [membershipPlanId],
@@ -1373,7 +1373,7 @@ if (couponCode && String(couponCode).trim()) {
       const planResult = await pool.query(
         `
         SELECT *
-        FROM lkp_lkp_subscription_plans
+        FROM lkp_subscription_plans
         WHERE id = $1
       `,
         [membershipPlanId],
