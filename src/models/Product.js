@@ -1,12 +1,18 @@
 const pool = require("../../db");
 
 // Get all products
-// Get all products
+
 const getProducts = async () => {
   const result = await pool.query(`
     SELECT
       p.*,
 
+      -- Category information
+      c.name AS category_name,
+      c.description AS category_description,
+      p.category_id AS category_id,
+
+      -- Average product rating
       COALESCE(
         (
           SELECT ROUND(AVG(pr.rating)::numeric, 1)
@@ -16,6 +22,7 @@ const getProducts = async () => {
         0
       ) AS average_rating,
 
+      -- Product images
       COALESCE(
         (
           SELECT json_agg(
@@ -32,9 +39,10 @@ const getProducts = async () => {
             AND ai.image_type = 'PRODUCT_IMAGE'
             AND ai.is_active = 1
         ),
-        '[]'
+        '[]'::json
       ) AS images,
 
+      -- Additional product views
       COALESCE(
         (
           SELECT json_agg(
@@ -51,40 +59,55 @@ const getProducts = async () => {
             AND ai.image_type = 'PRODUCT_VIEW'
             AND ai.is_active = 1
         ),
-        '[]'
+        '[]'::json
       ) AS product_views
 
-    FROM lkp_products p
-    ORDER BY p.display_order ASC
+    FROM public.lkp_products p
+    LEFT JOIN public.lkp_categories c
+      ON c.id = p.category_id
+
+    ORDER BY
+      p.display_order ASC NULLS LAST,
+      p.id ASC
   `);
 
   return result.rows;
 };
 
-// Get product by id
+
+// Get product by ID
 const getProductById = async (id) => {
   const result = await pool.query(
     `
     SELECT
       p.*,
+
+      -- Category information
+      c.name AS category_name,
+      c.description AS category_description,
+      p.category_id AS category_id,
+
+      -- Product images
       COALESCE(
         (
           SELECT json_agg(
-          json_build_object(
-            'id', ai.id,
-            'image_name', ai.image_name,
-            'url', ai.url,
-            'format', ai.format
-          )
-          ORDER BY ai.id
+            json_build_object(
+              'id', ai.id,
+              'image_name', ai.image_name,
+              'url', ai.url,
+              'format', ai.format
+            )
+            ORDER BY ai.id
           )
           FROM app_images ai
           WHERE ai.product_id = p.id
             AND ai.image_type = 'PRODUCT_IMAGE'
             AND ai.is_active = 1
         ),
-        '[]'
+        '[]'::json
       ) AS images,
+
+      -- Additional product views
       COALESCE(
         (
           SELECT json_agg(
@@ -101,16 +124,21 @@ const getProductById = async (id) => {
             AND ai.image_type = 'PRODUCT_VIEW'
             AND ai.is_active = 1
         ),
-        '[]'
+        '[]'::json
       ) AS product_views
-    FROM lkp_products p
+
+    FROM public.lkp_products p
+    LEFT JOIN public.lkp_categories c
+      ON c.id = p.category_id
+
     WHERE p.id = $1
-  `,
-    [id],
+    `,
+    [id]
   );
 
   return result.rows[0];
 };
+
 
 // const createProduct = async (productData) => {
 //   const query = `
