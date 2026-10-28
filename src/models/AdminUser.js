@@ -47,7 +47,7 @@ const AdminUser = {
   // --------------------------------------------------
   // CREATE USER
   // --------------------------------------------------
-    async createUser(client, loginData, infoData) {
+  async createUser(client, loginData, infoData) {
     // Resolve the numeric role ID from lkp_user_roles
     const roleResult = await client.query(
       `
@@ -60,9 +60,7 @@ const AdminUser = {
     );
 
     if (roleResult.rows.length === 0) {
-      throw new Error(
-        `Role "${loginData.role}" not found in lkp_user_roles`
-      );
+      throw new Error(`Role "${loginData.role}" not found in lkp_user_roles`);
     }
 
     const roleId = roleResult.rows[0].id;
@@ -154,69 +152,71 @@ const AdminUser = {
       info: infoResult.rows[0],
     };
   },
+  //------------------------------------------------------
+  //   GET Users by User ID (all users,vendor & reseller users)
+  //----------------------------------------------------------
+
+  async getUsersByUserId(userId, roleId) {
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM public.get_users_by_user_id($1, $2)
+    `,
+      [userId, roleId],
+    );
+
+    return result.rows.map((user) => ({
+      user_id: user.customer_user_id,
+      username: user.customer_name,
+      mobile_no: user.customer_mobile,
+      email: user.customer_email,
+      role: user.customer_role,
+      is_active: user.customer_status,
+    }));
+  },
 
   // --------------------------------------------------
   // GET ALL USERS
   // --------------------------------------------------
-  async getAllUsers() {
-    const result = await pool.query(
-      `
-      SELECT
-        l.user_id,
-        l.username,
-        COALESCE(l.mobile_no, i.mobile) AS mobile_no,
-        ur.role_name AS role,
-        l.is_active,
-        l.created_by,
-        l.assigned_by,
-        l.relationship_type,
-        l.created_at,
-
-        i.first_name,
-        i.last_name,
-        i.email,
-        i.address,
-        i.city,
-        i.state,
-        i.pincode,
-        i.subscription,
-        COALESCE(i.mobile, l.mobile_no) AS mobile,
-        i.bank_account_no,
-        i.ifsc_code,
-        i.bank_holder_name,
-        i.bank_name,
-        i.contact_person_name,
-        i.contact_person_mobile
-
-      FROM user_login l
-
-      LEFT JOIN user_info i
-        ON l.user_id = i.user_id
-      LEFT JOIN lkp_user_roles ur
-        ON ur.id = l.role
-
-      ORDER BY l.created_at DESC
-      `,
-    );
-
-    return result.rows.map((user) => {
-      const roleName = getRoleName(user.role);
-      if (!roleName) {
-        throw new Error(`Unknown role returned for user ${user.user_id}`);
-      }
-      return { ...user, role: roleName };
-    });
-  },
-  // --------------------------------------------------
-  // GET USERS BY VENDOR
-  // --------------------------------------------------
-  // async getUsersByVendorId(vendorUserId) {
+  // async getAllUsers() {
   //   const result = await pool.query(
   //     `
-  //     SELECT *
-  //     FROM public.get_users_by_vendor_id($1)
+  //     SELECT
+  //       l.user_id,
+  //       l.username,
+  //       COALESCE(l.mobile_no, i.mobile) AS mobile_no,
+  //       ur.role_name AS role,
+  //       l.is_active,
+  //       l.created_by,
+  //       l.assigned_by,
+  //       l.relationship_type,
+  //       l.created_at,
+
+  //       i.first_name,
+  //       i.last_name,
+  //       i.email,
+  //       i.address,
+  //       i.city,
+  //       i.state,
+  //       i.pincode,
+  //       i.subscription,
+  //       COALESCE(i.mobile, l.mobile_no) AS mobile,
+  //       i.bank_account_no,
+  //       i.ifsc_code,
+  //       i.bank_holder_name,
+  //       i.bank_name,
+  //       i.contact_person_name,
+  //       i.contact_person_mobile
+
+  //     FROM user_login l
+
+  //     LEFT JOIN user_info i
+  //       ON l.user_id = i.user_id
+  //     LEFT JOIN lkp_user_roles ur
+  //       ON ur.id = l.role
+
+  //     ORDER BY l.created_at DESC
   //     `,
-  //     [vendorUserId],
   //   );
 
   //   return result.rows.map((user) => {
@@ -228,65 +228,18 @@ const AdminUser = {
   //   });
   // },
 
-  async getUsersByVendorId(vendorUserId) {
-    const result = await pool.query(
-      `SELECT * FROM public.get_users_by_vendor_id($1)`,
-      [vendorUserId],
-    );
-
-    return result.rows;
-  },
-
   // --------------------------------------------------
-  // GET USER BY ID
+  // GET USERS BY VENDOR
   // --------------------------------------------------
-  async getUserById(userId) {
-    const result = await pool.query(
-      `
-      SELECT
-        l.user_id,
-        l.username,
-        l.mobile_no,
-        ur.role_name AS role,
-        l.is_active,
-        l.created_by,
-        l.assigned_by,
-        l.relationship_type,
-        l.created_at,
 
-        i.first_name,
-        i.last_name,
-        i.email,
-        i.address,
-        i.city,
-        i.state,
-        i.pincode,
-        i.subscription,
-        COALESCE(i.mobile, l.mobile_no) AS mobile,
-        i.bank_account_no,
-        i.ifsc_code,
-        i.bank_holder_name,
-        i.bank_name,
-        i.contact_person_name,
-        i.contact_person_mobile
+  // async getUsersByVendorId(userId) {
+  //   const result = await pool.query(
+  //     `SELECT * FROM public.get_users_by_vendor_reseller_id($1)`,
+  //     [userId],
+  //   );
 
-
-      FROM user_login l
-
-      LEFT JOIN user_info i
-        ON l.user_id = i.user_id
-      LEFT JOIN lkp_user_roles ur
-        ON ur.id = l.role
-
-      WHERE l.user_id = $1
-
-      LIMIT 1
-      `,
-      [userId],
-    );
-
-    return result.rows[0] || null;
-  },
+  //   return result.rows;
+  // },
 
   // --------------------------------------------------
   // UPDATE STATUS
