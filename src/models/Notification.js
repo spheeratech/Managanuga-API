@@ -21,13 +21,7 @@ const createNotification = async ({
     VALUES ($1, $2, $3, $4, $5)
     RETURNING *;
     `,
-    [
-      userId,
-      title,
-      message,
-      type,
-      referenceId,
-    ]
+    [userId, title, message, type, referenceId],
   );
 
   return result.rows[0];
@@ -42,7 +36,7 @@ const getUserNotifications = async (userId) => {
     WHERE user_id = $1
     ORDER BY created_at DESC
     `,
-    [userId]
+    [userId],
   );
 
   return result.rows;
@@ -57,7 +51,7 @@ const getUnreadCount = async (userId) => {
     WHERE user_id = $1
       AND is_read = FALSE
     `,
-    [userId]
+    [userId],
   );
 
   return result.rows[0].count;
@@ -68,12 +62,13 @@ const markAsRead = async (notificationId, userId) => {
   const result = await pool.query(
     `
     UPDATE inapp_notifications
-    SET is_read = TRUE
+    SET is_read = TRUE,
+     is_active = 0
     WHERE id = $1
       AND user_id = $2
     RETURNING *;
     `,
-    [notificationId, userId]
+    [notificationId, userId],
   );
 
   return result.rows[0];
@@ -84,12 +79,13 @@ const markAllAsRead = async (userId) => {
   const result = await pool.query(
     `
     UPDATE inapp_notifications
-    SET is_read = TRUE
+    SET is_read = TRUE,
+     is_active = 0
     WHERE user_id = $1
       AND is_read = FALSE
     RETURNING *;
     `,
-    [userId]
+    [userId],
   );
 
   return result.rows;

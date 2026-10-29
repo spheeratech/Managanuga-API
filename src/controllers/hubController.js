@@ -1,5 +1,5 @@
 const Hub = require("../models/Hub");
-
+const Notification = require("../models/Notification");
 const getStates = async (req, res) => {
   try {
     const data = await Hub.getStates();
@@ -93,33 +93,113 @@ const getHubById = async (req, res) => {
 const createHub = async (req, res) => {
   try {
     const data = await Hub.createHub(req.body);
-    res
-      .status(201)
-      .json({ success: true, message: "Hub created successfully", data });
+
+    await createHubNotification({
+      userId: req.body.creatorUserId || req.body.created_by || req.body.user_id,
+      title: "Hub Created Successfully",
+      message: `Hub ${data.hubname || data.hub_name || data.hubcode || data.id || ""} has been created.`,
+      hubId: data.id,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Hub created successfully",
+      data,
+    });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
 const updateHub = async (req, res) => {
   try {
     const data = await Hub.updateHub(req.params.id, req.body);
-    if (!data)
-      return res.status(404).json({ success: false, message: "Hub not found" });
-    res.json({ success: true, message: "Hub updated successfully", data });
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        message: "Hub not found",
+      });
+    }
+
+    await createHubNotification({
+      userId: req.body.creatorUserId || req.body.updated_by || req.body.user_id,
+      title: "Hub Updated Successfully",
+      message: `Hub ${data.hubname || data.hub_name || data.hubcode || data.id || req.params.id} has been updated.`,
+      hubId: data.id || req.params.id,
+    });
+
+    return res.json({
+      success: true,
+      message: "Hub updated successfully",
+      data,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("UPDATE HUB ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
 const deleteHub = async (req, res) => {
   try {
     const data = await Hub.deleteHub(req.params.id);
-    if (!data)
-      return res.status(404).json({ success: false, message: "Hub not found" });
-    res.json({ success: true, message: "Hub deleted successfully", data });
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        message: "Hub not found",
+      });
+    }
+
+    await createHubNotification({
+      userId:
+        req.body?.creatorUserId ||
+        req.body?.deleted_by ||
+        req.body?.user_id ||
+        req.user?.userId ||
+        req.user?.id,
+      title: "Hub Deleted Successfully",
+      message: `Hub ${data.id} has been deleted successfully.`,
+      hubId: data.id,
+    });
+
+    return res.json({
+      success: true,
+      message: "Hub deleted successfully",
+      data,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("DELETE HUB ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+const createHubNotification = async ({ userId, title, message, hubId }) => {
+  if (!userId) {
+    console.warn("Hub notification skipped: user ID was not provided.");
+    return;
+  }
+
+  try {
+    await Notification.createNotification({
+      userId,
+      title,
+      message,
+      type: "HUB",
+      // referenceId: hubId == null ? null : String(hubId),
+      referenceId: null,
+    });
+  } catch (error) {
+    // Notification failure must not undo a successful hub operation.
+    console.error("Hub notification failed:", error.message);
   }
 };
 

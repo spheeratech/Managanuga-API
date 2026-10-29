@@ -3,7 +3,26 @@ const pool = require("../../db");
 const generateUserId = require("../utils/generatedUserId");
 const Subscription = require("../models/Subscription");
 const Membership = require("../models/Membership");
+const Notification = require("../models/Notification");
+const notifySubscriptionAdmin = async ({ userId, title, message, planId }) => {
+  if (!userId) {
+    console.warn("Subscription notification skipped: admin user ID missing");
+    return;
+  }
 
+  try {
+    await Notification.createNotification({
+      userId,
+      title,
+      message,
+      type: "SUBSCRIPTION",
+      referenceId: planId ? Number(planId) : null,
+    });
+  } catch (error) {
+    // Notification failure should not undo a successful plan action.
+    console.error("Failed to create subscription notification:", error);
+  }
+};
 const getSubscriptionPlans = async (req, res) => {
   try {
     const plans = await Subscription.getPlans();
@@ -15,13 +34,12 @@ const getSubscriptionPlans = async (req, res) => {
   } catch (error) {
     console.error("Subscription Plans Error:", error);
 
-   res.status(500).json({
-  success: false,
-  message: "Failed to fetch subscription plans",
-});
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch subscription plans",
+    });
   }
 };
-
 
 const getMyMembership = async (req, res) => {
   try {
@@ -125,7 +143,14 @@ const createSubscriptionPlan = async (req, res) => {
       description,
       display_order,
     });
+    const { performedByUserId } = req.body;
 
+    await notifySubscriptionAdmin({
+      userId: performedByUserId,
+      title: "Subscription Plan Created",
+      message: `Subscription plan "${plan.plan_name}" was created successfully.`,
+      planId: plan.id,
+    });
     res.status(201).json({
       success: true,
       message: "Subscription plan created successfully",
@@ -415,7 +440,7 @@ const verifySubscriptionPayment = async (req, res) => {
         WHERE id = 5
           AND UPPER(TRIM(role_name)) = 'CUSTOMER'
         LIMIT 1
-        `
+        `,
       );
 
       if (customerRoleResult.rows.length === 0) {
@@ -456,20 +481,14 @@ const verifySubscriptionPayment = async (req, res) => {
           'CUSTOMER'
         )
         `,
-        [
-          userId,
-          username,
-          phone,
-          temporaryPassword,
-          customerRoleId,
-        ]
+        [userId, username, phone, temporaryPassword, customerRoleId],
       );
 
       console.log(
         "New user_login created:",
         userId,
         "Role ID:",
-        customerRoleId
+        customerRoleId,
       );
 
       console.log("New user_login created:", userId);
@@ -656,7 +675,7 @@ const assignSubscriptionToCustomer = async (req, res) => {
 const toggleSubscriptionPlanStatus = async (req, res) => {
   try {
     const { planId } = req.params;
-
+    const { performedByUserId } = req.body;
     if (!planId) {
       return res.status(400).json({
         success: false,
@@ -665,7 +684,18 @@ const toggleSubscriptionPlanStatus = async (req, res) => {
     }
 
     const plan = await Subscription.togglePlanStatus(planId);
+    const isActive = Number(plan.is_active) === 1;
 
+    await notifySubscriptionAdmin({
+      userId: performedByUserId,
+      title: isActive
+        ? "Subscription Plan Activated"
+        : "Subscription Plan Deactivated",
+      message: `Subscription plan "${plan.plan_name}" was ${
+        isActive ? "activated" : "deactivated"
+      } successfully.`,
+      planId: plan.id,
+    });
     res.status(200).json({
       success: true,
       message: plan.is_active
@@ -685,7 +715,7 @@ const toggleSubscriptionPlanStatus = async (req, res) => {
 const deleteSubscriptionPlan = async (req, res) => {
   try {
     const { planId } = req.params;
-
+    const { performedByUserId } = req.body;
     if (!planId) {
       return res.status(400).json({
         success: false,
@@ -694,7 +724,12 @@ const deleteSubscriptionPlan = async (req, res) => {
     }
 
     const deletedPlan = await Subscription.deletePlan(planId);
-
+    await notifySubscriptionAdmin({
+      userId: performedByUserId,
+      title: "Subscription Plan Deleted",
+      message: `Subscription plan "${deletedPlan.plan_name}" was deleted successfully.`,
+      planId: deletedPlan.id,
+    });
     res.status(200).json({
       success: true,
       message: "Subscription plan deleted successfully",
@@ -712,7 +747,7 @@ const deleteSubscriptionPlan = async (req, res) => {
 };
 const validateReferralCode = async (req, res) => {
   try {
-    const {referralCode, userId} = req.body;
+    const { referralCode, userId } = req.body;
 
     if (!referralCode || !referralCode.trim()) {
       return res.status(400).json({
@@ -730,8 +765,8 @@ const validateReferralCode = async (req, res) => {
       });
     }
 
-   const referralResult = await pool.query(
-  `
+    const referralResult = await pool.query(
+      `
   SELECT
     ul.user_id AS referral_code
   FROM user_login ul
@@ -739,8 +774,8 @@ const validateReferralCode = async (req, res) => {
     AND ul.is_active = 1
   LIMIT 1
   `,
-  [referralCode.trim()]
-);
+      [referralCode.trim()],
+    );
 
     const referrer = referralResult.rows[0];
 
@@ -754,34 +789,31 @@ const validateReferralCode = async (req, res) => {
 
     // Resolve the current user so self-referral can be rejected.
     const currentUserResult = await pool.query(
-  `
+      `
   SELECT user_id
   FROM user_login
   WHERE user_id = $1
     AND is_active = 1
   LIMIT 1
   `,
-  [String(userId).trim()]
-);
+      [String(userId).trim()],
+    );
 
-if (currentUserResult.rows.length === 0) {
-  return res.status(400).json({
-    success: false,
-    valid: false,
-    message: "Invalid user",
-  });
-}
+    if (currentUserResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        message: "Invalid user",
+      });
+    }
 
-   if (
-  String(referrer.referral_code).trim() ===
-  String(userId).trim()
-) {
-  return res.status(400).json({
-    success: false,
-    valid: false,
-    message: "You cannot use your own referral code",
-  });
-}
+    if (String(referrer.referral_code).trim() === String(userId).trim()) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        message: "You cannot use your own referral code",
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -814,8 +846,7 @@ const getMembershipWallet = async (req, res) => {
       });
     }
 
-    const wallet =
-      await Membership.getMembershipWallet(userId);
+    const wallet = await Membership.getMembershipWallet(userId);
 
     if (!wallet) {
       return res.status(404).json({
@@ -828,12 +859,8 @@ const getMembershipWallet = async (req, res) => {
       success: true,
       data: wallet,
     });
-
   } catch (error) {
-    console.error(
-      "GET MEMBERSHIP WALLET ERROR:",
-      error
-    );
+    console.error("GET MEMBERSHIP WALLET ERROR:", error);
 
     return res.status(500).json({
       success: false,

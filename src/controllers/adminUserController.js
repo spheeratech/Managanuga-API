@@ -1,5 +1,7 @@
 const pool = require("../../db");
 const AdminUser = require("../models/AdminUser");
+const Notification = require("../models/Notification");
+const { sendPushNotification } = require("../services/fcmService");
 const generateUserId = require("../utils/generatedUserId");
 const clean = (val) =>
   val && String(val).trim() !== "" ? String(val).trim() : null;
@@ -291,6 +293,27 @@ const createUser = async (req, res) => {
     );
     console.log("========================================");
     await client.query("COMMIT");
+    await client.query("COMMIT");
+
+    // ADDED: Notify the creator when a user is created.
+    try {
+      const createdUserName = [user.info.first_name, user.info.last_name]
+        .filter(Boolean)
+        .join(" ");
+
+      await Notification.createNotification({
+        userId: normalizedCreatorUserId,
+        title: "User Created Successfully",
+        message: `${createdUserName || user.login.username} (${targetRole}) has been created successfully.`,
+        type: "USER",
+        referenceId: null,
+      });
+    } catch (notificationError) {
+      console.error(
+        "User creation notification failed:",
+        notificationError.message,
+      );
+    }
 
     let smsSent = false;
 
@@ -389,6 +412,55 @@ const createUser = async (req, res) => {
     client.release();
   }
 };
+
+const createAdminLoginNotification = async (userId) => {
+  if (!userId) return;
+
+  try {
+    const title = "Login Successful";
+    const message = "You have successfully logged in to Mana Ganuga.";
+
+    // Save the in-app notification.
+    const notification = await Notification.createNotification({
+      userId,
+      title,
+      message,
+      type: "LOGIN",
+    });
+
+    // Send a push notification when an FCM token is available.
+    const result = await pool.query(
+      `SELECT fcm_token
+       FROM user_login
+       WHERE user_id = $1
+       LIMIT 1`,
+      [userId],
+    );
+
+    const fcmToken = result.rows[0]?.fcm_token;
+
+    if (fcmToken) {
+      try {
+        await sendPushNotification({
+          fcmToken,
+          title,
+          body: message,
+          data: {
+            notificationId: String(notification.id),
+            userId: String(userId),
+            type: "LOGIN",
+          },
+        });
+      } catch (pushError) {
+        console.error("Login push notification failed:", pushError.message);
+      }
+    }
+  } catch (error) {
+    // Notification errors must not block a successful login.
+    console.error("Login notification failed:", error.message);
+  }
+};
+
 // --------------------------------------------------
 //   GET Users by User ID (all users,vendor & reseller users)
 // --------------------------------------------------
@@ -645,6 +717,8 @@ const loginUser = async (req, res) => {
     }
 
     delete user.password;
+    // Create notification after successful login.
+    await createAdminLoginNotification(user.user_id);
 
     return res.status(200).json({
       success: true,
@@ -735,6 +809,21 @@ const updateUser = async (req, res) => {
     }
 
     await client.query("COMMIT");
+    // Notify the user who was updated.
+    try {
+      await Notification.createNotification({
+        userId: userId,
+        title: "User Updated Successfully",
+        message: "Your user profile has been updated successfully.",
+        type: "USER",
+        referenceId: null,
+      });
+    } catch (notificationError) {
+      console.error(
+        "User update notification failed:",
+        notificationError.message,
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -782,6 +871,28 @@ const deleteUser = async (req, res) => {
     }
 
     await client.query("COMMIT");
+
+    // ADDED: Notify the user who performed the deletion.
+    // Replace req.body.creatorUserId with the actual logged-in
+    // user's ID if your frontend sends it through another field.
+    try {
+      const creatorUserId = req.body?.creatorUserId;
+
+      if (creatorUserId) {
+        await Notification.createNotification({
+          userId: String(creatorUserId).trim(),
+          title: "User Deleted Successfully",
+          message: `User ${userId} has been deleted successfully.`,
+          type: "USER",
+          referenceId: null,
+        });
+      }
+    } catch (notificationError) {
+      console.error(
+        "User deletion notification failed:",
+        notificationError.message,
+      );
+    }
 
     return res.status(200).json({
       success: true,

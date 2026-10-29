@@ -276,13 +276,6 @@ const createHub = async (hubData) => {
       [hubId, hubName.trim(), primaryPincode, activeValue],
     );
 
-    // try {
-    //   await client.query(
-    //     `UPDATE "pincodeList" SET "HubCode" = $1 WHERE "pincode" = $2`,
-    //     [hubId, primaryPincode],
-    //   );
-    // } catch (err) {}
-
     if (nonPrimaryPincodes.length > 0) {
       let baseRouteCount = 1;
       const lastRouteRes = await client.query(`
@@ -308,13 +301,6 @@ const createHub = async (hubData) => {
         `,
           [routeId, routeName, routePincode, hubId, activeValue],
         );
-
-        try {
-          await client.query(
-            `UPDATE "pincodeList" SET "HubCode" = $1 WHERE "pincode" = $2`,
-            [hubId, routePincode],
-          );
-        } catch (err) {}
       }
     }
 
@@ -332,11 +318,12 @@ const createHub = async (hubData) => {
     client.release();
   }
 };
-
 const updateHub = async (hubId, hubData) => {
   const client = await pool.connect();
+
   try {
     await client.query("BEGIN");
+
     const { hubName: requestedHubName, pincodes, isActive = 1 } = hubData;
 
     const activeValue =
@@ -352,10 +339,17 @@ const updateHub = async (hubId, hubData) => {
 
     const areaName = String(pincodes[0].name ?? "").trim();
     const hubName = areaName || String(requestedHubName ?? "").trim();
-    if (!hubName) throw new Error("Hub name or pincode area name is required");
+
+    if (!hubName) {
+      throw new Error("Hub name or pincode area name is required");
+    }
 
     const primaryPincode = String(pincodes[0].pincode ?? "").trim();
-    if (!primaryPincode) throw new Error("Selected pincode is required");
+
+    if (!primaryPincode) {
+      throw new Error("Selected pincode is required");
+    }
+
     const nonPrimaryPincodes = pincodes.slice(1);
 
     const existingCheck = await client.query(
@@ -363,14 +357,16 @@ const updateHub = async (hubId, hubData) => {
       SELECT h.hubid, h.hubname, h.hubpincode
       FROM hubs h
       LEFT JOIN hubroute hr ON hr.hubid = h.hubid
-      WHERE (h.hubpincode = $1 OR hr.hubroutepincode = $1) AND h.hubid != $2
+      WHERE (h.hubpincode = $1 OR hr.hubroutepincode = $1)
+        AND h.hubid != $2
       LIMIT 1
-    `,
+      `,
       [primaryPincode, hubId],
     );
 
     if (existingCheck.rows.length > 0) {
       const existing = existingCheck.rows[0];
+
       throw new Error(
         `Pincode ${primaryPincode} is already assigned to another hub "${existing.hubname}" (${existing.hubid}).`,
       );
@@ -379,37 +375,35 @@ const updateHub = async (hubId, hubData) => {
     const hubResult = await client.query(
       `
       UPDATE hubs
-      SET hubname = $1, hubpincode = $2, is_active = $3, updated_at = NOW()
+      SET hubname = $1,
+          hubpincode = $2,
+          is_active = $3,
+          updated_at = NOW()
       WHERE hubid = $4
-      RETURNING hubid AS id, hubname AS hub_name, hubpincode AS pincode, is_active, created_at, updated_at
-    `,
-      // [hubName.trim(), primaryPincode, isActive, hubId],
-      [hubName.trim(), primaryPincode, activeValue, hubId],
+      RETURNING hubid AS id, hubname AS hub_name, hubpincode AS pincode,
+                is_active, created_at, updated_at
+      `,
+      [hubName, primaryPincode, activeValue, hubId],
     );
 
-    if (hubResult.rows.length === 0) throw new Error("Hub not found");
+    if (hubResult.rows.length === 0) {
+      throw new Error("Hub not found");
+    }
 
-    try {
-      await client.query(
-        `UPDATE "pincodeList" SET "HubCode" = NULL WHERE "HubCode" = $1`,
-        [hubId],
-      );
-    } catch (e) {}
+    // Remove the hub's existing routes.
     await client.query(`DELETE FROM hubroute WHERE hubid = $1`, [hubId]);
-
-    try {
-      await client.query(
-        `UPDATE "pincodeList" SET "HubCode" = $1 WHERE "pincode" = $2`,
-        [hubId, primaryPincode],
-      );
-    } catch (err) {}
 
     if (nonPrimaryPincodes.length > 0) {
       let baseRouteCount = 1;
+
       const lastRouteRes = await client.query(`
-        SELECT hubrouteid FROM hubroute WHERE hubrouteid ~ '^HR[0-9]+$' 
-        ORDER BY CAST(SUBSTRING(hubrouteid FROM 3) AS INTEGER) DESC LIMIT 1
+        SELECT hubrouteid
+        FROM hubroute
+        WHERE hubrouteid ~ '^HR[0-9]+$'
+        ORDER BY CAST(SUBSTRING(hubrouteid FROM 3) AS INTEGER) DESC
+        LIMIT 1
       `);
+
       if (lastRouteRes.rows.length > 0) {
         baseRouteCount =
           parseInt(lastRouteRes.rows[0].hubrouteid.replace("HR", ""), 10) + 1;
@@ -418,24 +412,26 @@ const updateHub = async (hubId, hubData) => {
       for (let i = 0; i < nonPrimaryPincodes.length; i++) {
         const routeItem = nonPrimaryPincodes[i];
         const routeId = `HR${String(baseRouteCount + i).padStart(3, "0")}`;
+
         const routeName =
           routeItem.name || routeItem.city_name || `${hubName} Route ${i + 1}`;
-        const routePincode = String(routeItem.pincode).trim();
+
+        const routePincode = String(routeItem.pincode ?? "").trim();
+
+        if (!routePincode) {
+          throw new Error(`Pincode is missing for route ${i + 1}`);
+        }
 
         await client.query(
           `
-          INSERT INTO hubroute (hubrouteid, hubroutename, hubroutepincode, hubid, is_active, created_at, updated_at)
+          INSERT INTO hubroute (
+            hubrouteid, hubroutename, hubroutepincode,
+            hubid, is_active, created_at, updated_at
+          )
           VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-        `,
+          `,
           [routeId, routeName, routePincode, hubId, activeValue],
         );
-
-        try {
-          await client.query(
-            `UPDATE "pincodeList" SET "HubCode" = $1 WHERE "pincode" = $2`,
-            [hubId, routePincode],
-          );
-        } catch (err) {}
       }
     }
 
@@ -449,16 +445,113 @@ const updateHub = async (hubId, hubData) => {
   }
 };
 
+// const updateHub = async (hubId, hubData) => {
+//   const client = await pool.connect();
+//   try {
+//     await client.query("BEGIN");
+//     const { hubName: requestedHubName, pincodes, isActive = 1 } = hubData;
+
+//     const activeValue =
+//       isActive === true || isActive === "true"
+//         ? 1
+//         : isActive === false || isActive === "false"
+//           ? 0
+//           : Number(isActive);
+
+//     if (!pincodes || !Array.isArray(pincodes) || pincodes.length === 0) {
+//       throw new Error("At least one pincode must be selected");
+//     }
+
+//     const areaName = String(pincodes[0].name ?? "").trim();
+//     const hubName = areaName || String(requestedHubName ?? "").trim();
+//     if (!hubName) throw new Error("Hub name or pincode area name is required");
+
+//     const primaryPincode = String(pincodes[0].pincode ?? "").trim();
+//     if (!primaryPincode) throw new Error("Selected pincode is required");
+//     const nonPrimaryPincodes = pincodes.slice(1);
+
+//     const existingCheck = await client.query(
+//       `
+//       SELECT h.hubid, h.hubname, h.hubpincode
+//       FROM hubs h
+//       LEFT JOIN hubroute hr ON hr.hubid = h.hubid
+//       WHERE (h.hubpincode = $1 OR hr.hubroutepincode = $1) AND h.hubid != $2
+//       LIMIT 1
+//     `,
+//       [primaryPincode, hubId],
+//     );
+
+//     if (existingCheck.rows.length > 0) {
+//       const existing = existingCheck.rows[0];
+//       throw new Error(
+//         `Pincode ${primaryPincode} is already assigned to another hub "${existing.hubname}" (${existing.hubid}).`,
+//       );
+//     }
+
+//     const hubResult = await client.query(
+//       `
+//       UPDATE hubs
+//       SET hubname = $1, hubpincode = $2, is_active = $3, updated_at = NOW()
+//       WHERE hubid = $4
+//       RETURNING hubid AS id, hubname AS hub_name, hubpincode AS pincode, is_active, created_at, updated_at
+//     `,
+//       // [hubName.trim(), primaryPincode, isActive, hubId],
+//       [hubName.trim(), primaryPincode, activeValue, hubId],
+//     );
+
+//     if (hubResult.rows.length === 0) throw new Error("Hub not found");
+
+//       console.error("CLEAR PINCODE ASSIGNMENT FAILED:", e.message);
+//     }
+
+//     // Delete previous hub routes
+//     await client.query(`DELETE FROM hubroute WHERE hubid = $1`, [hubId]);
+
+//       console.error("ASSIGN PINCODE FAILED:", err.message);
+//     }
+
+//     if (nonPrimaryPincodes.length > 0) {
+//       let baseRouteCount = 1;
+//       const lastRouteRes = await client.query(`
+//         SELECT hubrouteid FROM hubroute WHERE hubrouteid ~ '^HR[0-9]+$'
+//         ORDER BY CAST(SUBSTRING(hubrouteid FROM 3) AS INTEGER) DESC LIMIT 1
+//       `);
+//       if (lastRouteRes.rows.length > 0) {
+//         baseRouteCount =
+//           parseInt(lastRouteRes.rows[0].hubrouteid.replace("HR", ""), 10) + 1;
+//       }
+
+//       for (let i = 0; i < nonPrimaryPincodes.length; i++) {
+//         const routeItem = nonPrimaryPincodes[i];
+//         const routeId = `HR${String(baseRouteCount + i).padStart(3, "0")}`;
+//         const routeName =
+//           routeItem.name || routeItem.city_name || `${hubName} Route ${i + 1}`;
+//         const routePincode = String(routeItem.pincode).trim();
+
+//         await client.query(
+//           `
+//           INSERT INTO hubroute (hubrouteid, hubroutename, hubroutepincode, hubid, is_active, created_at, updated_at)
+//           VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+//         `,
+//           [routeId, routeName, routePincode, hubId, activeValue],
+//         );
+//       }
+//     }
+
+//     await client.query("COMMIT");
+//     return hubResult.rows[0];
+//   } catch (error) {
+//     await client.query("ROLLBACK");
+//     throw error;
+//   } finally {
+//     client.release();
+//   }
+// };
+
 const deleteHub = async (hubId) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    try {
-      await client.query(
-        `UPDATE "pincodeList" SET "HubCode" = NULL WHERE "HubCode" = $1`,
-        [hubId],
-      );
-    } catch (e) {}
     await client.query(`DELETE FROM hubroute WHERE hubid = $1`, [hubId]);
     const result = await client.query(
       `DELETE FROM hubs WHERE hubid = $1 RETURNING hubid AS id`,
