@@ -168,10 +168,13 @@ const AdminUser = {
     return result.rows.map((user) => ({
       user_id: user.customer_user_id,
       username: user.customer_name,
+      first_name: user.customer_first_name,
+      last_name: user.customer_last_name,
       mobile_no: user.customer_mobile,
       email: user.customer_email,
       role: user.customer_role,
       is_active: user.customer_status,
+      created_at: user.created_at,
     }));
   },
 

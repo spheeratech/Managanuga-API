@@ -1,5 +1,37 @@
 const Product = require("../models/Product");
+const Notification = require("../models/Notification");
 
+const notifyProductChange = async (
+  userId,
+  title,
+  message,
+  referenceId = null,
+) => {
+  try {
+    if (typeof userId !== "string" && typeof userId !== "number") {
+      console.warn(
+        "Product notification skipped: invalid user ID",
+        typeof userId,
+      );
+      return;
+    }
+
+    await Notification.createNotification({
+      userId: String(userId),
+      title,
+      message,
+      type: "PRODUCT",
+      referenceId:
+        Number.isInteger(Number(referenceId)) && referenceId !== null
+          ? Number(referenceId)
+          : null,
+    });
+
+    console.log("Product notification created.");
+  } catch (error) {
+    console.error("Product notification failed:", error.message);
+  }
+};
 // GET all products
 const getProducts = async (req, res) => {
   try {
@@ -55,6 +87,12 @@ const createProduct = async (req, res) => {
       message: "Product created successfully",
       data: product,
     });
+    await notifyProductChange(
+      req.body.userId,
+      "Product Created Successfully",
+      `Product ${product.name} has been created successfully.`,
+      product.id,
+    );
   } catch (error) {
     console.error(error);
 
@@ -80,6 +118,12 @@ const updateProduct = async (req, res) => {
       message: "Product updated successfully",
       data: product,
     });
+    await notifyProductChange(
+      req.body.userId,
+      "Product Updated Successfully",
+      `Product ${product.name} has been updated successfully.`,
+      product.id,
+    );
   } catch (error) {
     console.error(error);
 
@@ -105,6 +149,12 @@ const deleteProduct = async (req, res) => {
       message: "Product deleted successfully",
       data: product,
     });
+    await notifyProductChange(
+      req.body.userId,
+      "Product Deleted Successfully",
+      `Product ${product.name} has been deleted successfully.`,
+      null,
+    );
   } catch (error) {
     res.status(500).json({
       success: false,

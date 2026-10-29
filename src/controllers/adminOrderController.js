@@ -4,7 +4,7 @@ const AdminOrder = require("../models/AdminOrder");
 const shiprocketService = require("../services/shiprocketService");
 // const Warehouse = require("../models/Warehouse");
 const { sendSMS } = require("../services/smsService");
-
+const Notification = require("../models/Notification");
 const createAdminOrder = async (req, res) => {
   try {
     const { user_id, productId, quantity, warehouse_id } = req.body || {};
@@ -359,6 +359,52 @@ const verifyAdminOrder = async (req, res) => {
         success: false,
         message: "Order not found",
       });
+    }
+    // --------------------------------
+    // CREATE ORDER ACCEPTANCE NOTIFICATION
+    // --------------------------------
+
+    // --------------------------------
+    // CREATE ORDER ACCEPTANCE NOTIFICATION FOR ADMIN
+    // --------------------------------
+    try {
+      const acceptedByUserId = String(req.body?.acceptedByUserId || "").trim();
+
+      if (!acceptedByUserId) {
+        console.warn(
+          `Admin acceptance notification skipped: acceptedByUserId missing for order ${order.id}`,
+        );
+      } else {
+        // Resolve the customer ID for the notification message.
+        const customerResult = await pool.query(
+          `
+          SELECT user_id
+          FROM public.orders
+          WHERE id = $1::integer
+          LIMIT 1
+          `,
+          [Number(order.id)],
+        );
+
+        const customerUserId = customerResult.rows[0]?.user_id;
+
+        await Notification.createNotification({
+          userId: acceptedByUserId,
+          title: "Order Accepted Successfully",
+          message: `Order ${order.order_id || order.id} for customer ${customerUserId || "Unknown"} has been verified and accepted.`,
+          type: "ORDER_ACCEPTED",
+          referenceId: Number(order.id) || null,
+        });
+
+        console.log(
+          `ORDER ACCEPTANCE NOTIFICATION CREATED: Order ${order.id}, Admin ${acceptedByUserId}`,
+        );
+      }
+    } catch (notificationError) {
+      console.error(
+        `ORDER ACCEPTANCE NOTIFICATION FAILED FOR ORDER ${order.id}:`,
+        notificationError.message,
+      );
     }
     // try {
     //   const customerPhone = existingOrder.customer_phone;
