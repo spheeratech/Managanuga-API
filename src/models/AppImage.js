@@ -1,3 +1,4 @@
+
 const pool = require("../../db");
 
 const getAppImages = async () => {
@@ -10,12 +11,18 @@ const getAppImages = async () => {
       image_type
     FROM app_images
     WHERE is_active = 1
-      AND image_type IN ('LOGO', 'BANNER', 'LOGIN_BG')
+      AND image_type IN (
+        'LOGO',
+        'BANNER',
+        'LOGIN_BG',
+        'categories_image'
+      )
     ORDER BY
       CASE image_type
         WHEN 'LOGO' THEN 1
         WHEN 'BANNER' THEN 2
         WHEN 'LOGIN_BG' THEN 3
+        WHEN 'categories_image' THEN 4
       END,
       id
   `);
