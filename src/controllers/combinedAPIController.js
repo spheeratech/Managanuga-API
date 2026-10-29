@@ -12,6 +12,8 @@ const getCombinedAPI = async (req, res) => {
       });
     }
 
+    
+
     const data = await combinedAPIModel.getCombinedAPI(
       String(userId).trim()
     );
