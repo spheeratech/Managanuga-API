@@ -1,3 +1,4 @@
+
 const pool = require("../../db");
 
 // =====================================================
@@ -30,7 +31,7 @@ const getCartItemDetails = async (cartId, user_id = null) => {
             AND ai.image_type = 'PRODUCT_IMAGE'
             AND ai.is_active = 1
         ),
-        '[]'
+        '[]'::json
       ) AS images,
 
       c.quantity,
@@ -61,13 +62,13 @@ const getCartItemDetails = async (cartId, user_id = null) => {
 
 
 // =====================================================
-// ADD ITEM
+// ADD ITEM — OPTIMIZED SINGLE DATABASE QUERY
 // =====================================================
 const addItem = async (data) => {
   const {
     user_id,
     item_id,
-    quantity,
+    quantity = 1,
   } = data;
 
   if (!user_id) {
@@ -79,70 +80,84 @@ const addItem = async (data) => {
   }
 
   const cleanUserId = String(user_id).trim();
+  const addQuantity = Number(quantity);
 
-  // Check if this user already has this product
-  const existing = await pool.query(
-    `
-    SELECT *
-    FROM cart_items
-    WHERE user_id = $1
-      AND item_id = $2
-    `,
-    [
-      cleanUserId,
-      item_id,
-    ]
-  );
-
-  // ===================================================
-  // ITEM ALREADY EXISTS
-  // ===================================================
-  if (existing.rowCount > 0) {
-    const updated = await pool.query(
-      `
-      UPDATE cart_items
-      SET quantity = quantity + $1
-      WHERE user_id = $2
-        AND item_id = $3
-      RETURNING *
-      `,
-      [
-        quantity,
-        cleanUserId,
-        item_id,
-      ]
-    );
-
-    return await getCartItemDetails(
-      updated.rows[0].id,
-      cleanUserId
-    );
+  if (!Number.isFinite(addQuantity) || addQuantity <= 0) {
+    throw new Error("Quantity must be greater than zero");
   }
 
-  // ===================================================
-  // NEW ITEM
-  // ===================================================
   const result = await pool.query(
     `
-    INSERT INTO cart_items (
-      user_id,
-      item_id,
-      quantity
+    WITH cart_item AS (
+      INSERT INTO cart_items (
+        user_id,
+        item_id,
+        quantity,
+        is_active
+      )
+      VALUES ($1, $2, $3, 1)
+
+      ON CONFLICT (user_id, item_id)
+      WHERE is_active = 1
+
+      DO UPDATE SET
+        quantity = cart_items.quantity + EXCLUDED.quantity
+
+      RETURNING
+        id,
+        user_id,
+        item_id,
+        quantity,
+        created_at
     )
-    VALUES ($1, $2, $3)
-    RETURNING *
+
+    SELECT
+      c.id AS cart_id,
+      c.user_id,
+      c.item_id AS product_id,
+      p.name AS product_name,
+      p.price,
+      p.weight,
+      p.stock,
+
+      COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', ai.id,
+              'image_name', ai.image_name,
+              'url', ai.url,
+              'format', ai.format
+            )
+            ORDER BY ai.id
+          )
+          FROM app_images ai
+          WHERE ai.product_id = p.id
+            AND ai.image_type = 'PRODUCT_IMAGE'
+            AND ai.is_active = 1
+        ),
+        '[]'::json
+      ) AS images,
+
+      c.quantity,
+      (p.price * c.quantity) AS total_price,
+      c.created_at
+
+    FROM cart_item c
+
+    JOIN lkp_products p
+      ON p.id = c.item_id
+
+    WHERE p.is_active = 1
     `,
-    [
-      cleanUserId,
-      item_id,
-      quantity,
-    ]
+    [cleanUserId, item_id, addQuantity]
   );
 
-  return await getCartItemDetails(
-    result.rows[0].id,
-    cleanUserId
-  );
+  if (result.rowCount === 0) {
+    throw new Error("Product not found or inactive");
+  }
+
+  return result.rows[0];
 };
 
 
@@ -183,7 +198,7 @@ const getItems = async (user_id) => {
             AND ai.image_type = 'PRODUCT_IMAGE'
             AND ai.is_active = 1
         ),
-        '[]'
+        '[]'::json
       ) AS images,
 
       c.quantity,
@@ -325,7 +340,7 @@ const getAllItems = async () => {
             AND ai.image_type = 'PRODUCT_IMAGE'
             AND ai.is_active = 1
         ),
-        '[]'
+        '[]'::json
       ) AS images,
 
       c.quantity,
@@ -336,6 +351,7 @@ const getAllItems = async () => {
 
     JOIN lkp_products p
       ON p.id = c.item_id
+
     WHERE c.is_active = 1
       AND p.is_active = 1
 
