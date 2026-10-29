@@ -28,6 +28,7 @@ const appImageRoutes = require("./routes/appImageRoutes");
 const couponRoutes = require("./routes/couponRoutes");
 const faqRoutes = require("./routes/faqRoutes");
 const locationRoutes = require("./routes/locationRoutes");
+const combinedAPIRoutes = require("./routes/combinedAPIRoutes");
 const app = express();
 
 // mobile App APIS
@@ -52,7 +53,7 @@ app.use("/api/legal", legalContentRoutes);
 app.use("/api/faqs", faqRoutes);
 app.use("/api/coupons", couponRoutes);
 app.use("/api/locations", locationRoutes);
-
+app.use("/api/combined", combinedAPIRoutes);
 // Web APP APIs
 app.use("/api/hubs", hubRoutes);
 app.use("/api/admin/users", adminUserRoutes);
