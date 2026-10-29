@@ -3,20 +3,10 @@ const combinedAPIModel = require("../models/combinedAPIModel");
 
 const getCombinedAPI = async (req, res) => {
   try {
-    const userId = req.query.userId;
+    // userId is optional for guest users.
+    const userId = String(req.query.userId ?? "").trim() || null;
 
-    if (!userId || !String(userId).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
-      });
-    }
-
-    
-
-    const data = await combinedAPIModel.getCombinedAPI(
-      String(userId).trim()
-    );
+    const data = await combinedAPIModel.getCombinedAPI(userId);
 
     return res.status(200).json({
       success: true,
