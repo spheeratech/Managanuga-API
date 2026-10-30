@@ -49,23 +49,20 @@ const requestLogger = (req, res, next) => {
   };
 
   res.once("finish", () => {
+    const statusCode = res.statusCode;
+    if (statusCode < 400) {
+      return;
+    }
+
     const durationMs = Math.min(
       Math.round(Number(process.hrtime.bigint() - startedAt) / 1e6),
       2147483647,
     );
-    const statusCode = res.statusCode;
-    const outcome = statusCode < 400 ? "success" : "failure";
     const route =
       typeof req.route?.path === "string"
         ? `${req.baseUrl}${req.route.path}`.slice(0, 512)
         : "<unmatched>";
-    const errorType =
-      req.errorType ||
-      (statusCode >= 500
-        ? "server_error"
-        : statusCode >= 400
-          ? "http_error"
-          : null);
+    const errorType = req.errorType || (statusCode >= 500 ? "server_error" : "http_error");
 
     pool
       .query(
@@ -79,7 +76,7 @@ const requestLogger = (req, res, next) => {
           req.method.slice(0, 16),
           route,
           statusCode,
-          outcome,
+          "failure",
           durationMs,
           errorType,
           req.errorMessage || null,
