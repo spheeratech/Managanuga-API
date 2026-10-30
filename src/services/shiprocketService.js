@@ -4,6 +4,7 @@ const BASE_URL = "https://apiv2.shiprocket.in/v1/external";
 
 let token = null;
 let tokenExpiry = null;
+let loginPromise = null;
 
 const login = async () => {
   // Refresh before the documented 10-day expiry.
@@ -11,29 +12,38 @@ const login = async () => {
     return token;
   }
 
-  const response = await axios.post(
-    `${BASE_URL}/auth/login`,
-    {
-      email: process.env.SHIPROCKET_EMAIL,
-      password: process.env.SHIPROCKET_PASSWORD,
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    },
-  );
+  if (!loginPromise) {
+    loginPromise = axios
+      .post(
+        `${BASE_URL}/auth/login`,
+        {
+          email: process.env.SHIPROCKET_EMAIL,
+          password: process.env.SHIPROCKET_PASSWORD,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      )
+      .then((response) => {
+        if (!response.data.token) {
+          throw new Error("Shiprocket login failed");
+        }
 
-  if (!response.data.token) {
-    throw new Error("Shiprocket login failed");
+        token = response.data.token;
+        tokenExpiry = Date.now() + 9 * 24 * 60 * 60 * 1000;
+
+        console.log("SHIPROCKET LOGIN SUCCESS");
+
+        return token;
+      })
+      .finally(() => {
+        loginPromise = null;
+      });
   }
 
-  token = response.data.token;
-  tokenExpiry = Date.now() + 9 * 24 * 60 * 60 * 1000;
-
-  console.log("SHIPROCKET LOGIN SUCCESS");
-
-  return token;
+  return loginPromise;
 };
 
 const getHeaders = async () => ({

@@ -3,6 +3,7 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
+const { requestLogger, errorHandler } = require("./middleware/requestLogger");
 
 const authRoutes = require("./routes/authRoutes");
 const adminOrderRoutes = require("./routes/adminOrderRoutes");
@@ -30,6 +31,8 @@ const faqRoutes = require("./routes/faqRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const combinedAPIRoutes = require("./routes/combinedAPIRoutes");
 const app = express();
+
+app.use(requestLogger);
 
 // mobile App APIS
 app.use(cors());
@@ -88,4 +91,7 @@ app.get("/test", (req, res) => {
     message: "Main app working",
   });
 });
+
+app.use(errorHandler);
+
 module.exports = app;
