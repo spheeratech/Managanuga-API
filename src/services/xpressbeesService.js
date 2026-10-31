@@ -4,37 +4,47 @@ const BASE_URL = "https://shipment.xpressbees.com/api";
 
 let token = null;
 let tokenExpiry = null;
+let loginPromise = null;
 
 const login = async () => {
   if (token && tokenExpiry && Date.now() < tokenExpiry) {
     return token;
   }
 
-  const response = await axios.post(
-    `${BASE_URL}/users/login`,
-    {
-      email: process.env.XPRESSBEES_EMAIL,
-      password: process.env.XPRESSBEES_PASSWORD,
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }
-  );
+  if (!loginPromise) {
+    loginPromise = axios
+      .post(
+        `${BASE_URL}/users/login`,
+        {
+          email: process.env.XPRESSBEES_EMAIL,
+          password: process.env.XPRESSBEES_PASSWORD,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      )
+      .then((response) => {
+        if (!response.data.status) {
+          throw new Error("Xpressbees login failed");
+        }
 
-  if (!response.data.status) {
-    throw new Error("Xpressbees login failed");
+        token = response.data.data;
+
+        // Token cache for 2 hours
+        tokenExpiry = Date.now() + 2 * 60 * 60 * 1000;
+
+        console.log("✅ XPRESSBEES LOGIN SUCCESS");
+
+        return token;
+      })
+      .finally(() => {
+        loginPromise = null;
+      });
   }
 
-  token = response.data.data;
-
-  // Token cache for 2 hours
-  tokenExpiry = Date.now() + 2 * 60 * 60 * 1000;
-
-  console.log("✅ XPRESSBEES LOGIN SUCCESS");
-
-  return token;
+  return loginPromise;
 };
 const createShipment = async ({ order, address, warehouse }) => {
   const jwt = await login();
@@ -115,4 +125,3 @@ module.exports = {
   createShipment,
   trackShipment,
 };
-
