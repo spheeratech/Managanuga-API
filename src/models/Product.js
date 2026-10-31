@@ -140,67 +140,6 @@ const getProductById = async (id) => {
 };
 
 
-// const createProduct = async (productData) => {
-//   const query = `
-//     INSERT INTO lkp_products (
-//       name,
-//       price,
-//       stock,
-//       keywords
-//     )
-//     VALUES ($1, $2, $3, $4)
-//     RETURNING *;
-//   `;
-
-//   const values = [
-//     productData.name,
-//     productData.price,
-//     productData.stock,
-//     productData.keywords,
-//   ];
-
-//   const result = await pool.query(query, values);
-
-//   return result.rows[0];
-// };
-
-// const updateProduct = async (id, data) => {
-//   const allowedFields = ["name", "price", "stock", "currency", "keywords"];
-
-//   const fields = Object.keys(data).filter((field) =>
-//     allowedFields.includes(field),
-//   );
-
-//   if (fields.length === 0) {
-//     return null;
-//   }
-
-//   const setClause = fields
-//     .map((field, index) => `${field} = $${index + 1}`)
-//     .join(", ");
-
-//   const values = [...fields.map((field) => data[field]), id];
-
-//   const query = `
-//     UPDATE lkp_products
-//     SET ${setClause}
-//     WHERE id = $${fields.length + 1}
-//     RETURNING *;
-//   `;
-
-//   //   const result = await pool.query(query, values);
-
-//   //   return result.rows[0];
-//   // };
-//   const result = await pool.query(query, values);
-
-//   if (result.rows.length === 0) {
-//     return null;
-//   }
-
-//   return getProductById(id);
-// };
-
 const createProduct = async (productData) => {
   const allowedFields = [
     "name",

@@ -98,23 +98,55 @@ const updateCategory = async (id, data) => {
     return null;
   }
 
-  const setClause = fields
-    .map((field, index) => `${field} = $${index + 1}`)
-    .join(", ");
+  const client = await pool.connect();
 
-  const values = [...fields.map((field) => data[field]), id];
+  try {
+    await client.query("BEGIN");
 
-  const result = await pool.query(
-    `
-    UPDATE lkp_categories
-    SET ${setClause}
-    WHERE id = $${fields.length + 1}
-    RETURNING *
-    `,
-    values,
-  );
+    const setClause = fields
+      .map((field, index) => `${field} = $${index + 1}`)
+      .join(", ");
 
-  return result.rows[0];
+    const values = [...fields.map((field) => data[field]), id];
+
+    const result = await client.query(
+      `
+      UPDATE lkp_categories
+      SET ${setClause}
+      WHERE id = $${fields.length + 1}
+      RETURNING *
+      `,
+      values,
+    );
+
+    const updatedCategory = result.rows[0];
+
+    if (!updatedCategory) {
+      await client.query("COMMIT");
+      return null;
+    }
+
+    // If category status was changed, sync its products
+    if (fields.includes("is_active")) {
+      await client.query(
+        `
+        UPDATE lkp_products
+        SET is_active = $1
+        WHERE category_id = $2
+        `,
+        [updatedCategory.is_active, id],
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return updatedCategory;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 // ==========================================
