@@ -255,58 +255,6 @@ async function findActiveHubForPincode(pincode) {
   };
 }
 
-// async function findActiveHubForPincode(pincode) {
-//   const normalizedPincode = String(pincode || "").trim();
-
-//   if (!normalizedPincode) {
-//     throw new Error("Customer delivery pincode is missing.");
-//   }
-
-//   // First priority: match the hub's primary pincode.
-//   let result = await pool.query(
-//     `
-//       SELECT
-//         h.hubid AS id,
-//         h.hubname AS name,
-//         h.hubpincode AS pincode
-//       FROM hubs h
-//       WHERE h.hubpincode = $1
-//         AND h.is_active = 1
-//       LIMIT 1
-//     `,
-//     [normalizedPincode],
-//   );
-
-//   if (result.rows.length > 0) {
-//     return result.rows[0];
-//   }
-
-//   // Second priority: match an additional pincode in hub routes.
-//   result = await pool.query(
-//     `
-//       SELECT
-//         h.hubid AS id,
-//         h.hubname AS name,
-//         h.hubpincode AS pincode
-//       FROM hubroute hr
-//       INNER JOIN hubs h
-//         ON h.hubid = hr.hubid
-//       WHERE hr.hubroutepincode = $1
-//         AND hr.is_active = 1
-//         AND h.is_active = 1
-//       LIMIT 1
-//     `,
-//     [normalizedPincode],
-//   );
-
-//   if (result.rows.length > 0) {
-//     return result.rows[0];
-//   }
-
-//   throw new Error(
-//     `No active hub or hub route is configured for delivery pincode ${normalizedPincode}.`,
-//   );
-// }
 
 /* --------------------------------
    VERIFY / ACCEPT ADMIN ORDER
@@ -406,32 +354,6 @@ const verifyAdminOrder = async (req, res) => {
         notificationError.message,
       );
     }
-    // try {
-    //   const customerPhone = existingOrder.customer_phone;
-
-    //   if (customerPhone) {
-    //     const confirmationMessage = `ManaGanuga: Order ${order.id} confirmed successfully. Thank you for shopping with us.`;
-
-    //     await sendSMS(
-    //       String(customerPhone),
-    //       confirmationMessage,
-    //       process.env.SMS_ORDER_CONFIRMED_TEMPLATE_ID,
-    //     );
-
-    //     console.log(
-    //       `ORDER CONFIRMATION SMS SENT: Order ${order.id} -> ${customerPhone}`,
-    //     );
-    //   } else {
-    //     console.warn(
-    //       `ORDER CONFIRMATION SMS SKIPPED: No mobile number for order ${order.id}`,
-    //     );
-    //   }
-    // } catch (smsError) {
-    //   console.error(
-    //     `ORDER CONFIRMATION SMS FAILED FOR ORDER ${order.id}:`,
-    //     smsError.message,
-    //   );
-    // }
 
     // --------------------------------
     // MANAGANUGA DELIVERY
@@ -465,61 +387,6 @@ const verifyAdminOrder = async (req, res) => {
         throw new Error("Customer pincode is missing");
       }
 
-      // if (!order.warehouse_id) {
-      //   throw new Error("Warehouse is not assigned to this order");
-      // }
-
-      // const warehouse = await Warehouse.getWarehouseById(order.warehouse_id);
-
-      // if (!warehouse) {
-      //   throw new Error(`Warehouse with id ${order.warehouse_id} not found`);
-      // }
-
-      // if (!warehouse.name) {
-      //   throw new Error("Warehouse name is missing");
-      // }
-
-      // const hub = await findActiveHubForPincode(existingOrder.pincode);
-
-      // console.log("SELECTED HUB FOR MANAGANUGA SHIPMENT:", {
-      //   hubId: hub.id,
-      //   // hubName: hub.name,
-      //   hubPincode: hub.pincode,
-      //   customerPincode: existingOrder.pincode,
-      // });
-
-      // // Reuse the existing Shiprocket service interface.
-      // // Shiprocket pickup_location must match a registered pickup location.
-      // // const warehouse = {
-      // //   name: String(hub.name),
-      // // };
-
-      // if (!warehouse.contact_name) {
-      //   throw new Error("Warehouse contact name is missing");
-      // }
-
-      // if (!warehouse.address) {
-      //   throw new Error("Warehouse address is missing");
-      // }
-
-      // if (!warehouse.city) {
-      //   throw new Error("Warehouse city is missing");
-      // }
-
-      // if (!warehouse.state) {
-      //   throw new Error("Warehouse state is missing");
-      // }
-
-      // if (!warehouse.pincode) {
-      //   throw new Error("Warehouse pincode is missing");
-      // }
-
-      // if (!warehouse.phone) {
-      //   throw new Error("Warehouse phone number is missing");
-      // }
-      //  if (!existingOrder.items || existingOrder.items.length === 0) {
-      //   throw new Error("Order items are missing");
-      // }
 
       const hub = await findActiveHubForPincode(existingOrder.pincode);
 
@@ -543,7 +410,6 @@ const verifyAdminOrder = async (req, res) => {
       });
 
       // Find the registered Shiprocket pickup location using
-      // the selected hub's PRIMARY pincode.
       const pickupLocation = await shiprocketService.getPickupLocationByPincode(
         hub.pincode,
       );

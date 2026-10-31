@@ -235,6 +235,7 @@ const getAdminOrders = async () => {
       o.actual_amount AS total_amount,
       COALESCE(o.membership_discount, 0) AS membership_discount,
       COALESCE(o.wallet_claim, 0) AS wallet_claim,
+      COALESCE(o.coupon_discount, 0) AS coupon_discount,
       COALESCE(o.delivery_charge, 0) AS delivery_charge,
       COALESCE(
         o.payable_amount,
@@ -334,92 +335,6 @@ const getAdminOrders = async () => {
   return result.rows;
 };
 
-// const getAdminOrders = async () => {
-//   const result = await pool.query(`
-//     SELECT
-//       o.id,
-//       o.order_id,
-//       o.user_id,
-//       o.address_id,
-//       o.actual_amount AS total_amount,
-//       o.warehouse_id,
-//       o.status,
-//       o.payment_status,
-//       o.tracking_number,
-//       o.courier_name,
-//       o.created_at,
-
-//       -- USER LOGIN DETAILS
-//       ul.username,
-
-//       -- CUSTOMER CONTACT
-//       COALESCE(
-//         NULLIF(TRIM(ua.phone), ''),
-//         NULLIF(TRIM(ul.mobile_no), '')
-//       ) AS customer_phone,
-
-//       -- USER PROFILE DETAILS
-//       ui.first_name,
-//       ui.last_name,
-//       ui.email AS customer_email,
-
-//       -- DELIVERY ADDRESS SAVED WITH THE MOBILE ORDER
-//       COALESCE(
-//         NULLIF(TRIM(ua.full_name), ''),
-//         NULLIF(
-//           TRIM(CONCAT_WS(' ', ui.first_name, ui.last_name)),
-//           ''
-//         ),
-//         NULLIF(TRIM(ul.username), ''),
-//         CONCAT('Customer #', o.user_id)
-//       ) AS customer_name,
-
-//       COALESCE(
-//         NULLIF(
-//           TRIM(CONCAT_WS(
-//             ' ',
-//             NULLIF(TRIM(ua.address_line1), ''),
-//             NULLIF(TRIM(ua.address_line2), '')
-//           )),
-//           ''
-//         ),
-//         NULLIF(TRIM(ui.address), '')
-//       ) AS customer_address,
-
-//       COALESCE(
-//         NULLIF(TRIM(ua.city), ''),
-//         NULLIF(TRIM(ui.city), '')
-//       ) AS customer_city,
-
-//       COALESCE(
-//         NULLIF(TRIM(ua.state), ''),
-//         NULLIF(TRIM(ui.state), '')
-//       ) AS customer_state,
-
-//       COALESCE(
-//         NULLIF(TRIM(ua.postal_code), ''),
-//         NULLIF(TRIM(ui.pincode), '')
-//       ) AS customer_pincode,
-
-//       ua.country AS customer_country
-
-//     FROM public.orders o
-
-//     LEFT JOIN public.user_login ul
-//       ON CAST(o.user_id AS VARCHAR) = CAST(ul.user_id AS VARCHAR)
-
-//     LEFT JOIN public.user_info ui
-//       ON CAST(o.user_id AS VARCHAR) = CAST(ui.user_id AS VARCHAR)
-
-//     LEFT JOIN public.user_address ua
-//       ON ua.id = o.address_id
-//      AND CAST(ua.user_id AS VARCHAR) = CAST(o.user_id AS VARCHAR)
-
-//     ORDER BY o.id DESC
-//   `);
-
-//   return result.rows;
-// };
 
 /* --------------------------------
    GET ADMIN ORDER BY ID

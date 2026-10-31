@@ -506,111 +506,6 @@ const getUsersByUserId = async (req, res) => {
 };
 
 // --------------------------------------------------
-// GET ALL USERS
-// --------------------------------------------------
-// const getAllUsers = async (req, res) => {
-//   try {
-//     const users = await AdminUser.getAllUsers();
-
-//     console.log("=================================");
-//     console.log("USERS FROM DATABASE:");
-//     console.log(JSON.stringify(users, null, 2));
-//     console.log("TOTAL USERS:", users.length);
-//     console.log("=================================");
-
-//     return res.status(200).json({
-//       success: true,
-//       count: users.length,
-//       data: users,
-//     });
-//   } catch (error) {
-//     console.error("Get all users error:", error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch users",
-//       error: error.message,
-//     });
-//   }
-// };
-
-/* --------------------------------------------------
-   GET USERS BY VENDOR OR RESELLER
--------------------------------------------------- */
-// const getUsersByVendorId = async (req, res) => {
-//   try {
-//     const userId = String(
-//       req.query.userId || req.query.vendorUserId || "",
-//     ).trim();
-
-//     if (!userId) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "userId is required",
-//       });
-//     }
-
-//     const users = await AdminUser.getUsersByVendorId(userId);
-
-//     console.log("USERS FOR LOGGED-IN USER:", userId);
-//     console.log("TOTAL USERS:", users.length);
-
-//     return res.status(200).json({
-//       success: true,
-//       count: users.length,
-//       data: users,
-//     });
-//   } catch (error) {
-//     console.error("Get vendor/reseller users error:", error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch users",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// --------------------------------------------------
-// GET USERS BY VENDOR
-// --------------------------------------------------
-// const getUsersByVendorId = async (req, res) => {
-//   try {
-//     const { vendorUserId } = req.query;
-
-//     if (!vendorUserId) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "vendorUserId is required",
-//       });
-//     }
-
-//     const users = await AdminUser.getUsersByVendorId(vendorUserId);
-
-//     console.log("=================================");
-//     console.log("VENDOR USERS FROM DATABASE:");
-//     console.log("VENDOR USER ID:", vendorUserId);
-//     console.log(JSON.stringify(users, null, 2));
-//     console.log("TOTAL VENDOR USERS:", users.length);
-//     console.log("=================================");
-
-//     return res.status(200).json({
-//       success: true,
-//       count: users.length,
-//       data: users,
-//     });
-//   } catch (error) {
-//     console.error("Get vendor users error:", error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch vendor users",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// --------------------------------------------------
 // ACTIVATE / DEACTIVATE USER
 // --------------------------------------------------
 const updateUserStatus = async (req, res) => {
@@ -872,9 +767,6 @@ const deleteUser = async (req, res) => {
 
     await client.query("COMMIT");
 
-    // ADDED: Notify the user who performed the deletion.
-    // Replace req.body.creatorUserId with the actual logged-in
-    // user's ID if your frontend sends it through another field.
     try {
       const creatorUserId = req.body?.creatorUserId;
 

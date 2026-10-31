@@ -1,7 +1,7 @@
-// console.log("APP FILE LOADED");
-
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
+const { uploadDir } = require("./middleware/eventPosterUpload");
 require("dotenv").config();
 
 const authRoutes = require("./routes/authRoutes");
@@ -34,6 +34,7 @@ const app = express();
 // mobile App APIS
 app.use(cors());
 app.use(express.json());
+app.use("/images", express.static(uploadDir));
 app.use("/api/categories", categoryRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
@@ -73,13 +74,13 @@ app.get("/join", (req, res) => {
   if (isAndroid) {
     return res.redirect(
       302,
-      "https://play.google.com/store/apps/details?id=com.apfdcllp.managanuga"
+      "https://play.google.com/store/apps/details?id=com.apfdcllp.managanuga",
     );
   }
 
   return res.redirect(
     302,
-    "https://apps.apple.com/in/app/mana-ganuga/id6796354317"
+    "https://apps.apple.com/in/app/mana-ganuga/id6796354317",
   );
 });
 
