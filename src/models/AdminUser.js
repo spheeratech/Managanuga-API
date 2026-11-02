@@ -119,11 +119,12 @@ const AdminUser = {
         bank_holder_name,
         bank_name,
         contact_person_name,
-        contact_person_mobile
+        contact_person_mobile,
+        referral_benefit
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10, $11, $12, $13, $14, $15, $16
+        $9, $10, $11, $12, $13, $14, $15, $16, $17
       )
       RETURNING *
       `,
@@ -144,6 +145,7 @@ const AdminUser = {
         infoData.bankName || null,
         infoData.contactPersonName || null,
         infoData.contactPersonNumber || null,
+        infoData.referralBenefit ?? null,
       ],
     );
 
@@ -175,9 +177,9 @@ const AdminUser = {
       role: user.customer_role,
       is_active: user.customer_status,
       created_at: user.created_at,
+      subscription: user.subscription || null,
     }));
   },
-
 
   // --------------------------------------------------
   // UPDATE STATUS
@@ -269,8 +271,9 @@ const AdminUser = {
         bank_holder_name = $12,
         bank_name = $13,
         contact_person_name = $14,
-        contact_person_mobile = $15
-        WHERE user_id = $16
+        contact_person_mobile = $15,
+        referral_benefit = $16
+        WHERE user_id = $17
         RETURNING *
       `,
       [
@@ -289,6 +292,7 @@ const AdminUser = {
         data.bankName,
         data.contactPersonName,
         data.contactPersonNumber,
+        data.referralBenefit ?? null,
         userId,
       ],
     );

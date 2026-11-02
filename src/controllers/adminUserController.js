@@ -54,7 +54,7 @@ const createUser = async (req, res) => {
       bankName,
       contactPersonName,
       contactPersonNumber,
-
+      referralBenefit,
       // Creator information sent from frontend
       creatorRole,
       creatorUserId,
@@ -170,7 +170,37 @@ const createUser = async (req, res) => {
         message: "Creator account is inactive",
       });
     }
+    // --------------------------------------------------
+    // VALIDATE REFERRAL BENEFIT
+    // --------------------------------------------------
+    const referralValue =
+      targetRole === "CUSTOMER" ? 5 : Number(referralBenefit);
 
+    if (
+      targetRole === "VENDOR" &&
+      (!Number.isInteger(referralValue) ||
+        referralValue < 10 ||
+        referralValue > 20)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Vendor referral benefit must be a whole number between 10 and 20.",
+      });
+    }
+
+    if (
+      targetRole === "RESELLER" &&
+      (!Number.isInteger(referralValue) ||
+        referralValue < 5 ||
+        referralValue > 15)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Reseller referral benefit must be a whole number between 5 and 15.",
+      });
+    }
     // --------------------------------------------------
     // CHECK USERNAME
     // --------------------------------------------------
@@ -263,6 +293,7 @@ const createUser = async (req, res) => {
         bankName: clean(bankName),
         contactPersonName: clean(contactPersonName),
         contactPersonNumber: clean(contactPersonNumber),
+        referralBenefit: referralValue,
       },
     );
     console.log("========================================");
@@ -286,13 +317,13 @@ const createUser = async (req, res) => {
           bankName: clean(bankName),
           contactPersonName: clean(contactPersonName),
           contactPersonNumber: clean(contactPersonNumber),
+          referralBenefit: referralValue,
         },
         null,
         2,
       ),
     );
     console.log("========================================");
-    await client.query("COMMIT");
     await client.query("COMMIT");
 
     // ADDED: Notify the creator when a user is created.
@@ -376,7 +407,7 @@ const createUser = async (req, res) => {
         pincode: user.info.pincode,
 
         subscription: user.info.subscription,
-
+        referralBenefit: user.info.referral_benefit,
         // Add these lines back into your response object:
         bankAccountNumber: user.info.bank_account_no,
         ifscCode: user.info.ifsc_code,
@@ -656,6 +687,7 @@ const updateUser = async (req, res) => {
       bankName,
       contactPersonName,
       contactPersonNumber,
+      referralBenefit,
     } = req.body;
     console.log("CREATE USER BANK/CONTACT BODY:", {
       bankAccountNumber,
@@ -693,6 +725,7 @@ const updateUser = async (req, res) => {
       bankName: clean(bankName),
       contactPersonName: clean(contactPersonName),
       contactPersonNumber: clean(contactPersonNumber),
+      referralBenefit: Number(referralBenefit),
     });
 
     if (!updatedUser) {
