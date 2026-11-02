@@ -21,6 +21,7 @@ const calculateTotalLitres = (cartItems) =>
     0
   );
 
+
 const getDeliveryRule = async (totalLitres) => {
   const deliveryRuleResult = await pool.query(
     `
@@ -29,7 +30,7 @@ const getDeliveryRule = async (totalLitres) => {
       expected_delivery_days
     FROM delivery_charges
     WHERE is_active = 1
-      AND delivery_cart_count <= $1
+      AND delivery_cart_count::numeric <= $1::numeric
     ORDER BY delivery_cart_count DESC, id DESC
     LIMIT 1
     `,
@@ -37,6 +38,7 @@ const getDeliveryRule = async (totalLitres) => {
   );
 
   const deliveryRule = deliveryRuleResult.rows[0];
+
   if (!deliveryRule) {
     throw new Error(
       `Delivery charge configuration not found for ${totalLitres} litres`
@@ -45,6 +47,7 @@ const getDeliveryRule = async (totalLitres) => {
 
   return deliveryRule;
 };
+
 
 const calculateMembershipBenefits = async (
   userId,
