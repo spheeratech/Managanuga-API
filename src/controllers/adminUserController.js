@@ -193,12 +193,12 @@ const createUser = async (req, res) => {
       targetRole === "RESELLER" &&
       (!Number.isInteger(referralValue) ||
         referralValue < 5 ||
-        referralValue > 15)
+        referralValue > 20)
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "Reseller referral benefit must be a whole number between 5 and 15.",
+          "Reseller referral benefit must be a whole number between 5 and 20.",
       });
     }
     // --------------------------------------------------
@@ -544,10 +544,10 @@ const updateUserStatus = async (req, res) => {
     const { userId } = req.params;
     const { isActive } = req.body;
 
-    if (typeof isActive !== "boolean") {
+    if (isActive !== 0 && isActive !== 1) {
       return res.status(400).json({
         success: false,
-        message: "isActive must be true or false",
+        message: "isActive must be 0 or 1",
       });
     }
 
@@ -704,7 +704,24 @@ const updateUser = async (req, res) => {
         message: "userId is required",
       });
     }
+    // Missing referral benefit is valid for roles that don't use it.
+    const normalizedReferralBenefit =
+      referralBenefit === undefined ||
+      referralBenefit === null ||
+      referralBenefit === ""
+        ? null
+        : Number(referralBenefit);
 
+    // Reject invalid supplied values, but allow null.
+    if (
+      normalizedReferralBenefit !== null &&
+      !Number.isFinite(normalizedReferralBenefit)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "referralBenefit must be a valid number",
+      });
+    }
     await client.query("BEGIN");
 
     const updatedUser = await AdminUser.updateUser(client, userId, {
@@ -725,7 +742,7 @@ const updateUser = async (req, res) => {
       bankName: clean(bankName),
       contactPersonName: clean(contactPersonName),
       contactPersonNumber: clean(contactPersonNumber),
-      referralBenefit: Number(referralBenefit),
+      referralBenefit: normalizedReferralBenefit,
     });
 
     if (!updatedUser) {
