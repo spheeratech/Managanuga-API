@@ -181,37 +181,43 @@ const AdminUser = {
     }));
   },
 
-  // --------------------------------------------------
-  // UPDATE STATUS
-  // --------------------------------------------------
   async updateStatus(userId, isActive) {
     const result = await pool.query(
       `
-      WITH updated AS (
-        UPDATE user_login
-        SET is_active = $1
-        WHERE user_id = $2
-        RETURNING *
-      )
-      SELECT
-        updated.id,
-        updated.user_id,
-        updated.username,
-        updated.mobile_no,
-        updated.password,
-        ur.role_name AS role,
-        updated.is_active,
-        updated.created_by,
-        updated.assigned_by,
-        updated.relationship_type,
-        updated.created_at,
-        updated.fcm_token,
-        updated.deleted_at,
-        updated.deleted_by
-      FROM updated
-      LEFT JOIN lkp_user_roles ur
-        ON ur.id = updated.role
-      `,
+    WITH updated_login AS (
+      UPDATE user_login
+      SET is_active = $1
+      WHERE user_id = $2
+      RETURNING *
+    ),
+    updated_info AS (
+      UPDATE user_info
+      SET is_active = $1
+      WHERE user_id = $2
+      RETURNING user_id, is_active
+    )
+    SELECT
+      updated_login.id,
+      updated_login.user_id,
+      updated_login.username,
+      updated_login.mobile_no,
+      updated_login.password,
+      ur.role_name AS role,
+      updated_login.is_active,
+      updated_login.created_by,
+      updated_login.assigned_by,
+      updated_login.relationship_type,
+      updated_login.created_at,
+      updated_login.fcm_token,
+      updated_login.deleted_at,
+      updated_login.deleted_by,
+      updated_info.is_active AS info_is_active
+    FROM updated_login
+    LEFT JOIN lkp_user_roles ur
+      ON ur.id = updated_login.role
+    LEFT JOIN updated_info
+      ON updated_info.user_id = updated_login.user_id
+    `,
       [isActive, userId],
     );
 
@@ -272,8 +278,9 @@ const AdminUser = {
         bank_name = $13,
         contact_person_name = $14,
         contact_person_mobile = $15,
-        referral_benefit = $16
-        WHERE user_id = $17
+         is_active = COALESCE($16, is_active),
+      referral_benefit = COALESCE($17, referral_benefit)
+    WHERE user_id = $18
         RETURNING *
       `,
       [
@@ -292,6 +299,7 @@ const AdminUser = {
         data.bankName,
         data.contactPersonName,
         data.contactPersonNumber,
+        data.isActive,
         data.referralBenefit ?? null,
         userId,
       ],
