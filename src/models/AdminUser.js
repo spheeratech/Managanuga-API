@@ -178,44 +178,95 @@ const AdminUser = {
       is_active: user.customer_status,
       created_at: user.created_at,
       subscription: user.subscription || null,
+      // Existing profile information
+      address: user.address ?? null,
+      city: user.city ?? null,
+      state: user.state ?? null,
+      pincode: user.pincode ?? null,
+      subscription: user.subscription ?? null,
+
+      bank_account_no: user.bank_account_no ?? null,
+      ifsc_code: user.ifsc_code ?? null,
+      bank_holder_name: user.bank_holder_name ?? null,
+      bank_name: user.bank_name ?? null,
+
+      contact_person_name: user.contact_person_name ?? null,
+      contact_person_number: user.contact_person_mobile ?? null,
+
+      referral_benefit: user.referral_benefit ?? null,
     }));
   },
 
   // --------------------------------------------------
-  // UPDATE STATUS
+  // UPDATE STATUS IN BOTH TABLES
   // --------------------------------------------------
   async updateStatus(userId, isActive) {
-    const result = await pool.query(
-      `
-      WITH updated AS (
-        UPDATE user_login
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      // Update user_login
+      const result = await client.query(
+        `
+        WITH updated AS (
+          UPDATE user_login
+          SET is_active = $1
+          WHERE user_id = $2
+          RETURNING
+            id,
+            user_id,
+            username,
+            mobile_no,
+            role,
+            is_active,
+            created_by,
+            assigned_by,
+            relationship_type,
+            created_at,
+            deleted_at,
+            deleted_by
+        )
+        SELECT
+          updated.*,
+          ur.role_name AS role_name
+        FROM updated
+        LEFT JOIN lkp_user_roles ur
+          ON ur.id = updated.role
+        `,
+        [isActive, userId],
+      );
+
+      if (result.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+
+      // Update user_info
+      await client.query(
+        `
+        UPDATE user_info
         SET is_active = $1
         WHERE user_id = $2
-        RETURNING *
-      )
-      SELECT
-        updated.id,
-        updated.user_id,
-        updated.username,
-        updated.mobile_no,
-        updated.password,
-        ur.role_name AS role,
-        updated.is_active,
-        updated.created_by,
-        updated.assigned_by,
-        updated.relationship_type,
-        updated.created_at,
-        updated.fcm_token,
-        updated.deleted_at,
-        updated.deleted_by
-      FROM updated
-      LEFT JOIN lkp_user_roles ur
-        ON ur.id = updated.role
-      `,
-      [isActive, userId],
-    );
+        `,
+        [isActive, userId],
+      );
 
-    return result.rows[0] || null;
+      await client.query("COMMIT");
+
+      const user = result.rows[0];
+
+      // Return the role name without exposing the numeric role ID
+      user.role = user.role_name;
+      delete user.role_name;
+
+      return user;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 
   // --------------------------------------------------
