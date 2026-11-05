@@ -323,8 +323,9 @@ const AdminUser = {
         bank_name = $13,
         contact_person_name = $14,
         contact_person_mobile = $15,
-        referral_benefit = $16
-        WHERE user_id = $17
+         is_active = COALESCE($16, is_active),
+      referral_benefit = COALESCE($17, referral_benefit)
+    WHERE user_id = $18
         RETURNING *
       `,
       [
@@ -343,6 +344,7 @@ const AdminUser = {
         data.bankName,
         data.contactPersonName,
         data.contactPersonNumber,
+        data.isActive,
         data.referralBenefit ?? null,
         userId,
       ],
