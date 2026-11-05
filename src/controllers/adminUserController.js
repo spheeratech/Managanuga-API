@@ -551,8 +551,10 @@ const updateUserStatus = async (req, res) => {
       });
     }
 
-    const user = await AdminUser.updateStatus(userId, isActive);
+    // Convert boolean to SMALLINT (1 = active, 0 = inactive)
+    const statusValue = isActive ? 1 : 0;
 
+    const user = await AdminUser.updateStatus(userId, statusValue);
     if (!user) {
       return res.status(404).json({
         success: false,
