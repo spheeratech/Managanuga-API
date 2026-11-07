@@ -450,14 +450,86 @@ const getRedeemTransactions = async (req, res) => {
     });
   }
 };
+// Customer Referral Wallet
+const getCustomerReferralWallet = async (req, res) => {
+  try {
+    const userId = req.authenticatedUser.id;
+
+    const wallet = await Wallet.getCustomerReferralWallet(userId);
+
+    return res.status(200).json({
+      success: true,
+      wallet,
+    });
+  } catch (error) {
+    console.error("Customer Referral Wallet Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch customer referral wallet",
+    });
+  }
+};
+
+// Customer Referral Transactions
+const getCustomerReferralTransactions = async (req, res) => {
+  try {
+    const userId = req.authenticatedUser.id;
+
+    const transactions = await Wallet.getCustomerTransactions(
+      userId,
+      "CUSTOMER_REFERRAL"
+    );
+
+    return res.status(200).json({
+      success: true,
+      transactions,
+    });
+  } catch (error) {
+    console.error("Customer Referral Transactions Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch customer referral transactions",
+    });
+  }
+};
+
+const {
+  getCustomerReferralSummary: fetchCustomerReferralSummary,
+} = require("../services/customerReferralService");
+
+const getCustomerReferralSummary = async (req, res) => {
+  try {
+    const userId = req.authenticatedUser.id;
+
+    const summary = await fetchCustomerReferralSummary(userId);
+
+    return res.status(200).json({
+      success: true,
+      summary,
+    });
+  } catch (error) {
+    console.error("Customer Referral Summary Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch customer referral summary",
+    });
+  }
+};
+
 
 
 module.exports = {
   getWallet,
   getWalletTransactions,
+  getCustomerReferralWallet,
+  getCustomerReferralTransactions,
   payOrderWithWallet,
   createRedeemRequest,
   updateRedeemStatus,
   getRedeemStatus,
   getRedeemTransactions,
+  getCustomerReferralSummary,
 };

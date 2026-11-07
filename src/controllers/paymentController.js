@@ -26,6 +26,11 @@ const {
   sendSubscriptionWhatsApp,
 } = require("../services/whatsappService");
 
+const {
+  validateCustomerReferral,
+  creditCustomerReferralReward,
+} = require("../services/customerReferralService");
+
 const roundMoney = (amount) =>
   Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
 
@@ -514,20 +519,21 @@ const verifyPayment = async (req, res) => {
   let verifiedCouponDiscount = 0;
 
   try {
-    const {
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
-      paymentType,
-      membershipPlanId,
-      userId,
-      address_id,
-      buyNow,
-      productId,
-      quantity,
-      referralCode,
-      couponCode,
-    } = req.body;
+   const {
+  razorpay_order_id,
+  razorpay_payment_id,
+  razorpay_signature,
+  paymentType,
+  membershipPlanId,
+  userId,
+  address_id,
+  buyNow,
+  productId,
+  quantity,
+  referralCode,
+  customerReferralId,
+  couponCode,
+} = req.body;
     /* =====================================================
        VERIFY SIGNATURE
     ===================================================== */
@@ -1508,6 +1514,28 @@ if (couponCode && String(couponCode).trim()) {
 
         validatedReferralCode = referrer.referral_user_id;
       }
+
+
+let validatedCustomerReferralId = null;
+
+if (customerReferralId?.trim()) {
+  try {
+    const referralValidation = await validateCustomerReferral({
+      referrerId: customerReferralId,
+      customerId: userId,
+    });
+
+    validatedCustomerReferralId = referralValidation.referrerId;
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
+
+
       /* =================================================
          CREATE MEMBERSHIP
       ================================================= */
@@ -1533,8 +1561,31 @@ if (couponCode && String(couponCode).trim()) {
 
         assignedRole,
 
-        referralCode: validatedReferralCode,
+        referralCode:
+         validatedCustomerReferralId || validatedReferralCode,
       });
+
+
+if (validatedCustomerReferralId) {
+  try {
+    const referralReward = await creditCustomerReferralReward({
+      referrerId: validatedCustomerReferralId,
+      referredCustomerId: customer.login_user_id,
+      membershipId: membership.id,
+      planAmount: Number(plan.plan_price),
+    });
+
+    console.log(
+      `CUSTOMER REFERRAL REWARD: ₹${referralReward.rewardAmount} credited to ${validatedCustomerReferralId}`
+    );
+  } catch (referralRewardError) {
+    console.error(
+      "CUSTOMER REFERRAL REWARD FAILED:",
+      referralRewardError
+    );
+  }
+}
+
 
       /* =================================================
          PAYMENT LOG
