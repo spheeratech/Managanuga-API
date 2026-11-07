@@ -8,6 +8,7 @@ const clean = (val) =>
 const { sendSMS } = require("../services/smsService");
 const crypto = require("crypto");
 const { ROLE_IDS_BY_NAME } = require("../utils/userRoles");
+const generateToken = require("../utils/generateToken");
 const generatePassword = (length = 8) => {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
@@ -645,12 +646,18 @@ const loginUser = async (req, res) => {
     }
 
     delete user.password;
+    // Generate JWT using the PUBLIC ManaGanuga user ID.
+    const token = generateToken({
+      id: user.user_id,
+      mobile: user.mobile_no,
+    });
     // Create notification after successful login.
-    await createAdminLoginNotification(user.user_id);
+    // await createAdminLoginNotification(user.user_id);
 
     return res.status(200).json({
       success: true,
       message: "Login successful",
+      token,
       data: user,
     });
   } catch (error) {
