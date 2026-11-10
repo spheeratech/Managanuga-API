@@ -81,6 +81,50 @@ const creditCustomerReferralReward = async ({
 };
 
 
+const redeemCustomerReferralWithClient = async ({
+  client,
+  userId,
+  amount,
+  referenceType,
+  referenceId,
+}) => {
+  const cleanUserId = normalizeUserId(userId);
+  const cleanAmount = Number(amount);
+
+  if (!client) {
+    throw new Error("Database transaction client is required");
+  }
+
+  if (!cleanUserId) {
+    throw new Error("Customer ID is required");
+  }
+
+  if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) {
+    throw new Error("Invalid referral wallet redemption amount");
+  }
+
+  const normalizedAmount = Math.round(cleanAmount * 100) / 100;
+
+  const result = await Wallet.debitCustomerReferralWalletWithClient(
+    client,
+    {
+      userId: cleanUserId,
+      amount: normalizedAmount,
+      referenceType,
+      referenceId,
+      description: `Referral wallet redemption for ${referenceType} ${referenceId}`,
+    }
+  );
+
+  return {
+    redeemedAmount: normalizedAmount,
+    wallet: result.wallet,
+    transaction: result.transaction,
+    duplicate: result.duplicate,
+  };
+};
+
+
 const getCustomerReferralSummary = async (userId) => {
   const cleanUserId = normalizeUserId(userId);
 
@@ -122,5 +166,6 @@ const getCustomerReferralSummary = async (userId) => {
 module.exports = {
   validateCustomerReferral,
   creditCustomerReferralReward,
+  redeemCustomerReferralWithClient,
   getCustomerReferralSummary,
 };

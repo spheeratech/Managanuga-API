@@ -166,6 +166,9 @@ const applyCustomerWalletTransaction = async (
 ) => {
   const cleanAmount = normalizeAmount(amount);
   const currentBalance = Number(wallet.current_balance);
+  if (!Number.isFinite(currentBalance) || currentBalance < 0) {
+  throw new Error("Invalid customer wallet balance");
+}
 
   if (
     transactionType === "DEBIT" &&
@@ -548,6 +551,109 @@ async getCustomerTransactions(userId, benefitType = null) {
       transactionType: "DEBIT",
     });
   },
+
+
+async debitCustomerReferralWalletWithClient(
+  client,
+  {
+    userId,
+    amount,
+    referenceType,
+    referenceId,
+    description,
+  }
+) {
+  const cleanUserId = String(userId || "").trim();
+  const cleanReferenceType = String(referenceType || "").trim();
+  const cleanReferenceId = String(referenceId || "").trim();
+
+  if (!cleanUserId) {
+    throw new Error("User ID is required");
+  }
+
+  if (!cleanReferenceType || !cleanReferenceId) {
+    throw new Error("Referral wallet transaction reference is required");
+  }
+
+  const cleanAmount = normalizeAmount(amount);
+
+  const referenceMarker = ` [wallet-reference:${JSON.stringify([
+    cleanReferenceType,
+    cleanReferenceId,
+  ])}]`;
+
+const amountMarker =
+  ` [referral-amount:${cleanAmount.toFixed(2)}]`;
+
+const transactionDescription =
+  `${String(description || "Referral wallet redemption").trim()}` +
+  `${amountMarker}${referenceMarker}`;
+
+
+  const wallet = await ensureCustomerWallet(
+    client,
+    cleanUserId,
+    "CUSTOMER_REFERRAL"
+  );
+
+  const existingTransaction = await findCustomerTransaction(
+    client,
+    {
+      userId: cleanUserId,
+      walletId: wallet.wallet_id,
+      transactionType: "DEBIT",
+      benefitType: "CUSTOMER_REFERRAL",
+      referenceMarker,
+      legacyReferenceMarker: null,
+    }
+  );
+
+
+if (existingTransaction) {
+  const existingAmountMatch =
+    existingTransaction.description?.match(
+      /\[referral-amount:([0-9]+(?:\.[0-9]{1,2})?)\]/
+    );
+
+  const existingAmount = existingAmountMatch
+    ? Number(existingAmountMatch[1])
+    : null;
+
+  if (
+    existingAmount === null ||
+    existingAmount !== cleanAmount
+  ) {
+    throw new Error(
+      "Referral wallet redemption amount mismatch"
+    );
+  }
+
+  return {
+    wallet,
+    transaction: existingTransaction,
+    duplicate: true,
+  };
+}
+
+
+  const result = await applyCustomerWalletTransaction(
+    client,
+    wallet,
+    {
+      userId: cleanUserId,
+      amount: cleanAmount,
+      transactionType: "DEBIT",
+      description: transactionDescription,
+      benefitType: "CUSTOMER_REFERRAL",
+    }
+  );
+
+  return {
+    ...result,
+    duplicate: false,
+  };
+},
+
 
   async payOrderWithCustomerWallet(userId, orderIdentifier) {
     const cleanUserId = String(userId || "").trim();
