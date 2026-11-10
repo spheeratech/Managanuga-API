@@ -821,7 +821,8 @@ if (
       `,
           [localPayment.id, userId],
         );
-        if (!membershipResult.rows[0]) {
+        const existingMembership = membershipResult.rows[0];
+        if (!existingMembership) {
           return res.status(409).json({
             success: false,
             message:
@@ -830,14 +831,89 @@ if (
           });
         }
 
-        await creditCustomerReferralRewardForMembership({
-          membershipId: membershipResult.rows[0].id,
-        });
+        const requestedCustomerReferralId =
+          typeof customerReferralId === "string"
+            ? customerReferralId.trim()
+            : "";
+
+        if (requestedCustomerReferralId) {
+          let validatedReferrerId;
+          try {
+            const referralValidation = await validateCustomerReferral({
+              referrerId: requestedCustomerReferralId,
+              customerId: userId,
+            });
+            validatedReferrerId = referralValidation.referrerId;
+          } catch (error) {
+            return res.status(400).json({
+              success: false,
+              message: error.message,
+            });
+          }
+
+          const recordedReferralId = String(
+            existingMembership.referral_code || "",
+          ).trim();
+
+          if (!recordedReferralId) {
+            const referralUpdate = await pool.query(
+              `
+              UPDATE user_memberships
+              SET referral_code = $1,
+                  updated_at = NOW(),
+                  updated_by = $2
+              WHERE id = $3
+                AND user_id = $2
+                AND payment_id = $4
+                AND (referral_code IS NULL OR BTRIM(referral_code) = '')
+              RETURNING referral_code
+              `,
+              [
+                validatedReferrerId,
+                userId,
+                existingMembership.id,
+                localPayment.id,
+              ],
+            );
+
+            if (!referralUpdate.rows[0]) {
+              return res.status(409).json({
+                success: false,
+                message:
+                  "Membership referral attribution changed; retry verification",
+              });
+            }
+            existingMembership.referral_code =
+              referralUpdate.rows[0].referral_code;
+          } else if (
+            recordedReferralId.toUpperCase() !==
+            String(validatedReferrerId).trim().toUpperCase()
+          ) {
+            return res.status(409).json({
+              success: false,
+              message:
+                "A different referral is already recorded for this membership",
+            });
+          }
+        }
+
+        const referralReward =
+          await creditCustomerReferralRewardForMembership({
+            membershipId: existingMembership.id,
+          });
+
+        if (requestedCustomerReferralId && !referralReward) {
+          return res.status(409).json({
+            success: false,
+            message:
+              "The recorded customer referral is not eligible for a reward",
+          });
+        }
 
         return res.json({
           success: true,
           payment: localPayment,
-          membership: membershipResult.rows[0],
+          membership: existingMembership,
           message: "Membership payment was already verified.",
         });
       }

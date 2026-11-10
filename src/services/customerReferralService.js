@@ -215,7 +215,7 @@ const getCustomerReferralSummary = async (userId) => {
       AND uwt.description LIKE
           '%[wallet-reference:["CUSTOMER_REFERRAL","%'
           || um.id::text
-          || '"]}]%'
+          || '"]]%'
     WHERE UPPER(TRIM(um.referral_code)) = $1
       AND um.is_active = 1
     `,
