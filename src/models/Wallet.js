@@ -549,6 +549,84 @@ async getCustomerTransactions(userId, benefitType = null) {
     });
   },
 
+
+async debitCustomerReferralWalletWithClient(
+  client,
+  {
+    userId,
+    amount,
+    referenceType,
+    referenceId,
+    description,
+  }
+) {
+  const cleanUserId = String(userId || "").trim();
+  const cleanReferenceType = String(referenceType || "").trim();
+  const cleanReferenceId = String(referenceId || "").trim();
+
+  if (!cleanUserId) {
+    throw new Error("User ID is required");
+  }
+
+  if (!cleanReferenceType || !cleanReferenceId) {
+    throw new Error("Referral wallet transaction reference is required");
+  }
+
+  const cleanAmount = normalizeAmount(amount);
+
+  const referenceMarker = ` [wallet-reference:${JSON.stringify([
+    cleanReferenceType,
+    cleanReferenceId,
+  ])}]`;
+
+  const transactionDescription =
+    `${String(description || "Referral wallet redemption").trim()}${referenceMarker}`;
+
+  const wallet = await ensureCustomerWallet(
+    client,
+    cleanUserId,
+    "CUSTOMER_REFERRAL"
+  );
+
+  const existingTransaction = await findCustomerTransaction(
+    client,
+    {
+      userId: cleanUserId,
+      walletId: wallet.wallet_id,
+      transactionType: "DEBIT",
+      benefitType: "CUSTOMER_REFERRAL",
+      referenceMarker,
+      legacyReferenceMarker: null,
+    }
+  );
+
+  if (existingTransaction) {
+    return {
+      wallet,
+      transaction: existingTransaction,
+      duplicate: true,
+    };
+  }
+
+  const result = await applyCustomerWalletTransaction(
+    client,
+    wallet,
+    {
+      userId: cleanUserId,
+      amount: cleanAmount,
+      transactionType: "DEBIT",
+      description: transactionDescription,
+      benefitType: "CUSTOMER_REFERRAL",
+    }
+  );
+
+  return {
+    ...result,
+    duplicate: false,
+  };
+},
+
+
   async payOrderWithCustomerWallet(userId, orderIdentifier) {
     const cleanUserId = String(userId || "").trim();
     const cleanOrderIdentifier = String(orderIdentifier || "").trim();

@@ -10,6 +10,7 @@ const shiprocketService = require("../services/shiprocketService");
 const Cart = require("../models/Cart");
 const User = require("../models/User");
 const Coupon = require("../models/Coupon");
+const Wallet = require("../models/Wallet");
 
 const { sendPushNotification } = require("../services/fcmService");
 
@@ -29,6 +30,7 @@ const {
 const {
   validateCustomerReferral,
   creditCustomerReferralReward,
+  redeemCustomerReferralWithClient,
 } = require("../services/customerReferralService");
 
 const roundMoney = (amount) =>
@@ -163,19 +165,53 @@ const createOrder = async (req, res) => {
   try {
     console.log("CREATE ORDER HIT");
     console.log("BODY:", req.body);
-    const {
-      order_id,
-      user_id,
-      paymentType,
-      membershipPlanId,
-      buyNow,
-      productId,
-      quantity,
-      address_id,
+
+const {
+  order_id,
+  user_id,
+  paymentType,
+  membershipPlanId,
+  buyNow,
+  productId,
+  quantity,
+  address_id,
   couponCode,
+  referralBonus = 0,
 } = req.body;
 
+
     const publicUserId = user_id;
+
+
+const requestedReferralBonus = roundMoney(Number(referralBonus));
+
+
+if (requestedReferralBonus > 0) {
+  const referralWallet = await Wallet.getCustomerReferralWallet(
+    publicUserId
+  );
+
+  const referralBalance = Number(referralWallet?.current_balance || 0);
+
+  if (requestedReferralBonus > referralBalance) {
+    return res.status(400).json({
+      success: false,
+      message: "Insufficient referral wallet balance",
+    });
+  }
+}
+
+if (
+  !Number.isFinite(Number(referralBonus)) ||
+  Number(referralBonus) < 0 ||
+  requestedReferralBonus !== Number(referralBonus)
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid referral wallet amount",
+  });
+}
+
 
     if (!publicUserId) {
       return res.status(400).json({
@@ -407,6 +443,31 @@ if (couponCode && String(couponCode).trim()) {
   };
 }
 
+// REFERRAL WALLET REDEMPTION
+if (paymentTypeUpper === "MEMBERSHIP" && requestedReferralBonus > 0) {
+  return res.status(400).json({
+    success: false,
+    message: "Referral wallet cannot be used for membership",
+  });
+}
+
+if (paymentTypeUpper !== "MEMBERSHIP") {
+  const eligibleReferralAmount = roundMoney(
+    Number(payableAmount) - Number(checkoutTotals.deliveryCharge || 0)
+  );
+
+  if (requestedReferralBonus > eligibleReferralAmount) {
+    return res.status(400).json({
+      success: false,
+      message: "Referral amount exceeds eligible order amount",
+    });
+  }
+
+  payableAmount = roundMoney(
+    Number(payableAmount) - requestedReferralBonus
+  );
+}
+
     /* =====================================================
        SAFETY CHECK
     ===================================================== */
@@ -523,6 +584,7 @@ const verifyPayment = async (req, res) => {
   razorpay_order_id,
   razorpay_payment_id,
   razorpay_signature,
+  referralBonus = 0,
   paymentType,
   membershipPlanId,
   userId,
@@ -534,6 +596,30 @@ const verifyPayment = async (req, res) => {
   customerReferralId,
   couponCode,
 } = req.body;
+
+const verifiedReferralBonus = roundMoney(Number(referralBonus));
+
+if (
+  !Number.isFinite(Number(referralBonus)) ||
+  Number(referralBonus) < 0 ||
+  verifiedReferralBonus !== Number(referralBonus)
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid referral wallet amount",
+  });
+}
+
+if (
+  String(paymentType || "ORDER").toUpperCase() === "MEMBERSHIP" &&
+  verifiedReferralBonus > 0
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Referral wallet cannot be used for membership",
+  });
+}
+
     /* =====================================================
        VERIFY SIGNATURE
     ===================================================== */
@@ -1340,7 +1426,10 @@ if (couponCode && String(couponCode).trim()) {
 
   const expectedPayable = Number(localPayment.payable_amount);
   const expectedActual = Number(localPayment.actual_amount);
-  const calculatedPayable = Number(checkoutTotals.payableAmount);
+  const calculatedPayable = roundMoney(
+  Number(checkoutTotals.payableAmount) -
+    verifiedReferralBonus
+);
   const calculatedActual = Number(checkoutTotals.actualAmount);
   if (
     !Number.isFinite(expectedPayable) ||
@@ -2074,6 +2163,7 @@ try {
     });
   }
 
+
 const updatedOrderResult = await verificationLockClient.query(
   `
   UPDATE orders
@@ -2081,6 +2171,7 @@ const updatedOrderResult = await verificationLockClient.query(
     payment_status = 'PAID',
     coupon_discount = $5,
     payable_amount = $6,
+    referral_bonus = $7,
     updated_at = CURRENT_TIMESTAMP,
     updated_by = $1
   WHERE id = $2
@@ -2096,9 +2187,30 @@ const updatedOrderResult = await verificationLockClient.query(
     razorpay_order_id,
     persistedMembershipId,
     Number(verifiedCouponDiscount || 0),
-    Number(checkoutTotals.payableAmount),
+    roundMoney(
+      Number(checkoutTotals.payableAmount) - verifiedReferralBonus
+    ),
+    verifiedReferralBonus,
   ]
 );
+
+// REDEEM CUSTOMER REFERRAL WALLET
+if (verifiedReferralBonus > 0) {
+  const referralRedemption = await redeemCustomerReferralWithClient({
+    client: verificationLockClient,
+    userId,
+    amount: verifiedReferralBonus,
+    referenceType: "ORDER_REFERRAL_REDEMPTION",
+    referenceId: createdOrderId,
+  });
+
+  console.log("CUSTOMER REFERRAL WALLET REDEEMED:", {
+    orderId: createdOrderId,
+    amount: referralRedemption.redeemedAmount,
+    duplicate: referralRedemption.duplicate,
+  });
+}
+
 
 
 if (verifiedCoupon && payment) {
