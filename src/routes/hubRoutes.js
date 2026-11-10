@@ -10,6 +10,8 @@ router.get("/pincodes", hubController.getPincodes);
 
 // Hub CRUD routes
 router.get("/", hubController.getHubs);
+// Area creation
+router.post("/areas", hubController.createArea);
 // router.get("/:id", hubController.getHubById);
 router.post("/", hubController.createHub);
 router.put("/:id", hubController.updateHub);

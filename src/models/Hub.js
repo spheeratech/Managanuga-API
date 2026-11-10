@@ -123,7 +123,73 @@ const getPincodesByCity = async (stateId, distId, cityId) => {
     throw error;
   }
 };
+// 5. CREATE AREA - Insert into lkp_area_pincode
+const createArea = async (areaData) => {
+  const { area_name, pincode, city_id, district_id, state_id, created_by } =
+    areaData;
 
+  // Check whether this pincode already exists
+  const existingArea = await pool.query(
+    `
+    SELECT area_id, area_name, pincode
+    FROM public.lkp_area_pincode
+    WHERE pincode = $1
+    LIMIT 1
+    `,
+    [Number(pincode)],
+  );
+
+  if (existingArea.rows.length > 0) {
+    const error = new Error(
+      `Pincode ${pincode} already exists in the database.`,
+    );
+
+    error.code = "PINCODE_EXISTS";
+    error.existingArea = existingArea.rows[0];
+
+    throw error;
+  }
+
+  // Insert only when the pincode does not exist
+  const result = await pool.query(
+    `
+    INSERT INTO public.lkp_area_pincode (
+      area_id,
+      area_name,
+      pincode,
+      city_id,
+      district_id,
+      state_id,
+      created_by,
+      is_active
+    )
+    VALUES (
+      nextval('public.area_pin_code_area_id_seq'),
+      $1, $2, $3, $4, $5, $6, 1
+    )
+    RETURNING
+      area_id,
+      area_name,
+      pincode,
+      city_id,
+      district_id,
+      state_id,
+      created_by,
+      is_active,
+      created_at
+    `,
+    [
+      area_name,
+      Number(pincode),
+      city_id,
+      district_id,
+      state_id,
+      created_by || null,
+    ],
+  );
+
+  return result.rows[0];
+};
 const getHubs = async () => {
   try {
     const result = await pool.query(`
@@ -411,7 +477,6 @@ const updateHub = async (hubId, hubData) => {
   }
 };
 
-
 const deleteHub = async (hubId) => {
   const client = await pool.connect();
   try {
@@ -436,6 +501,7 @@ module.exports = {
   getDistrictsByState,
   getCitiesByDistrict,
   getPincodesByCity,
+  createArea,
   getHubs,
   getHubById,
   createHub,
