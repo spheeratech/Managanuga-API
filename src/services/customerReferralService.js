@@ -82,11 +82,21 @@ const creditCustomerReferralReward = async ({
 
 const creditCustomerReferralRewardForMembership = async ({
   membershipId,
+  customerId = null,
 }) => {
   const cleanMembershipId = Number(membershipId);
 
   if (!Number.isInteger(cleanMembershipId) || cleanMembershipId <= 0) {
     throw new Error("Valid membership ID is required");
+  }
+
+  const cleanCustomerId =
+    customerId === null || customerId === undefined
+      ? null
+      : String(customerId).trim();
+
+  if (cleanCustomerId === "") {
+    throw new Error("Valid customer ID is required");
   }
 
   const membershipResult = await pool.query(
@@ -106,14 +116,22 @@ const creditCustomerReferralRewardForMembership = async ({
     WHERE um.id = $1
       AND um.referral_code IS NOT NULL
       AND BTRIM(um.referral_code) <> ''
+      AND ($2::text IS NULL OR um.user_id = $2)
     LIMIT 1
     `,
-    [cleanMembershipId]
+    [cleanMembershipId, cleanCustomerId]
   );
 
   const membership = membershipResult.rows[0];
 
   if (!membership) {
+    console.warn(
+      "CUSTOMER_REFERRAL_REWARD_SKIPPED",
+      JSON.stringify({
+        membershipId: cleanMembershipId,
+        reason: "eligible_paid_membership_not_found",
+      })
+    );
     return null;
   }
 
@@ -138,15 +156,33 @@ const creditCustomerReferralRewardForMembership = async ({
     normalizeUserId(referrer.user_id) ===
       normalizeUserId(membership.referred_customer_id)
   ) {
+    console.warn(
+      "CUSTOMER_REFERRAL_REWARD_SKIPPED",
+      JSON.stringify({
+        membershipId: cleanMembershipId,
+        reason: referrer ? "self_referral" : "eligible_referrer_not_found",
+      })
+    );
     return null;
   }
 
-  return creditCustomerReferralReward({
+  const reward = await creditCustomerReferralReward({
     referrerId: referrer.user_id,
     referredCustomerId: membership.referred_customer_id,
     membershipId: membership.membership_id,
     planAmount: Number(membership.plan_amount),
   });
+
+  console.info(
+    "CUSTOMER_REFERRAL_REWARD_PROCESSED",
+    JSON.stringify({
+      membershipId: cleanMembershipId,
+      amount: reward.rewardAmount,
+      duplicate: Boolean(reward.transaction.duplicate),
+    })
+  );
+
+  return reward;
 };
 
 

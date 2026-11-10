@@ -18,6 +18,12 @@ router.post(
 );
 
 router.post(
+  "/memberships/:membershipId/customer-referral/recover",
+  requireAuthenticatedRole(["CUSTOMER", "USER"], "user_id", false),
+  paymentController.recoverMembershipCustomerReferralReward
+);
+
+router.post(
   "/checkout-summary",
   requireAuthenticatedRole(["CUSTOMER", "USER"], "user_id", true),
   paymentController.checkoutSummary
