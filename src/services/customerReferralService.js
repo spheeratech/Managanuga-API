@@ -80,6 +80,75 @@ const creditCustomerReferralReward = async ({
   };
 };
 
+const creditCustomerReferralRewardForMembership = async ({
+  membershipId,
+}) => {
+  const cleanMembershipId = Number(membershipId);
+
+  if (!Number.isInteger(cleanMembershipId) || cleanMembershipId <= 0) {
+    throw new Error("Valid membership ID is required");
+  }
+
+  const membershipResult = await pool.query(
+    `
+    SELECT
+      um.id AS membership_id,
+      um.user_id AS referred_customer_id,
+      um.referral_code,
+      COALESCE(NULLIF(p.actual_amount, 0), sp.plan_price) AS plan_amount
+    FROM user_memberships um
+    INNER JOIN payments p
+      ON p.id = um.payment_id
+      AND UPPER(TRIM(p.status)) = 'PAID'
+      AND UPPER(TRIM(p.payment_type)) = 'MEMBERSHIP'
+    INNER JOIN lkp_subscription_plans sp
+      ON sp.id = um.plan_id
+    WHERE um.id = $1
+      AND um.referral_code IS NOT NULL
+      AND BTRIM(um.referral_code) <> ''
+    LIMIT 1
+    `,
+    [cleanMembershipId]
+  );
+
+  const membership = membershipResult.rows[0];
+
+  if (!membership) {
+    return null;
+  }
+
+  const referrerResult = await pool.query(
+    `
+    SELECT ul.user_id
+    FROM user_login ul
+    INNER JOIN lkp_user_roles ur
+      ON ur.id = ul.role
+    WHERE UPPER(TRIM(ul.user_id)) = UPPER(TRIM($1))
+      AND ul.is_active = 1
+      AND UPPER(TRIM(ur.role_name)) = ANY($2::text[])
+    LIMIT 1
+    `,
+    [membership.referral_code, ["CUSTOMER", "USER"]]
+  );
+
+  const referrer = referrerResult.rows[0];
+
+  if (
+    !referrer ||
+    normalizeUserId(referrer.user_id) ===
+      normalizeUserId(membership.referred_customer_id)
+  ) {
+    return null;
+  }
+
+  return creditCustomerReferralReward({
+    referrerId: referrer.user_id,
+    referredCustomerId: membership.referred_customer_id,
+    membershipId: membership.membership_id,
+    planAmount: Number(membership.plan_amount),
+  });
+};
+
 
 const redeemCustomerReferralWithClient = async ({
   client,
@@ -166,6 +235,7 @@ const getCustomerReferralSummary = async (userId) => {
 module.exports = {
   validateCustomerReferral,
   creditCustomerReferralReward,
+  creditCustomerReferralRewardForMembership,
   redeemCustomerReferralWithClient,
   getCustomerReferralSummary,
 };

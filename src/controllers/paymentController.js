@@ -29,7 +29,7 @@ const {
 
 const {
   validateCustomerReferral,
-  creditCustomerReferralReward,
+  creditCustomerReferralRewardForMembership,
   redeemCustomerReferralWithClient,
 } = require("../services/customerReferralService");
 
@@ -829,6 +829,10 @@ if (
             paymentId: localPayment.id,
           });
         }
+
+        await creditCustomerReferralRewardForMembership({
+          membershipId: membershipResult.rows[0].id,
+        });
 
         return res.json({
           success: true,
@@ -1690,29 +1694,6 @@ if (customerReferralId?.trim()) {
         referralCode:
          validatedCustomerReferralId || validatedReferralCode,
       });
-
-
-if (validatedCustomerReferralId) {
-  try {
-    const referralReward = await creditCustomerReferralReward({
-      referrerId: validatedCustomerReferralId,
-      referredCustomerId: customer.login_user_id,
-      membershipId: membership.id,
-      planAmount: Number(plan.plan_price),
-    });
-
-    console.log(
-      `CUSTOMER REFERRAL REWARD: ₹${referralReward.rewardAmount} credited to ${validatedCustomerReferralId}`
-    );
-  } catch (referralRewardError) {
-    console.error(
-      "CUSTOMER REFERRAL REWARD FAILED:",
-      referralRewardError
-    );
-  }
-}
-
-
       /* =================================================
          PAYMENT LOG
       ================================================= */
@@ -1867,6 +1848,20 @@ if (validatedCustomerReferralId) {
 
       await updateLocalPayment("PAID");
       await createPaymentSuccessNotification();
+
+      if (validatedCustomerReferralId) {
+        const referralReward =
+          await creditCustomerReferralRewardForMembership({
+            membershipId: membership.id,
+          });
+
+        if (referralReward) {
+          console.log(
+            `CUSTOMER REFERRAL REWARD: ₹${referralReward.rewardAmount} credited to ${validatedCustomerReferralId}`,
+          );
+        }
+      }
+
       console.log("===== MEMBERSHIP WALLET BENEFITS =====");
 
       console.log(membershipBenefitResult);
@@ -2828,4 +2823,3 @@ module.exports = {
   checkoutSummary,
   applyCouponToCheckoutTotals,
 };
-
