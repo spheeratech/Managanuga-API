@@ -574,16 +574,15 @@ const verifyPayment = async (req, res) => {
   couponCode,
 } = req.body;
 
-const verifiedReferralBonus = roundMoney(Number(referralBonus));
+const MIN_REFERRAL_REDEMPTION = 100;
 
 if (
-  !Number.isFinite(Number(referralBonus)) ||
-  Number(referralBonus) < 0 ||
-  verifiedReferralBonus !== Number(referralBonus)
+  verifiedReferralBonus > 0 &&
+  verifiedReferralBonus < MIN_REFERRAL_REDEMPTION
 ) {
   return res.status(400).json({
     success: false,
-    message: "Invalid referral wallet amount",
+    message: `Minimum referral wallet redemption is ₹${MIN_REFERRAL_REDEMPTION}`,
   });
 }
 
