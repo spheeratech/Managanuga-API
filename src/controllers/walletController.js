@@ -476,10 +476,8 @@ const getCustomerReferralTransactions = async (req, res) => {
   try {
     const userId = req.authenticatedUser.id;
 
-    const transactions = await Wallet.getCustomerTransactions(
-      userId,
-      "CUSTOMER_REFERRAL"
-    );
+    const transactions =
+      await Wallet.getCustomerReferralTransactions(userId);
 
     return res.status(200).json({
       success: true,
@@ -491,6 +489,45 @@ const getCustomerReferralTransactions = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch customer referral transactions",
+    });
+  }
+};
+
+const getCustomerReferralOrderPaymentBreakdown = async (req, res) => {
+  try {
+    const userId = req.authenticatedUser.id;
+    const { orderId } = req.params;
+
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID is required",
+      });
+    }
+
+    const breakdown =
+      await Wallet.getCustomerReferralOrderPaymentBreakdown(
+        userId,
+        orderId
+      );
+
+    if (!breakdown) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      breakdown,
+    });
+  } catch (error) {
+    console.error("Customer Referral Order Breakdown Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch order payment breakdown",
     });
   }
 };
@@ -526,6 +563,7 @@ module.exports = {
   getWalletTransactions,
   getCustomerReferralWallet,
   getCustomerReferralTransactions,
+  getCustomerReferralOrderPaymentBreakdown,
   payOrderWithWallet,
   createRedeemRequest,
   updateRedeemStatus,
