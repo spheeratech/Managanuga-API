@@ -61,6 +61,63 @@ const getPincodes = async (req, res) => {
   }
 };
 
+const createArea = async (req, res) => {
+  try {
+    const { area_name, pincode, city_id, district_id, state_id, created_by } =
+      req.body;
+
+    if (
+      !area_name?.trim() ||
+      !pincode ||
+      !city_id ||
+      !district_id ||
+      !state_id
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Area name, pincode, state, district and city are required.",
+      });
+    }
+
+    if (!/^\d{6}$/.test(String(pincode))) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid 6-digit pincode.",
+      });
+    }
+
+    const data = await Hub.createArea({
+      area_name: area_name.trim(),
+      pincode: String(pincode),
+      city_id,
+      district_id,
+      state_id,
+      created_by,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Area created successfully.",
+      data,
+    });
+  } catch (error) {
+    console.error("CREATE AREA ERROR:", error);
+
+    if (error.code === "PINCODE_EXISTS") {
+      return res.status(409).json({
+        success: false,
+        message: `Pincode ${req.body.pincode} already exists. Please use another pincode.`,
+        data: error.existingArea,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to create area.",
+    });
+  }
+};
+
 // const getHubs = async (req, res) => {
 //   try {
 //     const data = await Hub.getHubs();
@@ -208,6 +265,7 @@ module.exports = {
   getDistricts,
   getCities,
   getPincodes,
+  createArea,
   getHubs,
   getHubById,
   createHub,
