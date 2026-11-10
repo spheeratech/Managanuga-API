@@ -1393,26 +1393,6 @@ if (
     });
   }
 
-      const expectedPayable = Number(localPayment.payable_amount);
-      const expectedActual = Number(localPayment.actual_amount);
-      const calculatedPayable = Number(checkoutTotals.payableAmount);
-      const calculatedActual = Number(checkoutTotals.actualAmount);
-      if (
-        !Number.isFinite(expectedPayable) ||
-        !Number.isFinite(expectedActual) ||
-        Math.round(expectedPayable * 100) !==
-          Math.round(calculatedPayable * 100) ||
-        Math.round(expectedActual * 100) !== Math.round(calculatedActual * 100)
-      ) {
-        return res.status(409).json({
-          success: false,
-          message:
-            "Captured payment requires reconciliation because checkout totals changed",
-          paymentId: localPayment.id,
-          paymentStatus: localPayment.status,
-        });
-      }
-
       if (calculatedMembershipId !== persistedMembershipId) {
         return res.status(409).json({
           success: false,
@@ -2214,34 +2194,48 @@ if (validatedCustomerReferralId) {
         }
 
 
-const updatedOrderResult = await verificationLockClient.query(
-  `
+
+        if (verifiedReferralBonus > 0) {
+          await redeemCustomerReferralWithClient({
+            client: verificationLockClient,
+            userId,
+            amount: verifiedReferralBonus,
+            referenceType: "ORDER_REFERRAL_REDEMPTION",
+            referenceId: createdOrderId,
+          });
+        }
+
         const updatedOrderResult = await verificationLockClient.query(
           `
-  UPDATE orders
-  SET
-    payment_status = 'PAID',
-    coupon_discount = $5,
-    payable_amount = $6,
-    referral_bonus = $7,
-    updated_at = CURRENT_TIMESTAMP,
-    updated_by = $1
-  WHERE id = $2
-    AND user_id = $1
-    AND tnx_order_id = $3
-    AND is_active = 1
-    AND membership_id IS NOT DISTINCT FROM $4::integer
-  RETURNING *
-  `,
+          UPDATE orders
+          SET
+            payment_status = 'PAID',
+            coupon_discount = $5,
+            payable_amount = $6,
+            referral_bonus = $7,
+            updated_at = CURRENT_TIMESTAMP,
+            updated_by = $1
+          WHERE id = $2
+            AND user_id = $1
+            AND tnx_order_id = $3
+            AND is_active = 1
+            AND membership_id IS NOT DISTINCT FROM $4::integer
+          RETURNING *
+          `,
           [
             userId,
             createdOrderDbId,
             razorpay_order_id,
             persistedMembershipId,
             Number(verifiedCouponDiscount || 0),
-            Number(checkoutTotals.payableAmount),
+            roundMoney(
+              Number(checkoutTotals.payableAmount) - verifiedReferralBonus
+            ),
+            verifiedReferralBonus,
           ],
         );
+
+
 
         if (verifiedCoupon && payment) {
           const couponUserResult = await verificationLockClient.query(
@@ -2835,3 +2829,4 @@ module.exports = {
   checkoutSummary,
   applyCouponToCheckoutTotals,
 };
+
