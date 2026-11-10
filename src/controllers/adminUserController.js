@@ -174,8 +174,16 @@ const createUser = async (req, res) => {
     // --------------------------------------------------
     // VALIDATE REFERRAL BENEFIT
     // --------------------------------------------------
+    // const referralValue =
+    //   targetRole === "CUSTOMER" ? 5 : Number(referralBenefit);
     const referralValue =
-      targetRole === "CUSTOMER" ? 5 : Number(referralBenefit);
+      targetRole === "CUSTOMER"
+        ? 5
+        : referralBenefit === undefined ||
+            referralBenefit === null ||
+            referralBenefit === ""
+          ? null
+          : Number(referralBenefit);
 
     if (
       targetRole === "VENDOR" &&
@@ -609,7 +617,8 @@ const loginUser = async (req, res) => {
         l.is_active,
         i.first_name,
         i.last_name,
-        i.email
+        i.email,
+        i.referral_code
       FROM user_login l
       LEFT JOIN user_info i ON l.user_id = i.user_id
       LEFT JOIN lkp_user_roles ur ON ur.id = l.role
