@@ -13,12 +13,27 @@ const normalizeAmount = (value) => {
   return Math.round(amount * 100) / 100;
 };
 
-const ensureCustomerWallet = async (client, userId) => {
+
+const ensureCustomerWallet = async (
+  client,
+  userId,
+  benefitType = "MEMBERSHIP"
+) => {
+  const allowedBenefitTypes = [
+    "MEMBERSHIP",
+    "CUSTOMER_REFERRAL",
+  ];
+
+  if (!allowedBenefitTypes.includes(benefitType)) {
+    throw new Error("Invalid customer wallet benefit type");
+  }
+
+  // Create the wallet if it does not exist
   await client.query(
     `
-    INSERT INTO user_wallet
-    (
+    INSERT INTO user_wallet (
       user_id,
+      benefit_type,
       wallet_amount,
       prev_balance,
       current_balance,
@@ -28,6 +43,7 @@ const ensureCustomerWallet = async (client, userId) => {
     )
     SELECT
       ul.user_id,
+      $3,
       0,
       0,
       0,
@@ -40,16 +56,18 @@ const ensureCustomerWallet = async (client, userId) => {
     WHERE ul.user_id = $1
       AND ul.is_active = 1
       AND UPPER(TRIM(ur.role_name)) = ANY($2::text[])
-    ON CONFLICT (user_id) DO NOTHING
+    ON CONFLICT DO NOTHING
     `,
-    [userId, CUSTOMER_ROLES]
+    [userId, CUSTOMER_ROLES, benefitType]
   );
 
+  // Select the correct wallet
   const result = await client.query(
     `
     SELECT
       uw.wallet_id,
       uw.user_id,
+      uw.benefit_type,
       uw.wallet_amount,
       uw.prev_balance,
       uw.current_balance,
@@ -61,22 +79,24 @@ const ensureCustomerWallet = async (client, userId) => {
     INNER JOIN lkp_user_roles ur
       ON ur.id = ul.role
     WHERE uw.user_id = $1
+      AND uw.benefit_type = $3
       AND uw.is_active = 1
       AND ul.is_active = 1
       AND UPPER(TRIM(ur.role_name)) = ANY($2::text[])
     FOR UPDATE OF uw
     `,
-    [userId, CUSTOMER_ROLES]
+    [userId, CUSTOMER_ROLES, benefitType]
   );
 
   const wallet = result.rows[0];
 
   if (!wallet) {
-    throw new Error("Customer wallet not found");
+    throw new Error(`${benefitType} wallet not found`);
   }
 
   return wallet;
 };
+
 
 const findCustomerTransaction = async (
   client,
@@ -303,7 +323,16 @@ const createCustomerWalletTransaction = async ({
       [`CUSTOMER_WALLET_TRANSACTION:${idempotencyKey}`]
     );
 
-    const wallet = await ensureCustomerWallet(client, cleanUserId);
+   const walletBenefitType =
+  cleanBenefitType === "CUSTOMER_REFERRAL"
+    ? "CUSTOMER_REFERRAL"
+    : "MEMBERSHIP";
+
+const wallet = await ensureCustomerWallet(
+  client,
+  cleanUserId,
+  walletBenefitType
+);
     const existingTransaction = await findCustomerTransaction(
       client,
       {
@@ -383,7 +412,11 @@ const Wallet = {
 
       try {
         await client.query("BEGIN");
-        const wallet = await ensureCustomerWallet(client, walletUserId);
+        const wallet = await ensureCustomerWallet(
+  client,
+  userId,
+  "MEMBERSHIP"
+);
         await client.query("COMMIT");
 
         return {
@@ -440,48 +473,67 @@ LIMIT 1
     return result.rows[0] || null;
   },
 
-  async getCustomerTransactions(userId) {
-    const walletUserId = String(userId || "").trim();
 
-    if (!walletUserId) {
-      return [];
-    }
 
-    const result = await pool.query(
-      `
-      SELECT
-        wt.id,
-        wt.user_id,
-        wt.wallet_id,
-        wt.transaction_type,
-        wt.description,
-        wt.benefit_amount,
-        wt.benefit_percentage,
-        wt.benefited_by,
-        wt.benefit_type,
-        wt.status,
-        wt.wallet_balance_after,
-        wt.created_at
-      FROM wallet_transactions wt
-      INNER JOIN user_wallet uw
-        ON uw.wallet_id = wt.wallet_id
-       AND uw.user_id = wt.user_id
-      INNER JOIN user_login ul
-        ON ul.user_id = wt.user_id
-      INNER JOIN lkp_user_roles ur
-        ON ur.id = ul.role
-      WHERE wt.user_id = $1
-        AND uw.is_active = 1
-        AND wt.is_active = 1
-        AND ul.is_active = 1
-        AND UPPER(TRIM(ur.role_name)) = ANY($2::text[])
-      ORDER BY wt.created_at DESC, wt.id DESC
-      `,
-     [walletUserId, ["CUSTOMER", "USER", "VENDOR", "RESELLER"]]
+async getCustomerReferralWallet(userId) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const wallet = await ensureCustomerWallet(
+      client,
+      String(userId).trim(),
+      "CUSTOMER_REFERRAL"
     );
 
-    return result.rows;
-  },
+    await client.query("COMMIT");
+
+    return {
+      id: wallet.wallet_id,
+      user_id: wallet.user_id,
+      wallet_type: "CUSTOMER_REFERRAL",
+      balance: wallet.current_balance,
+      wallet_amount: wallet.wallet_amount,
+      prev_balance: wallet.prev_balance,
+      current_balance: wallet.current_balance,
+      created_at: wallet.created_at,
+      updated_at: wallet.updated_at,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+},
+
+
+async getCustomerTransactions(userId, benefitType = null) {
+  const query = `
+    SELECT
+      wt.id,
+      wt.user_id,
+      wt.wallet_id,
+      wt.transaction_type,
+      wt.description,
+      wt.benefit_amount,
+      wt.benefit_percentage,
+      wt.benefited_by,
+      wt.benefit_type,
+      wt.status,
+      wt.wallet_balance_after,
+      wt.created_at
+    FROM wallet_transactions wt
+    WHERE wt.user_id = $1
+      AND ($2::text IS NULL OR wt.benefit_type = $2)
+    ORDER BY wt.created_at DESC
+  `;
+
+  const result = await pool.query(query, [userId, benefitType]);
+
+  return result.rows;
+},
 
   async creditCustomerWallet(details) {
     return createCustomerWalletTransaction({
