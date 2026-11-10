@@ -47,15 +47,125 @@ const AdminUser = {
   // --------------------------------------------------
   // CREATE USER
   // --------------------------------------------------
+  // async createUser(client, loginData, infoData) {
+  //   // Resolve the numeric role ID from lkp_user_roles
+  //   const roleResult = await client.query(
+  //     `
+  //     SELECT id
+  //     FROM lkp_user_roles
+  //     WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
+  //     LIMIT 1
+  //     `,
+  //     [loginData.role],
+  //   );
+
+  //   if (roleResult.rows.length === 0) {
+  //     throw new Error(`Role "${loginData.role}" not found in lkp_user_roles`);
+  //   }
+
+  //   const roleId = roleResult.rows[0].id;
+
+  //   // Store the numeric role ID in the existing role column.
+  //   // Store the ID directly in the role column.
+  //   const loginResult = await client.query(
+  //     `
+  //     INSERT INTO user_login (
+  //       user_id,
+  //       username,
+  //       mobile_no,
+  //       password,
+  //       role,
+  //       is_active,
+  //       created_by,
+  //       assigned_by,
+  //       relationship_type
+  //     )
+  //     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+  //     RETURNING *
+  //     `,
+  //     [
+  //       loginData.userId,
+  //       loginData.username,
+  //       loginData.mobileNo,
+  //       loginData.password,
+  //       roleId,
+  //       loginData.isActive,
+  //       loginData.createdBy || null,
+  //       loginData.assignedBy || null,
+  //       loginData.relationshipType || null,
+  //     ],
+  //   );
+
+  //   console.log("========================================");
+  //   console.log("CREATE USER");
+  //   console.log("Role ID:", roleId);
+  //   console.log("========================================");
+
+  //   const infoResult = await client.query(
+  //     `
+  //     INSERT INTO user_info (
+  //       user_id,
+  //       first_name,
+  //       last_name,
+  //       email,
+  //       address,
+  //       city,
+  //       state,
+  //       pincode,
+  //       subscription,
+  //       mobile,
+  //       bank_account_no,
+  //       ifsc_code,
+  //       bank_holder_name,
+  //       bank_name,
+  //       contact_person_name,
+  //       contact_person_mobile,
+  //       referral_benefit
+  //     )
+  //     VALUES (
+  //       $1, $2, $3, $4, $5, $6, $7, $8,
+  //       $9, $10, $11, $12, $13, $14, $15, $16, $17
+  //     )
+  //     RETURNING *
+  //     `,
+  //     [
+  //       infoData.userId,
+  //       infoData.firstName,
+  //       infoData.lastName || null,
+  //       infoData.email || null,
+  //       infoData.address || null,
+  //       infoData.city || null,
+  //       infoData.state || null,
+  //       infoData.pincode || null,
+  //       infoData.subscription || null,
+  //       infoData.mobile || null,
+  //       infoData.bankAccountNumber || null,
+  //       infoData.ifscCode || null,
+  //       infoData.bankHolderName || null,
+  //       infoData.bankName || null,
+  //       infoData.contactPersonName || null,
+  //       infoData.contactPersonNumber || null,
+  //       infoData.referralBenefit ?? null,
+  //     ],
+  //   );
+
+  //   return {
+  //     login: loginResult.rows[0],
+  //     info: infoResult.rows[0],
+  //   };
+  // },
+  // --------------------------------------------------
+  // CREATE USER USING DATABASE FUNCTION
+  // --------------------------------------------------
   async createUser(client, loginData, infoData) {
-    // Resolve the numeric role ID from lkp_user_roles
+    // 1. Resolve numeric role ID
     const roleResult = await client.query(
       `
-      SELECT id
-      FROM lkp_user_roles
-      WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
-      LIMIT 1
-      `,
+    SELECT id
+    FROM public.lkp_user_roles
+    WHERE UPPER(TRIM(role_name)) = UPPER(TRIM($1))
+    LIMIT 1
+    `,
       [loginData.role],
     );
 
@@ -63,95 +173,66 @@ const AdminUser = {
       throw new Error(`Role "${loginData.role}" not found in lkp_user_roles`);
     }
 
-    const roleId = roleResult.rows[0].id;
+    const roleId = Number(roleResult.rows[0].id);
 
-    // Store the numeric role ID in the existing role column.
-    // Store the ID directly in the role column.
-    const loginResult = await client.query(
+    // 2. Call PostgreSQL function
+    const result = await client.query(
       `
-      INSERT INTO user_login (
-        user_id,
-        username,
-        mobile_no,
-        password,
-        role,
-        is_active,
-        created_by,
-        assigned_by,
-        relationship_type
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING *
-      `,
+    SELECT *
+    FROM public.create_admin_user(
+      $1, $2, $3, $4, $5,
+      $6, $7, $8, $9, $10,
+      $11, $12, $13, $14, $15,
+      $16, $17, $18, $19, $20,
+      $21, $22, $23, $24, $25
+    )
+    `,
       [
-        loginData.userId,
-        loginData.username,
-        loginData.mobileNo,
-        loginData.password,
-        roleId,
-        loginData.isActive,
-        loginData.createdBy || null,
-        loginData.assignedBy || null,
-        loginData.relationshipType || null,
+        loginData.userId, // $1
+        loginData.username, // $2
+        loginData.mobileNo, // $3
+        loginData.password, // $4
+        roleId, // $5
+        loginData.isActive, // $6
+        loginData.createdBy || null, // $7
+        loginData.assignedBy || null, // $8
+        loginData.relationshipType || null, // $9
+
+        infoData.firstName, // $10
+        infoData.lastName || null, // $11
+        infoData.email || null, // $12
+        infoData.address || null, // $13
+        infoData.city || null, // $14
+        infoData.state || null, // $15
+        infoData.pincode || null, // $16
+        infoData.subscription || null, // $17
+        infoData.mobile || null, // $18
+
+        infoData.bankAccountNumber || null, // $19
+        infoData.ifscCode || null, // $20
+        infoData.bankHolderName || null, // $21
+        infoData.bankName || null, // $22
+        infoData.contactPersonName || null, // $23
+        infoData.contactPersonNumber || null, // $24
+        infoData.referralBenefit ?? null, // $25
       ],
     );
 
+    if (!result.rows.length) {
+      throw new Error("User creation function returned no data");
+    }
+
+    const createdUser = result.rows[0];
+
     console.log("========================================");
-    console.log("CREATE USER");
+    console.log("USER CREATED USING DATABASE FUNCTION");
     console.log("Role ID:", roleId);
+    console.log("Referral Code:", createdUser.info_data?.referral_code || null);
     console.log("========================================");
-
-    const infoResult = await client.query(
-      `
-      INSERT INTO user_info (
-        user_id,
-        first_name,
-        last_name,
-        email,
-        address,
-        city,
-        state,
-        pincode,
-        subscription,
-        mobile,
-        bank_account_no,
-        ifsc_code,
-        bank_holder_name,
-        bank_name,
-        contact_person_name,
-        contact_person_mobile,
-        referral_benefit
-      )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10, $11, $12, $13, $14, $15, $16, $17
-      )
-      RETURNING *
-      `,
-      [
-        infoData.userId,
-        infoData.firstName,
-        infoData.lastName || null,
-        infoData.email || null,
-        infoData.address || null,
-        infoData.city || null,
-        infoData.state || null,
-        infoData.pincode || null,
-        infoData.subscription || null,
-        infoData.mobile || null,
-        infoData.bankAccountNumber || null,
-        infoData.ifscCode || null,
-        infoData.bankHolderName || null,
-        infoData.bankName || null,
-        infoData.contactPersonName || null,
-        infoData.contactPersonNumber || null,
-        infoData.referralBenefit ?? null,
-      ],
-    );
 
     return {
-      login: loginResult.rows[0],
-      info: infoResult.rows[0],
+      login: createdUser.login_data,
+      info: createdUser.info_data,
     };
   },
   //------------------------------------------------------
