@@ -130,8 +130,8 @@ const findCustomerTransaction = async (
       AND transaction_type = $3
       AND benefit_type = $4
       AND (
-        ($5 IS NOT NULL AND RIGHT(description, LENGTH($5)) = $5)
-        OR ($6 IS NOT NULL AND RIGHT(description, LENGTH($6)) = $6)
+        ($5::text IS NOT NULL AND RIGHT(description, LENGTH($5::text)) = $5::text)
+        OR ($6::text IS NOT NULL AND RIGHT(description, LENGTH($6::text)) = $6::text)
       )
       AND status = 'COMPLETED'
       AND is_active = 1

@@ -574,6 +574,19 @@ const verifyPayment = async (req, res) => {
   couponCode,
 } = req.body;
 
+const referralBonusAmount = Number(referralBonus);
+if (
+  !Number.isFinite(referralBonusAmount) ||
+  referralBonusAmount < 0 ||
+  roundMoney(referralBonusAmount) !== referralBonusAmount
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid referral wallet amount",
+  });
+}
+const verifiedReferralBonus = roundMoney(referralBonusAmount);
+
 const MIN_REFERRAL_REDEMPTION = 100;
 
 if (
@@ -2626,6 +2639,55 @@ if (customerReferralId?.trim()) {
   }
 };
 
+const recoverMembershipCustomerReferralReward = async (req, res) => {
+  const membershipId = Number(req.params.membershipId);
+  const customerId = String(req.authenticatedUser?.id || "").trim();
+
+  if (!Number.isInteger(membershipId) || membershipId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Valid membership ID is required",
+    });
+  }
+
+  if (!customerId) {
+    return res.status(401).json({
+      success: false,
+      message: "Authenticated customer is required",
+    });
+  }
+
+  try {
+    const reward = await creditCustomerReferralRewardForMembership({
+      membershipId,
+      customerId,
+    });
+
+    if (!reward) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "No reward was credited: the membership must be paid, belong to this customer, and have an eligible customer referrer",
+      });
+    }
+
+    return res.json({
+      success: true,
+      membershipId,
+      rewardAmount: reward.rewardAmount,
+      duplicate: reward.transaction.duplicate,
+      walletBalance: Number(reward.transaction.wallet.current_balance),
+      transactionId: reward.transaction.transaction.id,
+    });
+  } catch (error) {
+    console.error("CUSTOMER REFERRAL REWARD RECOVERY ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Customer referral reward recovery failed",
+    });
+  }
+};
+
 /* =========================================================
    GET PAYMENTS
 ========================================================= */
@@ -2895,6 +2957,7 @@ const checkoutSummary = async (req, res) => {
 module.exports = {
   createOrder,
   verifyPayment,
+  recoverMembershipCustomerReferralReward,
   getPayments,
   checkoutSummary,
   applyCouponToCheckoutTotals,
