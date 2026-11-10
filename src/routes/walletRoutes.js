@@ -13,6 +13,7 @@ const {
   getRedeemTransactions,
   getCustomerReferralWallet,
   getCustomerReferralTransactions,
+  getCustomerReferralOrderPaymentBreakdown,
   getCustomerReferralSummary,
 } = require("../controllers/walletController");
 
@@ -47,6 +48,12 @@ router.get(
   "/customer-referral/summary/:userId",
   requireWalletOwner,
   getCustomerReferralSummary
+);
+
+router.get(
+  "/customer-referral/:userId/orders/:orderId/payment-breakdown",
+  requireWalletOwner,
+  getCustomerReferralOrderPaymentBreakdown
 );
 
 router.get("/redeem/:userId", requireWalletOwner, getRedeemStatus);

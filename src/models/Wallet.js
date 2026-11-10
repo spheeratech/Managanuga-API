@@ -13,6 +13,38 @@ const normalizeAmount = (value) => {
   return Math.round(amount * 100) / 100;
 };
 
+const parseWalletReference = (description) => {
+  const marker = String(description || "").match(
+    /\[wallet-reference:(\[[^\]]*\])\]/
+  );
+
+  if (marker) {
+    try {
+      const [referenceType, referenceId] = JSON.parse(marker[1]);
+      if (typeof referenceType === "string" && referenceId != null) {
+        return {
+          referenceType,
+          referenceId: String(referenceId),
+        };
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  const legacyOrderMarker = String(description || "").match(
+    /\[ORDER:([^\]]+)\]/
+  );
+
+  return legacyOrderMarker
+    ? { referenceType: "ORDER", referenceId: legacyOrderMarker[1] }
+    : null;
+};
+
+const isOrderWalletReference = (referenceType) =>
+  referenceType === "ORDER" ||
+  referenceType === "ORDER_REFERRAL_REDEMPTION";
+
 
 const ensureCustomerWallet = async (
   client,
@@ -511,6 +543,199 @@ async getCustomerReferralWallet(userId) {
   }
 },
 
+async getCustomerReferralTransactions(userId) {
+  const cleanUserId = String(userId || "").trim();
+  if (!cleanUserId) {
+    throw new Error("User ID is required");
+  }
+
+  const result = await pool.query(
+    `
+    SELECT
+      wt.id,
+      wt.user_id,
+      wt.wallet_id,
+      wt.transaction_type,
+      wt.description,
+      wt.benefit_amount,
+      wt.benefit_percentage,
+      wt.benefited_by,
+      wt.benefit_type,
+      wt.status,
+      wt.wallet_balance_after,
+      wt.created_at,
+      wt.is_active
+    FROM wallet_transactions wt
+    WHERE wt.user_id = $1
+      AND wt.benefit_type = 'CUSTOMER_REFERRAL'
+    ORDER BY wt.created_at DESC, wt.id DESC
+    `,
+    [cleanUserId]
+  );
+
+  const transactions = result.rows.map((transaction) => {
+    const reference = parseWalletReference(transaction.description);
+    return {
+      ...transaction,
+      reference_type: reference?.referenceType || null,
+      reference_id: reference?.referenceId || null,
+      order_id:
+        transaction.transaction_type === "DEBIT" &&
+        reference &&
+        isOrderWalletReference(reference.referenceType)
+          ? reference.referenceId
+          : null,
+      transaction_id: transaction.id,
+      amount: transaction.benefit_amount,
+      transaction_date: transaction.created_at,
+      wallet_type: transaction.benefit_type,
+    };
+  });
+
+  const referencedOrderIds = [
+    ...new Set(
+      transactions
+        .filter((transaction) => transaction.order_id)
+        .map((transaction) => transaction.order_id)
+    ),
+  ];
+
+  if (referencedOrderIds.length === 0) {
+    return transactions.map((transaction) => ({
+      ...transaction,
+      order_id: null,
+    }));
+  }
+
+  const ordersResult = await pool.query(
+    `
+    SELECT order_id
+    FROM orders
+    WHERE user_id = $1
+      AND order_id = ANY($2::text[])
+    `,
+    [cleanUserId, referencedOrderIds]
+  );
+  const validOrderIds = new Set(
+    ordersResult.rows.map((order) => order.order_id)
+  );
+
+  return transactions.map((transaction) => ({
+    ...transaction,
+    order_id:
+      transaction.order_id && validOrderIds.has(transaction.order_id)
+        ? transaction.order_id
+        : null,
+  }));
+},
+
+async getCustomerReferralOrderPaymentBreakdown(userId, orderId) {
+  const cleanUserId = String(userId || "").trim();
+  const cleanOrderId = String(orderId || "").trim();
+  if (!cleanUserId || !cleanOrderId) {
+    throw new Error("User ID and order ID are required");
+  }
+
+  const orderResult = await pool.query(
+    `
+    SELECT
+      id,
+      order_id,
+      actual_amount,
+      membership_discount,
+      wallet_claim,
+      delivery_charge,
+      coupon_discount,
+      payable_amount,
+      referral_bonus,
+      payment_status
+    FROM orders
+    WHERE order_id = $1
+      AND user_id = $2
+      AND is_active = 1
+    LIMIT 1
+    `,
+    [cleanOrderId, cleanUserId]
+  );
+  const order = orderResult.rows[0];
+  if (!order) {
+    return null;
+  }
+
+  const paymentsResult = await pool.query(
+    `
+    SELECT
+      id,
+      payment_gateway,
+      method,
+      payment_type,
+      payable_amount,
+      created_at
+    FROM payments
+    WHERE order_id = $1
+      AND created_by = $2
+      AND UPPER(TRIM(status)) = 'PAID'
+      AND is_active = 1
+    ORDER BY created_at, id
+    `,
+    [order.order_id, cleanUserId]
+  );
+
+  const referralTransactions =
+    await Wallet.getCustomerReferralTransactions(cleanUserId);
+  const transactionsByReference = new Map();
+  for (const transaction of referralTransactions) {
+    if (
+      transaction.transaction_type !== "DEBIT" ||
+      transaction.status !== "COMPLETED" ||
+      Number(transaction.is_active ?? 1) !== 1 ||
+      transaction.order_id !== order.order_id
+    ) {
+      continue;
+    }
+
+    const key = `${transaction.reference_type}:${transaction.reference_id}`;
+    if (!transactionsByReference.has(key)) {
+      transactionsByReference.set(key, transaction);
+    }
+  }
+
+  const referralWalletTransactions = [...transactionsByReference.values()];
+  const referralWalletAmountCents = referralWalletTransactions.reduce(
+    (total, transaction) =>
+      total + Math.round(Number(transaction.benefit_amount || 0) * 100),
+    0
+  );
+  const otherPayments = paymentsResult.rows.map((payment) => ({
+    payment_id: payment.id,
+    payment_gateway: payment.payment_gateway,
+    method: payment.method,
+    payment_type: payment.payment_type,
+    amount: Number(payment.payable_amount || 0),
+    transaction_date: payment.created_at,
+  }));
+  const otherPaymentTotalCents = otherPayments.reduce(
+    (total, payment) => total + Math.round(payment.amount * 100),
+    0
+  );
+  const orderTotalCents =
+    Math.round(Number(order.payable_amount || 0) * 100) +
+    Math.round(Number(order.referral_bonus || 0) * 100);
+  const totalAmountPaidCents =
+    referralWalletAmountCents + otherPaymentTotalCents;
+
+  return {
+    order_id: order.order_id,
+    payment_status: order.payment_status,
+    order_total: orderTotalCents / 100,
+    referral_wallet_amount_paid: referralWalletAmountCents / 100,
+    other_payments: otherPayments,
+    other_payment_amount: otherPaymentTotalCents / 100,
+    total_amount_paid: totalAmountPaidCents / 100,
+    remaining_balance:
+      Math.max(0, orderTotalCents - totalAmountPaidCents) / 100,
+  };
+},
 
 async getCustomerTransactions(userId, benefitType = null) {
   const query = `
