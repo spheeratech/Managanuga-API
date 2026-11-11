@@ -1,6 +1,9 @@
 const Wallet = require("../models/Wallet");
 const Notification = require("../models/Notification");
 
+const {
+  CUSTOMER_REFERRAL_MIN_REDEMPTION_AMOUNT,
+} = require("../services/customerReferralService");
 
 /*
  * ============================================================
@@ -460,6 +463,8 @@ const getCustomerReferralWallet = async (req, res) => {
     return res.status(200).json({
       success: true,
       wallet,
+      minimumRedemptionAmount:
+        CUSTOMER_REFERRAL_MIN_REDEMPTION_AMOUNT,
     });
   } catch (error) {
     console.error("Customer Referral Wallet Error:", error);
@@ -570,4 +575,5 @@ module.exports = {
   getRedeemStatus,
   getRedeemTransactions,
   getCustomerReferralSummary,
+
 };
