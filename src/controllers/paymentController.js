@@ -79,6 +79,10 @@ const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
     : originalMembershipDiscount;
   const existingWalletClaim = Number(checkoutTotals.walletClaim || 0);
   const deliveryCharge = Number(checkoutTotals.deliveryCharge || 0);
+  const deliveryDescription =
+  checkoutTotals.deliveryDescription ?? null;
+
+
 
   // Non-members retain the existing post-membership calculation. For members,
   // the accepted coupon replaces the membership discount on the product total.
@@ -2829,8 +2833,15 @@ const checkoutSummary = async (req, res) => {
        MEMBERSHIP BENEFITS
     ===================================================== */
 
-    let checkoutTotals = await calculateCheckoutTotals(publicUserId, cartItems);
-    const membershipBenefits = checkoutTotals.membershipBenefits;
+ let checkoutTotals = await calculateCheckoutTotals(publicUserId, cartItems);
+
+// Total quantity of items in cart
+const totalItemsCount = cartItems.reduce(
+  (total, item) => total + Number(item.quantity || 0),
+  0,
+);
+
+const membershipBenefits = checkoutTotals.membershipBenefits;
     const subtotal = checkoutTotals.subtotal;
     const totalLitres = checkoutTotals.totalLitres;
     const membershipDiscount = checkoutTotals.membershipDiscount;
@@ -2838,6 +2849,25 @@ const checkoutSummary = async (req, res) => {
     const deliveryCharge = checkoutTotals.deliveryCharge;
     const deliverySavings = checkoutTotals.deliverySavings;
     const expectedDeliveryDays = checkoutTotals.expectedDeliveryDays;
+
+
+    /* =====================================================
+   DELIVERY DESCRIPTION
+===================================================== */
+
+const deliveryDescriptionResult = await pool.query(
+  `
+    SELECT description
+    FROM delivery_charges
+    WHERE is_active = 1
+      AND delivery_cart_count = $1
+    LIMIT 1
+  `,
+  [totalItemsCount],
+);
+
+const deliveryDescription =
+  deliveryDescriptionResult.rows[0]?.description ?? null;
 
     const actualAmount = checkoutTotals.actualAmount;
     const payableAmount = Number(checkoutTotals.payableAmount);
@@ -2915,17 +2945,18 @@ const checkoutSummary = async (req, res) => {
        RESPONSE
     ===================================================== */
 
-    return res.json({
-      success: true,
-      cartItems,
-      membershipBenefits: appliedMembershipBenefits,
-      subtotal,
-      actualAmount,
-      membershipDiscount: appliedMembershipDiscount,
-      walletClaim: appliedWalletClaim,
-      deliveryCharge,
-      deliverySavings,
-      expectedDeliveryDays,
+return res.json({
+  success: true,
+  cartItems,
+  membershipBenefits: appliedMembershipBenefits,
+  subtotal,
+  actualAmount,
+  membershipDiscount: appliedMembershipDiscount,
+  walletClaim: appliedWalletClaim,
+  deliveryCharge,
+  deliveryDescription,
+  deliverySavings,
+  expectedDeliveryDays,
       payableAmount: finalPayableAmount,
       coupon: coupon
         ? {
