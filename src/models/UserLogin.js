@@ -188,7 +188,9 @@ const UserLogin = {
             is_active
           )
           VALUES ($1, 0, 0, 0, $1, $1, 1)
-          ON CONFLICT (user_id) DO NOTHING
+          ON CONFLICT (user_id)
+          WHERE benefit_type IS NULL
+          DO NOTHING
           `,
           [createdLoginUser.user_id]
         );
