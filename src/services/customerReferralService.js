@@ -3,6 +3,8 @@ const pool = require("../../db");
 const Wallet = require("../models/Wallet");
 
 const REFERRAL_PERCENTAGE = 10;
+const CUSTOMER_REFERRAL_MIN_REDEMPTION_AMOUNT = 100;
+
 
 const normalizeUserId = (value) =>
   String(value || "").trim().toUpperCase();
@@ -204,9 +206,14 @@ const redeemCustomerReferralWithClient = async ({
     throw new Error("Customer ID is required");
   }
 
-  if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) {
-    throw new Error("Invalid referral wallet redemption amount");
-  }
+if (
+  !Number.isFinite(cleanAmount) ||
+  cleanAmount < CUSTOMER_REFERRAL_MIN_REDEMPTION_AMOUNT
+) {
+  throw new Error(
+    `Minimum referral wallet redemption amount is ₹${CUSTOMER_REFERRAL_MIN_REDEMPTION_AMOUNT}`
+  );
+}
 
   const normalizedAmount = Math.round(cleanAmount * 100) / 100;
 
@@ -258,17 +265,20 @@ const getCustomerReferralSummary = async (userId) => {
     [cleanUserId]
   );
 
-  return {
-    referralId: cleanUserId,
-    referralPercentage: REFERRAL_PERCENTAGE,
-    totalReferrals: Number(result.rows[0].total_referrals),
-    totalEarnings: Number(result.rows[0].total_earnings),
-  };
+return {
+  referralId: cleanUserId,
+  referralPercentage: REFERRAL_PERCENTAGE,
+  minimumRedemptionAmount:
+    CUSTOMER_REFERRAL_MIN_REDEMPTION_AMOUNT,
+  totalReferrals: Number(result.rows[0].total_referrals),
+  totalEarnings: Number(result.rows[0].total_earnings),
+};
 };
 
 
 
 module.exports = {
+  CUSTOMER_REFERRAL_MIN_REDEMPTION_AMOUNT,
   validateCustomerReferral,
   creditCustomerReferralReward,
   creditCustomerReferralRewardForMembership,
