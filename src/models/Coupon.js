@@ -142,6 +142,7 @@ const createTransaction = async (
 };
 
 
+
 const findAvailableForUser = async (userId) => {
   const result = await pool.query(
     `
@@ -153,23 +154,13 @@ const findAvailableForUser = async (userId) => {
       c.coupon_percentage
     FROM coupons c
     WHERE c.is_active = 1
-      AND NOT EXISTS (
-        SELECT 1
-        FROM coupon_transactions ct
-        INNER JOIN user_login ul
-          ON ul.id = ct.user_id
-        WHERE ul.user_id = $1
-          AND ct.coupon_id = c.coupon_id
-          AND ct.status = 'APPLIED'
-          AND ct.is_active = 1
-      )
     ORDER BY c.coupon_percentage DESC
-    `,
-    [String(userId).trim()]
+    `
   );
 
   return result.rows;
 };
+
 
 
 module.exports = {
