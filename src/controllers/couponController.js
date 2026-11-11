@@ -103,6 +103,28 @@ const validateCoupon = async (req, res) => {
   }
 };
 
+const getAvailableCoupons = async (req, res) => {
+  try {
+    const coupons = await Coupon.findAvailableForUser(
+      req.authenticatedUser.id
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: coupons,
+    });
+  } catch (error) {
+    console.error("GET AVAILABLE COUPONS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch available coupons",
+    });
+  }
+};
+
+
 module.exports = {
   validateCoupon,
+  getAvailableCoupons,
 };
