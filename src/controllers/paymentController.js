@@ -2351,35 +2351,35 @@ try {
           });
         }
 
-        const updatedOrderResult = await verificationLockClient.query(
-          `
-          UPDATE orders
-          SET
-            payment_status = 'PAID',
-            coupon_discount = $5,
-            payable_amount = $6,
-            referral_bonus = $7,
-            updated_at = CURRENT_TIMESTAMP,
-            updated_by = $1
-          WHERE id = $2
-            AND user_id = $1
-            AND tnx_order_id = $3
-            AND is_active = 1
-            AND membership_id IS NOT DISTINCT FROM $4::integer
-          RETURNING *
-          `,
-          [
-            userId,
-            createdOrderDbId,
-            razorpay_order_id,
-            persistedMembershipId,
-            Number(verifiedCouponDiscount || 0),
-            roundMoney(
-              Number(checkoutTotals.payableAmount) - verifiedReferralBonus
-            ),
-            verifiedReferralBonus,
-          ],
-        );
+           const updatedOrderResult = await verificationLockClient.query(
+            `
+            UPDATE orders
+            SET
+              payment_status = 'PAID',
+              tnx_order_id = COALESCE(tnx_order_id, $3),
+              coupon_discount = $5,
+              payable_amount = $6,
+              referral_bonus = $7,
+              updated_at = CURRENT_TIMESTAMP,
+              updated_by = $1
+            WHERE id = $2
+              AND user_id = $1
+              AND is_active = 1
+              AND membership_id IS NOT DISTINCT FROM $4::integer
+            RETURNING *
+            `,
+            [
+              userId,
+              createdOrderDbId,
+              razorpay_order_id,
+              persistedMembershipId,
+              Number(verifiedCouponDiscount || 0),
+              roundMoney(
+                Number(checkoutTotals.payableAmount) - verifiedReferralBonus
+              ),
+              verifiedReferralBonus,
+            ],
+          );
 
 
 
@@ -2439,7 +2439,7 @@ try {
       AND created_by = $6
       AND tnx_order_id = $7
       AND payment_gateway = 'RAZORPAY'
-      AND status = 'PENDING'
+      AND status IN ('PENDING', 'CREATED')
       AND membership_id IS NOT DISTINCT FROM $8::integer
     RETURNING *
     `,
