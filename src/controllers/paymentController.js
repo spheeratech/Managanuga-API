@@ -557,6 +557,7 @@ const verifyPayment = async (req, res) => {
   let verificationLockClient = null;
   let verificationLockKey = null;
   let couponVerificationLockKey = null;
+  let membershipTransactionStarted = false;
   let verifiedCoupon = null;
   let verifiedCouponDiscount = 0;
 
@@ -1268,28 +1269,29 @@ if (
       razorpayPayment?.acquirer_data?.upi_transaction_id || null;
 
     let payment = localPayment;
-    const updateLocalPayment = async (status) => {
-      const updatedPayment = await Payment.updateByTnxOrderId(
-        razorpay_order_id,
-        {
-          status,
-          payment_id: paymentId,
-          upi_transaction_id: upiTransactionId,
-          method,
-          actual_amount: localPayment.actual_amount,
-          payable_amount: localPayment.payable_amount,
-          created_by: userId,
-          payment_record_id: localPayment.id,
-        },
-      );
+const updateLocalPayment = async (status, client = null) => {
+  const updatedPayment = await Payment.updateByTnxOrderId(
+    razorpay_order_id,
+    {
+      status,
+      payment_id: paymentId,
+      upi_transaction_id: upiTransactionId,
+      method,
+      actual_amount: localPayment.actual_amount,
+      payable_amount: localPayment.payable_amount,
+      created_by: userId,
+      payment_record_id: localPayment.id,
+    },
+    client,
+  );
 
-      if (!updatedPayment) {
-        throw new Error("Local payment state could not be updated");
-      }
+  if (!updatedPayment) {
+    throw new Error("Local payment state could not be updated");
+  }
 
-      payment = updatedPayment;
-      return payment;
-    };
+  payment = updatedPayment;
+  return payment;
+};
     const createPaymentSuccessNotification = async () => {
       try {
         await Notification.createNotification({
@@ -1762,6 +1764,7 @@ if (customerReferralId?.trim()) {
       /* =================================================
          CREATE MEMBERSHIP
       ================================================= */
+      await verificationLockClient.query("BEGIN");
 
       const membership = await Membership.createMembership({
         userId: userId,
@@ -1786,36 +1789,43 @@ if (customerReferralId?.trim()) {
 
         referralCode:
          validatedCustomerReferralId || validatedReferralCode,
+
+           client: verificationLockClient,
       });
       /* =================================================
          PAYMENT LOG
       ================================================= */
 
-      try {
-        await Payment.createPaymentLog({
-          user_id: userId,
+  
+try {
+  await Payment.createPaymentLog(
+    {
+      user_id: userId,
 
-          order_id: membership.id,
+      order_id: membership.id,
 
-          order_type: "MEMBERSHIP",
+      order_type: "MEMBERSHIP",
 
-          payment_request: {
-            razorpay_order_id,
+      payment_request: {
+        razorpay_order_id,
 
-            razorpay_payment_id,
+        razorpay_payment_id,
 
-            amount: razorpayPayment.amount,
+        amount: razorpayPayment.amount,
 
-            currency: razorpayPayment.currency,
-          },
+        currency: razorpayPayment.currency,
+      },
 
-          payment_response: razorpayPayment,
-        });
+      payment_response: razorpayPayment,
+    },
+    verificationLockClient,
+  );
+
 
         console.log(`Payment log created for membership ${membership.id}`);
-      } catch (paymentLogError) {
-        console.error("MEMBERSHIP PAYMENT LOG ERROR:", paymentLogError.message);
-      }
+    } catch (paymentLogError) {
+  throw paymentLogError;
+}
 
       /* =================================================
          WHATSAPP SUBSCRIPTION
@@ -1912,7 +1922,7 @@ if (customerReferralId?.trim()) {
       ================================================= */
 
       if (validatedReferralCode && assignedBy) {
-        await pool.query(
+       await verificationLockClient.query(
           `
             UPDATE user_login
             SET assigned_by = $1
@@ -1937,9 +1947,12 @@ if (customerReferralId?.trim()) {
         assignedRole: assignedRoleId,
 
         subscriptionAmount: Number(plan.plan_price),
+        
+        client: verificationLockClient,
       });
 
-      await updateLocalPayment("PAID");
+      await updateLocalPayment("PAID", verificationLockClient);
+      await verificationLockClient.query("COMMIT");
       await createPaymentSuccessNotification();
 
       if (validatedCustomerReferralId) {
@@ -2588,6 +2601,18 @@ if (customerReferralId?.trim()) {
       message: "Payment verified successfully.",
     });
   } catch (error) {
+    if (membershipTransactionStarted && verificationLockClient) {
+      try {
+        await verificationLockClient.query("ROLLBACK");
+        membershipTransactionStarted = false;
+      } catch (rollbackError) {
+        console.error(
+          "MEMBERSHIP TRANSACTION ROLLBACK ERROR:",
+          rollbackError.message,
+        );
+      }
+    }
+
     console.error("VERIFY PAYMENT ERROR:", error);
     if (error.code === "COUPON_ALREADY_USED") {
       return res.status(409).json({

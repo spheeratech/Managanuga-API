@@ -448,7 +448,7 @@ const processMembershipBenefit = async ({
     });
   }
 
-  if (suppliedClient !== pool) {
+  if (suppliedClient && suppliedClient !== pool) {
     return processMembershipBenefitInTransaction({
       membershipId,
       customerId,
