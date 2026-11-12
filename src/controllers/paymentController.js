@@ -2424,42 +2424,43 @@ try {
           });
         }
 
+          const updatedPaymentResult = await verificationLockClient.query(
+            `
+            UPDATE payments
+            SET
+              order_id = $1,
+              status = 'PAID',
+              payment_id = $2,
+              method = $3,
+              upi_transaction_id = $4,
+              updated_at = CURRENT_TIMESTAMP,
+              updated_by = $6
+            WHERE id = $5
+              AND status IS DISTINCT FROM 'PAID'
+            RETURNING *
+            `,
+            [
+              createdOrder.order_id,
+              paymentId,
+              method,
+              upiTransactionId,
+              localPayment.id,
+              userId,
+            ],
+          );
 
-const updatedPaymentResult = await verificationLockClient.query(
-  `
-  UPDATE payments
-  SET
-    order_id = $1,
-    status = 'PAID',
-    payment_id = $2,
-    method = $3,
-    upi_transaction_id = $4,
-    updated_at = CURRENT_TIMESTAMP,
-    updated_by = $6
-  WHERE id = $5
-    AND created_by = $6
-    AND payment_gateway = 'RAZORPAY'
-    AND status <> 'PAID'
-  RETURNING *
-  `,
-  [
-    createdOrder.order_id,
-    paymentId,
-    method,
-    upiTransactionId,
-    localPayment.id,
-    userId,
-  ],
-);
-
-
-       if (!updatedOrderResult.rows[0]) {
-  throw new Error("ORDER UPDATE FAILED: no matching order row");
-}
-
-if (!updatedPaymentResult.rows[0]) {
-  throw new Error("PAYMENT UPDATE FAILED: no matching payment row");
-}
+          if (!updatedPaymentResult.rows[0]) {
+            const currentPaymentCheck = await verificationLockClient.query(
+              `SELECT id, status, created_by, payment_gateway, tnx_order_id FROM payments WHERE id = $1`,
+              [localPayment?.id]
+            );
+            console.error("PAYMENT ROW MISMATCH DEBUG:", {
+              localPaymentId: localPayment?.id,
+              userId,
+              actualDbRow: currentPaymentCheck.rows[0] || "ROW_NOT_FOUND",
+            });
+            throw new Error("PAYMENT UPDATE FAILED: no matching payment row");
+          }
 
         await verificationLockClient.query("COMMIT");
         createdOrder = updatedOrderResult.rows[0];
