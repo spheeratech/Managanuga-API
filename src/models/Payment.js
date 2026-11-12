@@ -199,7 +199,34 @@ const linkPaymentToOrder = async ({
 const createPaymentLog = async (data, suppliedClient = null) => {
   const db = suppliedClient || pool;
 
-  const result = await db.query(
+  const values = [
+    data.user_id,
+    data.order_id,
+    data.order_type,
+    data.payment_request || null,
+    data.payment_response || null,
+  ];
+
+  const updateResult = await db.query(
+    `
+    UPDATE payments_log
+    SET
+      user_id = $1,
+      payment_request = $4,
+      payment_response = $5,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE order_type = $3
+      AND order_id = $2
+    RETURNING *
+    `,
+    values
+  );
+
+  if (updateResult.rows.length > 0) {
+    return updateResult.rows[0];
+  }
+
+  const insertResult = await db.query(
     `
     INSERT INTO payments_log
     (
@@ -209,27 +236,14 @@ const createPaymentLog = async (data, suppliedClient = null) => {
       payment_request,
       payment_response
     )
-    VALUES
-    ($1, $2, $3, $4, $5)
-    ON CONFLICT (order_type, order_id)
-    DO UPDATE SET
-      payment_request = EXCLUDED.payment_request,
-      payment_response = EXCLUDED.payment_response,
-      updated_at = CURRENT_TIMESTAMP
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING *
     `,
-    [
-      data.user_id,
-      data.order_id,
-      data.order_type,
-      data.payment_request || null,
-      data.payment_response || null,
-    ]
+    values
   );
 
-  return result.rows[0];
+  return insertResult.rows[0];
 };
-
 
 
 module.exports = {
