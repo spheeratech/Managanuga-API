@@ -259,7 +259,7 @@ const getAdminOrders = async () => {
       o.tracking_number,
       o.courier_name,
       o.created_at,
-
+      o.delivery_method,
       ul.username,
 
       COALESCE(
@@ -334,7 +334,6 @@ const getAdminOrders = async () => {
 
   return result.rows;
 };
-
 
 /* --------------------------------
    GET ADMIN ORDER BY ID
@@ -599,19 +598,42 @@ const deleteAllAdminOrders = async () => {
    VERIFY / ACCEPT ADMIN ORDER
 -------------------------------- */
 
+// const verifyAdminOrder = async (
+//   id,
+//   { status = "PROCESSING", delivery_method },
+// ) => {
+//   const result = await pool.query(
+//     `
+//     UPDATE orders
+//     SET
+//       status = $1,
+//        admin_verified = TRUE,
+//        admin_accepted = TRUE,
+//       delivery_method = $2
+//     WHERE id = $3::integer
+//     RETURNING *
+//     `,
+//     [status, delivery_method, Number(id)],
+//   );
+
+//   return result.rows[0] || null;
+// };
+
 const verifyAdminOrder = async (
   id,
   { status = "PROCESSING", delivery_method },
 ) => {
   const result = await pool.query(
     `
-    UPDATE orders
+    UPDATE public.orders
     SET
       status = $1,
-       admin_verified = TRUE,
-       admin_accepted = TRUE,
+      admin_verified = TRUE,
+      admin_accepted = TRUE,
       delivery_method = $2
     WHERE id = $3::integer
+      AND COALESCE(admin_verified, FALSE) = FALSE
+      AND tracking_number IS NULL
     RETURNING *
     `,
     [status, delivery_method, Number(id)],
@@ -639,7 +661,35 @@ const updateShipmentDetails = async (id, { tracking_number, courier_name }) => {
 
   return result.rows[0];
 };
+/* --------------------------------
+   SYNC SHIPROCKET CANCELLATION
+-------------------------------- */
 
+const updateShiprocketCancellation = async (id) => {
+  const result = await pool.query(
+    `
+    UPDATE public.orders
+    SET status = 'CANCELLED'
+    WHERE id = $1::integer
+      AND UPPER(
+        REPLACE(
+          REPLACE(TRIM(COALESCE(delivery_method, '')), ' ', '_'),
+          '-',
+          '_'
+        )
+      ) IN ('MANAGANUGA', 'MANA_GANUGA')
+      AND UPPER(TRIM(COALESCE(status, ''))) NOT IN (
+        'DELIVERED',
+        'RETURNED',
+        'REFUNDED'
+      )
+    RETURNING id, status, delivery_method
+    `,
+    [Number(id)],
+  );
+
+  return result.rows[0] || null;
+};
 /* --------------------------------
    EXPORTS
 -------------------------------- */
@@ -653,4 +703,5 @@ module.exports = {
   deleteAllAdminOrders,
   verifyAdminOrder,
   updateShipmentDetails,
+  updateShiprocketCancellation,
 };
