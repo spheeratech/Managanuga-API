@@ -300,18 +300,29 @@ const processMembershipBenefitInTransaction = async ({
       );
     }
 
-    // Create the wallet only if this user does not already have one.
-    await client.query(
-      `
-      INSERT INTO user_wallet
-        (user_id, wallet_amount, prev_balance, current_balance,
-         created_at, updated_at, created_by, is_active)
-      VALUES ($1, 0, 0, 0, NOW(), NOW(), $2, 1)
-      ON CONFLICT (user_id) DO NOTHING
-      `,
-      [beneficiaryId, cleanCustomerId]
-    );
+   // Create the wallet only if this user does not already have one.
+const existingWallet = await client.query(
+  `
+  SELECT wallet_id
+  FROM user_wallet
+  WHERE user_id = $1
+    AND is_active = 1
+  LIMIT 1
+  `,
+  [beneficiaryId]
+);
 
+if (existingWallet.rows.length === 0) {
+  await client.query(
+    `
+    INSERT INTO user_wallet
+      (user_id, wallet_amount, prev_balance, current_balance,
+       created_at, updated_at, created_by, is_active)
+    VALUES ($1, 0, 0, 0, NOW(), NOW(), $2, 1)
+    `,
+    [beneficiaryId, cleanCustomerId]
+  );
+}
     // Lock the wallet row before checking and updating its balance.
     const walletResult = await client.query(
       `
