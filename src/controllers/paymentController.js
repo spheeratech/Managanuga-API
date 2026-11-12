@@ -1504,7 +1504,12 @@ const updateLocalPayment = async (status, client = null) => {
    MEMBERSHIP PAYMENT
 ===================================================== */
 
-    if ((paymentType || "").toUpperCase() === "MEMBERSHIP") {
+    if (!plan) {
+  return res.status(404).json({
+    success: false,
+    message: "Membership plan not found",
+  });
+}
       const planResult = await pool.query(
         `
         SELECT *
