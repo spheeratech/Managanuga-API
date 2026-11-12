@@ -2455,9 +2455,13 @@ try {
           ],
         );
 
-        if (!updatedOrderResult.rows[0] || !updatedPaymentResult.rows[0]) {
-          throw new Error("Order and captured payment could not be reconciled");
-        }
+       if (!updatedOrderResult.rows[0]) {
+  throw new Error("ORDER UPDATE FAILED: no matching order row");
+}
+
+if (!updatedPaymentResult.rows[0]) {
+  throw new Error("PAYMENT UPDATE FAILED: no matching payment row");
+}
 
         await verificationLockClient.query("COMMIT");
         createdOrder = updatedOrderResult.rows[0];
