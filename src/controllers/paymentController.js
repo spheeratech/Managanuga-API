@@ -1536,16 +1536,6 @@ const updateLocalPayment = async (status, client = null) => {
       paymentStatus: localPayment.status,
     });
   }
-
-      if (calculatedMembershipId !== persistedMembershipId) {
-        return res.status(409).json({
-          success: false,
-          message:
-            "Captured payment requires reconciliation because the selected membership no longer matches the payment",
-          paymentId: localPayment.id,
-          paymentStatus: localPayment.status,
-        });
-      }
     }
 
     /* =====================================================
