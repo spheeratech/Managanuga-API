@@ -758,7 +758,7 @@ if (
    order payable amount.
 ===================================================== */
 
-\const razorpayAmountPaise = Number(razorpayPayment.amount);
+const razorpayAmountPaise = Number(razorpayPayment.amount);
 const razorpayAmount = razorpayAmountPaise / 100;
 
 const expectedAmount = isRazorpayTestMode()
