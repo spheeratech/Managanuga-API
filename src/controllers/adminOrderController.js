@@ -255,7 +255,6 @@ async function findActiveHubForPincode(pincode) {
   };
 }
 
-
 /* --------------------------------
    VERIFY / ACCEPT ADMIN ORDER
 -------------------------------- */
@@ -266,6 +265,9 @@ const verifyAdminOrder = async (req, res) => {
 
     // Prevent req.body undefined error
     const { status, delivery_method } = req.body || {};
+    console.log("========== VERIFY ADMIN ORDER API HIT ==========");
+    console.log("ORDER ID:", req.params.id);
+    console.log("DELIVERY METHOD:", delivery_method);
 
     // --------------------------------
     // VALIDATE DELIVERY METHOD
@@ -290,8 +292,35 @@ const verifyAdminOrder = async (req, res) => {
         message: "Order not found",
       });
     }
+    // Prevent duplicate shipment creation.
+    if (
+      String(delivery_method).toUpperCase() === "MANAGANUGA" &&
+      existingOrder.tracking_number
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "Shipment already exists for this order.",
+        tracking_number: existingOrder.tracking_number,
+      });
+    }
 
-    console.log("ADMIN ORDER BEFORE VERIFY:", existingOrder);
+    // Prevent re-verification of an already accepted order.
+    if (
+      existingOrder.admin_verified === true ||
+      existingOrder.admin_accepted === true
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "This order has already been accepted.",
+      });
+    }
+    // console.log("ADMIN ORDER BEFORE VERIFY:", existingOrder);
+    console.log("ADMIN ORDER BEFORE VERIFY:", {
+      id: existingOrder.id,
+      order_id: existingOrder.order_id,
+      status: existingOrder.status,
+      delivery_method: existingOrder.delivery_method || null,
+    });
 
     // --------------------------------
     // VERIFY / ACCEPT ORDER
@@ -308,9 +337,6 @@ const verifyAdminOrder = async (req, res) => {
         message: "Order not found",
       });
     }
-    // --------------------------------
-    // CREATE ORDER ACCEPTANCE NOTIFICATION
-    // --------------------------------
 
     // --------------------------------
     // CREATE ORDER ACCEPTANCE NOTIFICATION FOR ADMIN
@@ -387,7 +413,6 @@ const verifyAdminOrder = async (req, res) => {
         throw new Error("Customer pincode is missing");
       }
 
-
       const hub = await findActiveHubForPincode(existingOrder.pincode);
 
       const hubUpdateResult = await pool.query(
@@ -416,9 +441,7 @@ const verifyAdminOrder = async (req, res) => {
 
       console.log("SELECTED HUB AND SHIPROCKET PICKUP LOCATION:", {
         hubId: hub.id,
-        hubName: hub.name,
         hubPincode: hub.pincode,
-        customerPincode: existingOrder.pincode,
         pickupLocation,
       });
 
@@ -571,8 +594,8 @@ const verifyAdminOrder = async (req, res) => {
       //   });
       // }
 
-      const isPaid =
-        String(order.payment_status || "").toUpperCase() === "PAID";
+      // const isPaid =
+      //   String(order.payment_status || "").toUpperCase() === "PAID";
 
       const shipmentPayload = {
         order: {
@@ -617,35 +640,71 @@ const verifyAdminOrder = async (req, res) => {
       let shipment;
 
       try {
+        console.log("CALLING shiprocketService.createShipment()");
+
         shipment = await shiprocketService.createShipment(shipmentPayload);
 
-        console.log(
-          "SHIPROCKET ADMIN SHIPMENT RESPONSE:",
-          JSON.stringify(shipment, null, 2),
-        );
+        console.log("SHIPROCKET SHIPMENT RESPONSE SUMMARY:", {
+          order_id: order.id,
+          response_keys:
+            shipment && typeof shipment === "object"
+              ? Object.keys(shipment)
+              : [],
+          shipment_id:
+            shipment?.shipment_id || shipment?.order?.shipment_id || null,
+          awb_received: Boolean(
+            shipment?.awb_code ||
+            shipment?.awb?.response?.data?.awb_code ||
+            shipment?.awb?.awb_code ||
+            shipment?.order?.awb_code,
+          ),
+        });
       } catch (shipmentError) {
-        const shiprocketError = shipmentError.response?.data;
-        console.error(
-          "SHIPROCKET ADMIN SHIPMENT ERROR:",
-          shiprocketError || shipmentError.message,
-        );
+        const httpStatus = shipmentError.response?.status || null;
 
-        const shiprocketDetails =
-          shiprocketError?.message ||
-          (shiprocketError?.errors
-            ? JSON.stringify(shiprocketError.errors)
-            : shiprocketError
-              ? JSON.stringify(shiprocketError)
-              : shipmentError.message);
+        console.error("========== SHIPMENT CREATION FAILED ==========");
+        console.error("ORDER ID:", order.id);
+        console.error("HTTP STATUS:", httpStatus);
 
         throw new Error(
-          `Shiprocket request failed${
-            shipmentError.response?.status
-              ? ` (${shipmentError.response.status})`
-              : ""
-          }: ${shiprocketDetails || "Unknown provider error"}`,
+          `Shiprocket shipment creation failed${
+            httpStatus ? ` (${httpStatus})` : ""
+          }. Check shiprocket_log for sanitized API details.`,
         );
       }
+
+      // let shipment;
+
+      // try {
+      //   shipment = await shiprocketService.createShipment(shipmentPayload);
+
+      //   console.log(
+      //     "SHIPROCKET ADMIN SHIPMENT RESPONSE:",
+      //     JSON.stringify(shipment, null, 2),
+      //   );
+      // } catch (shipmentError) {
+      //   const shiprocketError = shipmentError.response?.data;
+      //   console.error(
+      //     "SHIPROCKET ADMIN SHIPMENT ERROR:",
+      //     shiprocketError || shipmentError.message,
+      //   );
+
+      //   const shiprocketDetails =
+      //     shiprocketError?.message ||
+      //     (shiprocketError?.errors
+      //       ? JSON.stringify(shiprocketError.errors)
+      //       : shiprocketError
+      //         ? JSON.stringify(shiprocketError)
+      //         : shipmentError.message);
+
+      //   throw new Error(
+      //     `Shiprocket request failed${
+      //       shipmentError.response?.status
+      //         ? ` (${shipmentError.response.status})`
+      //         : ""
+      //     }: ${shiprocketDetails || "Unknown provider error"}`,
+      //   );
+      // }
 
       const awbNumber =
         shipment?.awb_code ||
@@ -653,10 +712,15 @@ const verifyAdminOrder = async (req, res) => {
         shipment?.awb?.awb_code ||
         shipment?.order?.awb_code;
       if (!awbNumber) {
-        console.error(
-          "Shiprocket order response did not contain an AWB:",
-          shipment,
-        );
+        console.error("SHIPROCKET AWB MISSING:", {
+          order_id: order.id,
+          shipment_id:
+            shipment?.shipment_id || shipment?.order?.shipment_id || null,
+          response_keys:
+            shipment && typeof shipment === "object"
+              ? Object.keys(shipment)
+              : [],
+        });
 
         throw new Error(
           "Shiprocket order may have been created, but an AWB was not returned. Check Shiprocket before retrying.",
@@ -667,11 +731,20 @@ const verifyAdminOrder = async (req, res) => {
         `SHIPROCKET AWB VERIFIED: Order ${order.id}, AWB ${awbNumber}`,
       );
 
-      // Save shipment details before sending the confirmation SMS.
+      // const updatedOrder = await AdminOrder.updateShipmentDetails(order.id, {
+      //   tracking_number: String(awbNumber),
+      //   courier_name: "Shiprocket",
+      // });
       const updatedOrder = await AdminOrder.updateShipmentDetails(order.id, {
         tracking_number: String(awbNumber),
         courier_name: "Shiprocket",
       });
+
+      if (!updatedOrder) {
+        throw new Error(
+          "Order shipment details were not updated. No matching order found.",
+        );
+      }
 
       // Send order-confirmation SMS only after AWB verification.
       try {
@@ -703,21 +776,7 @@ const verifyAdminOrder = async (req, res) => {
         );
       }
 
-      // if (!awbNumber) {
-      //   console.error(
-      //     "Shiprocket order response did not contain an AWB:",
-      //     shipment,
-      //   );
-
-      //   throw new Error(
-      //     "Shiprocket order may have been created, but an AWB was not returned. Check Shiprocket before retrying.",
-      //   );
-      // }
-
-      // const updatedOrder = await AdminOrder.updateShipmentDetails(order.id, {
-      //   tracking_number: String(awbNumber),
-      //   courier_name: "Shiprocket",
-      // });
+      
 
       return res.status(200).json({
         success: true,
@@ -735,8 +794,13 @@ const verifyAdminOrder = async (req, res) => {
       message: "Order verified and accepted successfully",
       data: order,
     });
+   
   } catch (error) {
     console.error("VERIFY ADMIN ORDER ERROR:", error);
+
+    // --------------------------------
+    // LOG ORDER VERIFICATION / SHIPMENT FAILURE
+    // --------------------------------
 
     return res.status(500).json({
       success: false,
@@ -744,12 +808,309 @@ const verifyAdminOrder = async (req, res) => {
     });
   }
 };
+/* --------------------------------
+   GET LIVE SHIPROCKET TRACKING
+-------------------------------- */
 
+// const getShiprocketTracking = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // Find the order using its internal database ID.
+//     const order = await AdminOrder.getAdminOrderById(id);
+
+//     if (!order) {
+//       const deliveryMethod = String(order.delivery_method || "")
+//         .trim()
+//         .toUpperCase()
+//         .replace(/[\s-]+/g, "_");
+
+//       if (!["MANAGANUGA", "MANA_GANUGA"].includes(deliveryMethod)) {
+//         return res.status(400).json({
+//           success: false,
+//           message:
+//             "Shiprocket tracking is available only for ManaGanuga deliveries",
+//         });
+//       }
+//       return res.status(404).json({
+//         success: false,
+//         message: "Order not found",
+//       });
+//     }
+
+//     const awb = String(order.tracking_number || "").trim();
+
+//     if (!awb) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "No Shiprocket AWB is assigned to this order",
+//         data: {
+//           order_id: order.id,
+//           user_id: order.user_id,
+//           tracking_number: null,
+//           tracking_status: null,
+//         },
+//       });
+//     }
+
+//     // Fetch the latest status from Shiprocket.
+//     const trackingResponse = await shiprocketService.trackShipment(
+//       awb,
+//       order.id,
+//     );
+
+//     const trackingData = trackingResponse?.tracking_data || {};
+//     const shipmentTrack = Array.isArray(trackingData.shipment_track)
+//       ? trackingData.shipment_track
+//       : [];
+
+//     const shipment = shipmentTrack[0] || {};
+
+//     const activities = Array.isArray(trackingData.shipment_track_activities)
+//       ? trackingData.shipment_track_activities
+//       : [];
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Live Shiprocket tracking fetched successfully",
+//       data: {
+//         order_id: order.id,
+//         order_number: order.order_id,
+//         user_id: order.user_id,
+//         tracking_number: awb,
+//         courier_name: shipment.courier_name || order.courier_name || null,
+
+//         tracking_status:
+//           shipment.current_status ||
+//           trackingData.shipment_status ||
+//           trackingData.track_status ||
+//           "Tracking information unavailable",
+
+//         shipment_status: trackingData.shipment_status || null,
+//         track_status: trackingData.track_status || null,
+
+//         estimated_delivery_date: shipment.edd || trackingData.edd || null,
+
+//         delivered_date: shipment.delivered_date || null,
+
+//         activities,
+//         shipment_track: shipmentTrack,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("GET SHIPROCKET TRACKING ERROR:", {
+//       orderId: req.params.id,
+//       httpStatus: error.response?.status || null,
+//       message: error.message,
+//     });
+
+//     return res.status(502).json({
+//       success: false,
+//       message:
+//         error.response?.data?.message ||
+//         "Unable to fetch live tracking from Shiprocket",
+//     });
+//   }
+// };
+/* --------------------------------
+   GET LIVE SHIPROCKET TRACKING
+-------------------------------- */
+
+const getShiprocketTracking = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the order using its internal database ID.
+    const order = await AdminOrder.getAdminOrderById(id);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const deliveryMethod = String(order.delivery_method || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
+
+    if (!["MANAGANUGA", "MANA_GANUGA"].includes(deliveryMethod)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Shiprocket tracking is available only for ManaGanuga deliveries",
+      });
+    }
+
+    const awb = String(order.tracking_number || "").trim();
+
+    if (!awb) {
+      return res.status(404).json({
+        success: false,
+        message: "No Shiprocket AWB is assigned to this order",
+        data: {
+          order_id: order.id,
+          tracking_number: null,
+          shiprocket_order_status: null,
+          tracking_status: null,
+        },
+      });
+    }
+
+    // Retrieve the Shiprocket order ID saved during shipment creation.
+    const shiprocketOrderResult = await pool.query(
+      `
+        SELECT response_payload->>'order_id' AS shiprocket_order_id
+        FROM public.shiprocket_log
+        WHERE order_id = $1
+          AND operation = 'CREATE_SHIPMENT'
+          AND is_success = TRUE
+          AND response_payload->>'order_id' IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      [String(order.id)],
+    );
+
+    const shiprocketOrderId =
+      shiprocketOrderResult.rows[0]?.shiprocket_order_id || null;
+
+    // Fetch the exact Shiprocket dashboard order status.
+    let shiprocketOrderStatus = null;
+
+    if (shiprocketOrderId) {
+      shiprocketOrderStatus = await shiprocketService.getOrderStatus(
+        shiprocketOrderId,
+        order.id,
+      );
+    }
+
+    // Fetch courier/AWB tracking separately.
+    const trackingResponse = await shiprocketService.trackShipment(
+      awb,
+      order.id,
+    );
+
+    const trackingData = trackingResponse?.tracking_data || {};
+
+    const shipmentTrack = Array.isArray(trackingData.shipment_track)
+      ? trackingData.shipment_track
+      : [];
+
+    const shipment = shipmentTrack[0] || {};
+
+    const activities = Array.isArray(trackingData.shipment_track_activities)
+      ? trackingData.shipment_track_activities
+      : [];
+    // --------------------------------
+    // DETECT SHIPROCKET CANCELLATION
+    // --------------------------------
+
+    const shiprocketOrderStatusText = String(
+      shiprocketOrderStatus?.status || "",
+    )
+      .trim()
+      .toUpperCase();
+
+    const trackingError = String(trackingData?.error || "")
+      .trim()
+      .toUpperCase();
+
+    const isShiprocketCancelled =
+      ["CANCELLED", "CANCELED"].includes(shiprocketOrderStatusText) ||
+      trackingError.includes("AWB HAS BEEN CANCELLED") ||
+      trackingError.includes("AWB HAS BEEN CANCELED") ||
+      trackingError.includes("SHIPMENT HAS BEEN CANCELLED") ||
+      trackingError.includes("SHIPMENT HAS BEEN CANCELED");
+
+    // Update the ManaGanuga database order status.
+    let updatedOrderStatus = order.status;
+
+    if (isShiprocketCancelled) {
+      const updatedOrder = await AdminOrder.updateShiprocketCancellation(
+        order.id,
+      );
+
+      if (updatedOrder) {
+        updatedOrderStatus = updatedOrder.status;
+
+        console.log("SHIPROCKET CANCELLATION SYNCED TO DATABASE:", {
+          orderId: updatedOrder.id,
+          status: updatedOrder.status,
+        });
+      } else {
+        console.warn(
+          "SHIPROCKET CANCELLATION DETECTED, BUT DATABASE STATUS WAS NOT UPDATED:",
+          {
+            orderId: order.id,
+            existingStatus: order.status,
+          },
+        );
+      }
+    }
+    return res.status(200).json({
+      success: true,
+      message: "Live Shiprocket order status and tracking fetched successfully",
+      data: {
+        order_id: order.id,
+        order_number: order.order_id,
+        user_id: order.user_id,
+
+        // Exact order-level status from Shiprocket dashboard.
+        shiprocket_order_id: shiprocketOrderId,
+        shiprocket_order_status: shiprocketOrderStatus?.status || null,
+        shiprocket_order_status_code:
+          shiprocketOrderStatus?.status_code ?? null,
+
+        // Courier tracking details remain separate.
+        tracking_number: awb,
+        courier_name: shipment.courier_name || order.courier_name || null,
+
+        tracking_status: isShiprocketCancelled
+          ? "Cancelled"
+          : shipment.current_status ||
+            trackingData.shipment_status ||
+            trackingData.track_status ||
+            "Tracking information unavailable",
+
+        tracking_error: trackingData.error || null,
+
+        cancellation_detected: isShiprocketCancelled,
+
+        order_status: updatedOrderStatus,
+
+        shipment_status: trackingData.shipment_status || null,
+        track_status: trackingData.track_status || null,
+
+        estimated_delivery_date: shipment.edd || trackingData.edd || null,
+        delivered_date: shipment.delivered_date || null,
+
+        activities,
+        shipment_track: shipmentTrack,
+      },
+    });
+  } catch (error) {
+    console.error("GET SHIPROCKET TRACKING ERROR:", {
+      orderId: req.params.id,
+      httpStatus: error.response?.status || null,
+      message: error.message,
+    });
+
+    return res.status(502).json({
+      success: false,
+      message:
+        error.response?.data?.message ||
+        "Unable to fetch live Shiprocket order status and tracking",
+    });
+  }
+};
 module.exports = {
   // createAdminOrder,
   getAdminOrders,
   getAdminOrderById,
   updateAdminOrder,
+  getShiprocketTracking,
   // deleteAdminOrder,
   // deleteAllAdminOrders,
   verifyAdminOrder,

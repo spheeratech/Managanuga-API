@@ -6,6 +6,7 @@ const {
   createAdminOrder,
   getAdminOrders,
   getAdminOrderById,
+  getShiprocketTracking,
   updateAdminOrder,
   deleteAdminOrder,
   deleteAllAdminOrders,
@@ -16,7 +17,8 @@ const {
 
 // Get all admin orders
 router.get("/", getAdminOrders);
-
+// Get live Shiprocket tracking for a specific order
+router.get("/:id/tracking", getShiprocketTracking);
 // router.delete("/delete-all", deleteAllAdminOrders);
 
 router.get("/:id", getAdminOrderById);
