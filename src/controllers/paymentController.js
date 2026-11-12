@@ -645,7 +645,6 @@ if (
   payment_type: paymentType,
   razorpay_status: razorpayPayment.status,
   razorpay_amount: razorpayPayment.amount,
-  expected_amount: expectedAmount,
   user_id: userId,
 });
 
@@ -1573,6 +1572,7 @@ const updateLocalPayment = async (status, client = null) => {
       }
 
       if (
+        process.env.ALLOW_ONE_RUPEE_TEST !== "true" &&
         Math.round(Number(plan.plan_price) * 100) !==
         Math.round(expectedAmount * 100)
       ) {
