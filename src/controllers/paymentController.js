@@ -2436,7 +2436,6 @@ try {
               updated_at = CURRENT_TIMESTAMP,
               updated_by = $6
             WHERE id = $5
-              AND status IS DISTINCT FROM 'PAID'
             RETURNING *
             `,
             [
