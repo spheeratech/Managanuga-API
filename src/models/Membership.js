@@ -135,6 +135,7 @@ const resolvePublicUserId = async (userId, client = pool) => {
  *
  * user_memberships.user_id stores PUBLIC user_login.user_id.
  */
+
 const createMembership = async ({
   userId,
   planId,
@@ -146,12 +147,17 @@ const createMembership = async ({
   termsAndConditions = false,
   assignedBy = null,
   assignedRole = null,
-  referralCode = null
+  referralCode = null,
+  client: suppliedClient = null,
 }) => {
-  const client = await pool.connect();
+  const ownsClient = suppliedClient == null;
+  const client = suppliedClient || await pool.connect();
 
   try {
-    await client.query("BEGIN");
+    if (ownsClient) {
+      await client.query("BEGIN");
+    }
+
     const resolvedPublicUserId = await resolvePublicUserId(
       userId,
       client
@@ -189,8 +195,11 @@ const createMembership = async ({
           );
         }
 
-        await client.query("COMMIT");
-        return existingMembership;
+        if (ownsClient) {
+  await client.query("COMMIT");
+}
+
+return existingMembership;
       }
     }
 
@@ -242,14 +251,22 @@ const createMembership = async ({
       ]
     );
 
-    await client.query("COMMIT");
+    if (ownsClient) {
+      await client.query("COMMIT");
+    }
+
     return result.rows[0];
-  } catch (error) {
+} catch (error) {
+  if (ownsClient) {
     await client.query("ROLLBACK");
-    throw error;
-  } finally {
+  }
+
+  throw error;
+} finally {
+  if (ownsClient) {
     client.release();
   }
+}
 };
 
 

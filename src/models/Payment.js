@@ -109,11 +109,15 @@ const getPaymentsByUserAndOrderId = async (userId, orderId) => {
 /* --------------------------------
    UPDATE PAYMENT BY RAZORPAY ORDER ID
 -------------------------------- */
+
 const updateByTnxOrderId = async (
   tnx_order_id,
-  data
+  data,
+  suppliedClient = null
 ) => {
-  const result = await pool.query(
+  const db = suppliedClient || pool;
+
+  const result = await db.query(
     `
     UPDATE payments
     SET
@@ -181,8 +185,11 @@ const linkPaymentToOrder = async ({
 /* --------------------------------
    CREATE PAYMENT LOG
 -------------------------------- */
-const createPaymentLog = async (data) => {
-  const result = await pool.query(
+
+const createPaymentLog = async (data, suppliedClient = null) => {
+  const db = suppliedClient || pool;
+
+  const result = await db.query(
     `
     INSERT INTO payments_log
     (
@@ -207,6 +214,7 @@ const createPaymentLog = async (data) => {
 
   return result.rows[0];
 };
+
 
 
 module.exports = {
