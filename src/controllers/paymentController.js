@@ -2439,7 +2439,7 @@ try {
       AND created_by = $6
       AND tnx_order_id = $7
       AND payment_gateway = 'RAZORPAY'
-      AND status IN ('PENDING', 'CREATED')
+      AND status <> 'PAID'
       AND membership_id IS NOT DISTINCT FROM $8::integer
     RETURNING *
     `,
