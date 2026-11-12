@@ -758,12 +758,14 @@ if (
    order payable amount.
 ===================================================== */
 
-    const razorpayAmountPaise = Number(razorpayPayment.amount);
-    const razorpayAmount = razorpayAmountPaise / 100;
+\const razorpayAmountPaise = Number(razorpayPayment.amount);
+const razorpayAmount = razorpayAmountPaise / 100;
 
-const expectedAmount = 1;
+const expectedAmount = isRazorpayTestMode()
+  ? 1
+  : Number(localPayment.payable_amount);
 
-    console.log("Expected Razorpay Amount:", expectedAmount);
+console.log("Expected Razorpay Amount:", expectedAmount);
 
     console.log("Razorpay Amount:", razorpayAmount);
 

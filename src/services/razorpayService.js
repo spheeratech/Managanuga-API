@@ -8,7 +8,7 @@ const razorpay = new Razorpay({
 
 const createRazorpayOrder = async (amount) => {
   return await razorpay.orders.create({
-    amount: 100,
+    amount: amount * 100,
     currency: "INR",
     receipt: "rcpt_" + Date.now(),
   });
