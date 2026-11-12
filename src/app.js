@@ -30,6 +30,7 @@ const couponRoutes = require("./routes/couponRoutes");
 const faqRoutes = require("./routes/faqRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const combinedAPIRoutes = require("./routes/combinedAPIRoutes");
+const appUpdateRoutes = require("./routes/appUpdateRoutes");
 const app = express();
 
 app.use(requestLogger);
@@ -68,7 +69,7 @@ app.use("/api/subscriptions", subscriptionRoutes);
 
 // App-managed images: logo, banners, login background
 app.use("/api/app-images", appImageRoutes);
-
+app.use("/api/app-update", appUpdateRoutes);
 app.get("/join", (req, res) => {
   const userAgent = req.get("user-agent") || "";
 
