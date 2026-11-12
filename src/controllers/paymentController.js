@@ -2424,36 +2424,34 @@ try {
           });
         }
 
-        const updatedPaymentResult = await verificationLockClient.query(
-          `
-    UPDATE payments
-    SET
-      order_id = $1,
-      status = 'PAID',
-      payment_id = $2,
-      method = $3,
-      upi_transaction_id = $4,
-      updated_at = CURRENT_TIMESTAMP,
-      updated_by = $6
-    WHERE id = $5
-      AND created_by = $6
-      AND tnx_order_id = $7
-      AND payment_gateway = 'RAZORPAY'
-      AND status <> 'PAID'
-      AND membership_id IS NOT DISTINCT FROM $8::integer
-    RETURNING *
-    `,
-          [
-            createdOrder.order_id,
-            paymentId,
-            method,
-            upiTransactionId,
-            payment.id,
-            userId,
-            razorpay_order_id,
-            persistedMembershipId,
-          ],
-        );
+
+const updatedPaymentResult = await verificationLockClient.query(
+  `
+  UPDATE payments
+  SET
+    order_id = $1,
+    status = 'PAID',
+    payment_id = $2,
+    method = $3,
+    upi_transaction_id = $4,
+    updated_at = CURRENT_TIMESTAMP,
+    updated_by = $6
+  WHERE id = $5
+    AND created_by = $6
+    AND payment_gateway = 'RAZORPAY'
+    AND status <> 'PAID'
+  RETURNING *
+  `,
+  [
+    createdOrder.order_id,
+    paymentId,
+    method,
+    upiTransactionId,
+    localPayment.id,
+    userId,
+  ],
+);
+
 
        if (!updatedOrderResult.rows[0]) {
   throw new Error("ORDER UPDATE FAILED: no matching order row");
