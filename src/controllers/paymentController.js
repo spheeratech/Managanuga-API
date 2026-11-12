@@ -638,6 +638,17 @@ if (
     const razorpayPayment =
       await razorpayService.fetchRazorpayPayment(razorpay_payment_id);
 
+
+      console.log("[PAYMENT DIAGNOSTIC]", {
+  razorpay_order_id,
+  razorpay_payment_id,
+  payment_type: paymentType,
+  razorpay_status: razorpayPayment.status,
+  razorpay_amount: razorpayPayment.amount,
+  expected_amount: expectedAmount,
+  user_id: userId,
+});
+
     console.log("RAZORPAY PAYMENT:", JSON.stringify(razorpayPayment, null, 2));
 
     if (!razorpayPayment) {
@@ -917,6 +928,16 @@ const expectedAmount = 1;
           await creditCustomerReferralRewardForMembership({
             membershipId: existingMembership.id,
           });
+
+await Payment.updateByTnxOrderId(razorpay_order_id, {
+  created_by: userId,
+  payment_record_id: localPayment.id,
+  fulfillment_status: "COMPLETED",
+  fulfillment_data: {
+    membership_id: existingMembership.id,
+  },
+}, verificationLockClient);
+
 
         if (requestedCustomerReferralId && !referralReward) {
           return res.status(409).json({
@@ -1217,6 +1238,34 @@ const expectedAmount = 1;
           throw new Error("Captured payment recovery update failed");
         }
 
+        await verificationLockClient.query(
+  `
+  UPDATE payments
+  SET
+    fulfillment_status = 'COMPLETED',
+    fulfillment_data = $1,
+    updated_at = CURRENT_TIMESTAMP
+  WHERE id = $2
+  `,
+  [
+    JSON.stringify({ order_id: orderUpdate.rows[0].order_id }),
+    localPayment.id,
+  ],
+);
+
+await Payment.updateByTnxOrderId(
+  razorpay_order_id,
+  {
+    created_by: userId,
+    payment_record_id: payment.id,
+    fulfillment_status: "COMPLETED",
+    fulfillment_data: {
+      order_id: createdOrderId,
+    },
+  },
+  verificationLockClient,
+);
+
         await verificationLockClient.query("COMMIT");
         return res.json({
           success: true,
@@ -1307,7 +1356,7 @@ const updateLocalPayment = async (status, client = null) => {
       }
     };
 
-    await updateLocalPayment("PENDING");
+    await updateLocalPayment("PAID");
 
     await Membership.checkAndResetMonthlyBenefits(userId);
 
@@ -1504,12 +1553,7 @@ const updateLocalPayment = async (status, client = null) => {
    MEMBERSHIP PAYMENT
 ===================================================== */
 
-    if (!plan) {
-  return res.status(404).json({
-    success: false,
-    message: "Membership plan not found",
-  });
-}
+    if ((paymentType || "").toUpperCase() === "MEMBERSHIP") {
       const planResult = await pool.query(
         `
         SELECT *
@@ -1795,6 +1839,15 @@ if (customerReferralId?.trim()) {
 
            client: verificationLockClient,
       });
+
+      await Payment.updateByTnxOrderId(razorpay_order_id, {
+  created_by: userId,
+  payment_record_id: payment.id,
+  fulfillment_status: "COMPLETED",
+  fulfillment_data: {
+    membership_id: membership.id,
+  },
+}, verificationLockClient);
       /* =================================================
          PAYMENT LOG
       ================================================= */

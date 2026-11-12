@@ -17,11 +17,13 @@ const createPayment = async (data) => {
       payment_type,
       membership_plan_id,
       membership_id,
+      fulfillment_data,
+      fulfillment_status,
       created_by,
       updated_by
     )
     VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
     RETURNING *
     `,
     [
@@ -34,6 +36,8 @@ const createPayment = async (data) => {
       data.payment_type || "ORDER",
       data.membership_plan_id || null,
       data.membership_id ?? null,
+      data.fulfillment_data || null,
+      data.fulfillment_status || "PENDING",
       data.created_by || null,
     ]
   );
@@ -110,6 +114,7 @@ const getPaymentsByUserAndOrderId = async (userId, orderId) => {
    UPDATE PAYMENT BY RAZORPAY ORDER ID
 -------------------------------- */
 
+
 const updateByTnxOrderId = async (
   tnx_order_id,
   data,
@@ -127,6 +132,8 @@ const updateByTnxOrderId = async (
       method = COALESCE($4, method),
       actual_amount = COALESCE($5, actual_amount),
       payable_amount = COALESCE($6, payable_amount),
+      fulfillment_status = COALESCE($10, fulfillment_status),
+      fulfillment_data = COALESCE($11, fulfillment_data),
       updated_at = CURRENT_TIMESTAMP,
       updated_by = $8
     WHERE tnx_order_id = $7
@@ -144,11 +151,14 @@ const updateByTnxOrderId = async (
       tnx_order_id,
       data.created_by,
       data.payment_record_id,
+      data.fulfillment_status || null,
+      data.fulfillment_data || null,
     ]
   );
 
   return result.rows[0];
 };
+
 
 
 /* --------------------------------
@@ -201,6 +211,11 @@ const createPaymentLog = async (data, suppliedClient = null) => {
     )
     VALUES
     ($1, $2, $3, $4, $5)
+    ON CONFLICT (order_type, order_id)
+    DO UPDATE SET
+      payment_request = EXCLUDED.payment_request,
+      payment_response = EXCLUDED.payment_response,
+      updated_at = CURRENT_TIMESTAMP
     RETURNING *
     `,
     [
