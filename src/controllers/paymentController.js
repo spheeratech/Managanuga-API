@@ -638,8 +638,14 @@ if (
        FETCH RAZORPAY PAYMENT
     ===================================================== */
 
-    const razorpayPayment =
-      await razorpayService.fetchRazorpayPayment(razorpay_payment_id);
+    let razorpayPayment;
+    try {
+      razorpayPayment =
+        await razorpayService.fetchRazorpayPayment(razorpay_payment_id);
+    } catch (error) {
+      await logException(error, req);
+      throw error;
+    }
 
 
       console.log("[PAYMENT DIAGNOSTIC]", {
