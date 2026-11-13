@@ -1,5 +1,6 @@
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
+const { logException, logIntegrationCall } = require("../utils/exceptionLogger");
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -37,7 +38,34 @@ console.log(
 );
 
 const fetchRazorpayPayment = async (paymentId) => {
-  return await razorpay.payments.fetch(paymentId);
+  const startedAt = process.hrtime.bigint();
+
+  try {
+    const payment = await razorpay.payments.fetch(paymentId);
+    await logIntegrationCall({
+      service: "razorpay",
+      operation: "payments.fetch",
+      outcome: "success",
+      durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+      httpStatus: 200,
+    });
+    return payment;
+  } catch (error) {
+    const httpStatus = error.statusCode || error.status;
+
+    await Promise.all([
+      logIntegrationCall({
+        service: "razorpay",
+        operation: "payments.fetch",
+        outcome: "failure",
+        durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+        error,
+        httpStatus,
+      }),
+      logException(error),
+    ]);
+    throw error;
+  }
 };
 
 module.exports = {
