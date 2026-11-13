@@ -764,7 +764,12 @@ if (
 const razorpayAmountPaise = Number(razorpayPayment.amount);
 const razorpayAmount = razorpayAmountPaise / 100;
 
-const expectedAmount = 1;
+const isOneRupeeTest =
+  process.env.ALLOW_ONE_RUPEE_TEST === "true";
+
+const expectedAmount = isOneRupeeTest
+  ? 1
+  : Number(localPayment.payable_amount);
 
 console.log("Expected Razorpay Amount:", expectedAmount);
 
@@ -789,6 +794,8 @@ console.log("Expected Razorpay Amount:", expectedAmount);
 ===================================================== */
 
     const paymentId = razorpayPayment.id || razorpay_payment_id;
+
+    let recoverCapturedMembership = false;
 
     if (String(localPayment.status || "").toUpperCase() === "PAID") {
       if (String(localPayment.payment_id || "") !== String(paymentId)) {
@@ -851,14 +858,9 @@ console.log("Expected Razorpay Amount:", expectedAmount);
           [localPayment.id, userId],
         );
         const existingMembership = membershipResult.rows[0];
-        if (!existingMembership) {
-          return res.status(409).json({
-            success: false,
-            message:
-              "Membership payment is marked paid but membership activation requires reconciliation",
-            paymentId: localPayment.id,
-          });
-        }
+if (!existingMembership) {
+  recoverCapturedMembership = true;
+} else {
 
         const requestedCustomerReferralId =
           typeof customerReferralId === "string"
@@ -957,21 +959,27 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
           message: "Membership payment was already verified.",
         });
       }
+    }
 
+    if (!recoverCapturedMembership) {
       return res.status(409).json({
         success: false,
         message: "Paid payment has no supported reconciliation path",
         paymentId: localPayment.id,
       });
     }
+  }
 
-    if (String(localPayment.status || "").toUpperCase() !== "PENDING") {
-      return res.status(409).json({
-        success: false,
-        message: "Payment is not in a reconcilable pending state",
-        paymentId: localPayment.id,
-      });
-    }
+  if (
+    String(localPayment.status || "").toUpperCase() !== "PENDING" &&
+    !recoverCapturedMembership
+  ) {
+    return res.status(409).json({
+      success: false,
+      message: "Payment is not in a reconcilable pending state",
+      paymentId: localPayment.id,
+    });
+  }
 
     const pendingOrderResult = await verificationLockClient.query(
       `
@@ -1365,9 +1373,11 @@ const updateLocalPayment = async (status, client = null) => {
       }
     };
 
-    await updateLocalPayment("PAID");
+if ((paymentType || "").toUpperCase() !== "MEMBERSHIP") {
+  await updateLocalPayment("PAID");
+}
 
-    await Membership.checkAndResetMonthlyBenefits(userId);
+await Membership.checkAndResetMonthlyBenefits(userId);
 
     /* =====================================================
    MEMBERSHIP BENEFITS
