@@ -37,7 +37,7 @@ const roundMoney = (amount) =>
   Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
 
 const isRazorpayTestMode = () =>
-  String(process.env.RAZORPAY_KEY_ID || "").startsWith("rzp_test_");
+  process.env.RAZORPAY_TEST_MODE === "true";
 
 const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
   const subtotal = Number(
