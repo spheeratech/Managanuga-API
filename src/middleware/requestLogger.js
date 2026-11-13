@@ -1,29 +1,12 @@
 const { randomUUID } = require("node:crypto");
-const os = require("node:os");
 const pool = require("../../db");
-
-const machineInfo = {
-  hostname: os.hostname().slice(0, 255),
-  nodeVersion: process.version.slice(0, 32),
-  processId: process.pid,
-  environment: (process.env.NODE_ENV || "development").slice(0, 50),
-};
-
-const sanitizeErrorMessage = (message) =>
-  String(message || "Request failed")
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
-    .replace(
-      /\b(password|passwd|secret|token|api[_-]?key|authorization|credential)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi,
-      "$1$2[REDACTED]",
-    )
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[REDACTED_EMAIL]")
-    .replace(/\b(?:\+?\d[\s().-]*){10,}\b/g, "[REDACTED_PHONE]")
-    .slice(0, 2000);
-
-const getErrorCode = (error) =>
-  typeof error?.code === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(error.code)
-    ? error.code
-    : null;
+const {
+  getErrorCode,
+  logException,
+  machineInfo,
+  runWithRequestContext,
+  sanitizeErrorMessage,
+} = require("../utils/exceptionLogger");
 
 const requestLogger = (req, res, next) => {
   const startedAt = process.hrtime.bigint();
@@ -95,10 +78,10 @@ const requestLogger = (req, res, next) => {
       });
   });
 
-  next();
+  runWithRequestContext(req, next);
 };
 
-const errorHandler = (error, req, res, next) => {
+const errorHandler = async (error, req, res, next) => {
   const statusCode =
     Number.isInteger(error.status) && error.status >= 400 && error.status <= 599
       ? error.status
@@ -127,6 +110,8 @@ const errorHandler = (error, req, res, next) => {
     errorCode: req.errorCode,
   });
 
+  await logException(error, req);
+
   if (res.headersSent) {
     return next(error);
   }
@@ -140,5 +125,4 @@ const errorHandler = (error, req, res, next) => {
 module.exports = {
   requestLogger,
   errorHandler,
-  sanitizeErrorMessage,
 };

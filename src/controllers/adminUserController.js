@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 const AdminUser = require("../models/AdminUser");
 const Notification = require("../models/Notification");
@@ -349,6 +351,7 @@ const createUser = async (req, res) => {
         referenceId: null,
       });
     } catch (notificationError) {
+      void logException(notificationError);
       console.error(
         "User creation notification failed:",
         notificationError.message,
@@ -387,6 +390,7 @@ const createUser = async (req, res) => {
 
         smsSent = true;
       } catch (smsError) {
+        void logException(smsError);
         console.error(
           `${targetRole} created, but registration SMS failed:`,
           smsError.message,
@@ -436,6 +440,7 @@ const createUser = async (req, res) => {
       },
     });
   } catch (error) {
+    void logException(error);
     // --------------------------------------------------
     // ROLLBACK
     // --------------------------------------------------
@@ -492,10 +497,12 @@ const createAdminLoginNotification = async (userId) => {
           },
         });
       } catch (pushError) {
+        void logException(pushError);
         console.error("Login push notification failed:", pushError.message);
       }
     }
   } catch (error) {
+    void logException(error);
     // Notification errors must not block a successful login.
     console.error("Login notification failed:", error.message);
   }
@@ -535,6 +542,7 @@ const getUsersByUserId = async (req, res) => {
       data: users,
     });
   } catch (error) {
+    void logException(error);
     console.error("Get users by user ID error:", error);
 
     return res.status(500).json({
@@ -579,6 +587,7 @@ const updateUserStatus = async (req, res) => {
       data: user,
     });
   } catch (error) {
+    void logException(error);
     console.error("Update user status error:", error);
 
     return res.status(500).json({
@@ -670,6 +679,7 @@ const loginUser = async (req, res) => {
       data: user,
     });
   } catch (error) {
+    void logException(error);
     console.error("Dashboard login error:", error);
     return res.status(500).json({
       success: false,
@@ -782,6 +792,7 @@ const updateUser = async (req, res) => {
         referenceId: null,
       });
     } catch (notificationError) {
+      void logException(notificationError);
       console.error(
         "User update notification failed:",
         notificationError.message,
@@ -794,6 +805,7 @@ const updateUser = async (req, res) => {
       data: updatedUser,
     });
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     console.error("Update user error:", error);
     return res.status(500).json({
@@ -848,6 +860,7 @@ const deleteUser = async (req, res) => {
         });
       }
     } catch (notificationError) {
+      void logException(notificationError);
       console.error(
         "User deletion notification failed:",
         notificationError.message,
@@ -860,6 +873,7 @@ const deleteUser = async (req, res) => {
       data: deletedUser,
     });
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     console.error("Delete user error:", error);
     return res.status(500).json({

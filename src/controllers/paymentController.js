@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Order = require("../models/Order");
 const Payment = require("../models/Payment");
 const Notification = require("../models/Notification");
@@ -535,6 +537,7 @@ if (paymentTypeUpper !== "MEMBERSHIP") {
       },
     });
   } catch (err) {
+    void logException(err);
     console.error("CREATE ORDER ERROR:", err);
     if (err.code === "MEMBERSHIP_COUPON_NOT_ELIGIBLE") {
       return res.status(400).json({
@@ -871,6 +874,7 @@ console.log("Expected Razorpay Amount:", expectedAmount);
             });
             validatedReferrerId = referralValidation.referrerId;
           } catch (error) {
+            void logException(error);
             return res.status(400).json({
               success: false,
               message: error.message,
@@ -1282,6 +1286,7 @@ await Payment.updateByTnxOrderId(
           message: "Captured payment reconciled with its existing order.",
         });
       } catch (recoveryError) {
+        void logException(recoveryError);
         await verificationLockClient.query("ROLLBACK");
         throw recoveryError;
       }
@@ -1348,6 +1353,7 @@ const updateLocalPayment = async (status, client = null) => {
           referenceId: payment.id,
         });
       } catch (notificationError) {
+        void logException(notificationError);
         console.error(
           "PAYMENT SUCCESS NOTIFICATION ERROR:",
           notificationError.message,
@@ -1789,6 +1795,7 @@ if (customerReferralId?.trim()) {
 
     validatedCustomerReferralId = referralValidation.referrerId;
   } catch (error) {
+    void logException(error);
     return res.status(400).json({
       success: false,
       message: error.message,
@@ -1870,6 +1877,7 @@ try {
 
         console.log(`Payment log created for membership ${membership.id}`);
     } catch (paymentLogError) {
+      void logException(paymentLogError);
   throw paymentLogError;
 }
 
@@ -1896,6 +1904,7 @@ try {
           );
         }
       } catch (whatsappError) {
+        void logException(whatsappError);
         console.error("WHATSAPP SUBSCRIPTION FAILED:", whatsappError.message);
       }
 
@@ -1957,6 +1966,7 @@ try {
           console.log(`No FCM token found for user ${userId}`);
         }
       } catch (notificationError) {
+        void logException(notificationError);
         console.error(
           "MEMBERSHIP NOTIFICATION FAILED:",
           notificationError.message,
@@ -2148,6 +2158,7 @@ try {
           }
         }
       } catch (notificationError) {
+        void logException(notificationError);
         /*
          * Notification failure must never break
          * successful membership activation or benefit
@@ -2470,6 +2481,7 @@ try {
 
         console.log(`Transaction order ID ${razorpay_order_id} saved`);
       } catch (orderPaymentError) {
+        void logException(orderPaymentError);
         await verificationLockClient.query("ROLLBACK");
         console.error("ORDER PAYMENT STATUS ERROR:", orderPaymentError.message);
 
@@ -2503,6 +2515,7 @@ try {
 
         console.log(`Order payment log created for order ${createdOrderId}`);
       } catch (paymentLogError) {
+        void logException(paymentLogError);
         console.error("ORDER PAYMENT LOG ERROR:", paymentLogError.message);
       }
 
@@ -2564,6 +2577,7 @@ try {
           console.log(`No FCM token found for user ${userId}`);
         }
       } catch (notificationError) {
+        void logException(notificationError);
         console.error("ORDER NOTIFICATION ERROR:", notificationError.message);
       }
 
@@ -2605,6 +2619,7 @@ try {
           console.log(`ORDER WHATSAPP SENT FOR ORDER ${createdOrderId}`);
         }
       } catch (whatsappError) {
+        void logException(whatsappError);
         console.error("ORDER WHATSAPP FAILED:", whatsappError.message);
       }
 
@@ -2649,11 +2664,13 @@ try {
       message: "Payment verified successfully.",
     });
   } catch (error) {
+    void logException(error);
     if (membershipTransactionStarted && verificationLockClient) {
       try {
         await verificationLockClient.query("ROLLBACK");
         membershipTransactionStarted = false;
       } catch (rollbackError) {
+        void logException(rollbackError);
         console.error(
           "MEMBERSHIP TRANSACTION ROLLBACK ERROR:",
           rollbackError.message,
@@ -2690,6 +2707,7 @@ try {
             [couponVerificationLockKey],
           );
         } catch (unlockError) {
+          void logException(unlockError);
           console.error(
             "COUPON VERIFICATION LOCK RELEASE ERROR:",
             unlockError.message,
@@ -2705,6 +2723,7 @@ try {
           );
         }
       } catch (unlockError) {
+        void logException(unlockError);
         console.error(
           "RAZORPAY VERIFICATION LOCK RELEASE ERROR:",
           unlockError.message,
@@ -2757,6 +2776,7 @@ const recoverMembershipCustomerReferralReward = async (req, res) => {
       transactionId: reward.transaction.transaction.id,
     });
   } catch (error) {
+    void logException(error);
     console.error("CUSTOMER REFERRAL REWARD RECOVERY ERROR:", error);
     return res.status(500).json({
       success: false,
@@ -2791,6 +2811,7 @@ const getPayments = async (req, res) => {
       data: payments,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET PAYMENTS ERROR:", error);
 
     return res.status(500).json({
@@ -3042,6 +3063,7 @@ return res.json({
       finalPayableAmount,
     });
   } catch (error) {
+    void logException(error);
     console.error("CHECKOUT SUMMARY ERROR:", error);
 
     return res

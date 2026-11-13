@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const ProductVariant = require("../models/ProductVariant");
 
 const getVariantsByProductId = async (req, res) => {
@@ -11,6 +13,7 @@ const getVariantsByProductId = async (req, res) => {
       data: variants,
     });
   } catch (error) {
+    void logException(error);
     console.error("Error fetching product variants:", error);
 
     return res.status(500).json({

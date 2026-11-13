@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const axios = require("axios");
 const pool = require("../../db");
 
@@ -46,6 +48,7 @@ const saveShiprocketLog = async ({
 
     console.log(`SHIPROCKET LOG SAVED: ${operation}`);
   } catch (error) {
+    void logException(error);
     // Logging failures must never interrupt the existing shipment flow.
     console.error("SHIPROCKET DB LOG ERROR:", error.message);
   }
@@ -132,6 +135,7 @@ const login = async () => {
 
         return token;
       } catch (error) {
+        void logException(error);
         if (!logSaved) {
           await saveShiprocketLog({
             operation: "LOGIN",
@@ -211,6 +215,7 @@ const getPickupLocationByPincode = async (pincode) => {
       is_success: true,
     });
   } catch (error) {
+    void logException(error);
     await saveShiprocketLog({
       operation: "PICKUP_LOCATION",
       request_payload: {
@@ -280,6 +285,7 @@ const getPickupLocationByPincode = async (pincode) => {
 
     return String(pickupLocation);
   } catch (error) {
+    void logException(error);
     await saveShiprocketLog({
       operation: "PICKUP_LOCATION_MATCH",
       request_payload: {
@@ -476,6 +482,7 @@ const createShipment = async ({
 
     console.log("SHIPROCKET ORDER CREATED SUCCESSFULLY");
   } catch (error) {
+    void logException(error);
     await saveShiprocketLog({
       order_id: String(order.id),
       operation: "CREATE_SHIPMENT",
@@ -554,6 +561,7 @@ const createShipment = async ({
       { headers },
     );
   } catch (error) {
+    void logException(error);
     // API request failed.
     await saveShiprocketLog({
       order_id: String(order.id),
@@ -704,6 +712,7 @@ const trackShipment = async (awb, orderId = null) => {
     // Preserve the original Shiprocket response for existing callers.
     return response.data;
   } catch (error) {
+    void logException(error);
     await saveShiprocketLog({
       order_id: orderId ? String(orderId) : null,
 
@@ -770,6 +779,7 @@ const getOrderStatus = async (shiprocketOrderId, orderId = null) => {
       status_code: shiprocketOrder.status_code ?? null,
     };
   } catch (error) {
+    void logException(error);
     await saveShiprocketLog({
       order_id: orderId ? String(orderId) : null,
       operation: "GET_ORDER_STATUS",

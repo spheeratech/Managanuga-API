@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 const Notification = require("../models/Notification");
 const { sendPushNotification } = require("../services/fcmService");
@@ -27,6 +29,7 @@ const getNotifications = async (req, res) => {
       notifications,
     });
   } catch (error) {
+    void logException(error);
     console.error(
       "Get Notifications Error:",
       error
@@ -64,6 +67,7 @@ const getUnreadCount = async (req, res) => {
       count,
     });
   } catch (error) {
+    void logException(error);
     console.error(
       "Get Unread Count Error:",
       error
@@ -110,6 +114,7 @@ const markAsRead = async (req, res) => {
       notification,
     });
   } catch (error) {
+    void logException(error);
     console.error(
       "Mark Notification Read Error:",
       error
@@ -146,6 +151,7 @@ const markAllAsRead = async (req, res) => {
       message: "All notifications marked as read",
     });
   } catch (error) {
+    void logException(error);
     console.error(
       "Mark All Notifications Read Error:",
       error
@@ -250,6 +256,7 @@ const createTestNotification = async (
       fcmResponse,
     });
   } catch (error) {
+    void logException(error);
     console.error(
       "❌ Create/Send Notification Error:",
       error
@@ -345,6 +352,7 @@ const sendTestPushNotification = async (
       firebaseResponse,
     });
   } catch (error) {
+    void logException(error);
     console.error(
       "❌ Send Test Push Error:",
       error

@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const ProductReview = require("../models/ProductReview");
 
 /* --------------------------------
@@ -36,6 +38,7 @@ const createReview = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    void logException(error);
     console.error("CREATE REVIEW ERROR:", error);
 
     if (error.code === "23505") {
@@ -90,6 +93,7 @@ const createOrderReview = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    void logException(error);
     console.error("CREATE ORDER REVIEW ERROR:", error);
 
     return res.status(500).json({
@@ -121,6 +125,7 @@ const getProductReviews = async (req, res) => {
       data: reviews,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET REVIEWS ERROR:", error);
 
     res.status(500).json({

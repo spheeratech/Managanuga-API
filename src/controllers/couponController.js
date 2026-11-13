@@ -1,4 +1,6 @@
 
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Coupon = require("../models/Coupon");
 const Membership = require("../models/Membership");
 
@@ -94,6 +96,7 @@ const validateCoupon = async (req, res) => {
       },
     });
   } catch (error) {
+    void logException(error);
     console.error("VALIDATE COUPON ERROR:", error);
 
     return res.status(500).json({
@@ -114,6 +117,7 @@ const getAvailableCoupons = async (req, res) => {
       data: coupons,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET AVAILABLE COUPONS ERROR:", error);
 
     return res.status(500).json({

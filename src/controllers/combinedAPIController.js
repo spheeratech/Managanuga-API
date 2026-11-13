@@ -1,4 +1,6 @@
 
+
+const { logException } = require("../utils/exceptionLogger.js");
 const combinedAPIModel = require("../models/combinedAPIModel");
 
 const getCombinedAPI = async (req, res) => {
@@ -13,6 +15,7 @@ const getCombinedAPI = async (req, res) => {
       data,
     });
   } catch (error) {
+    void logException(error);
     console.error("Combined API Error:", error);
 
     return res.status(500).json({

@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const jwt = require("jsonwebtoken");
 const pool = require("../../db");
 
@@ -25,6 +27,7 @@ const requireWalletOwner = async (req, res, next) => {
   try {
     authenticatedUser = jwt.verify(token, process.env.JWT_SECRET);
   } catch (error) {
+    void logException(error);
     return res.status(401).json({
       success: false,
       message: "Invalid or expired authentication token",
@@ -75,6 +78,7 @@ const requireWalletOwner = async (req, res, next) => {
     req.authenticatedUser = authenticatedUser;
     return next();
   } catch (error) {
+    void logException(error);
     return next(error);
   }
 };

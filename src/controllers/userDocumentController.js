@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const UserDocument = require("../models/UserDocument");
 
 const uploadProfileImage = async (req, res) => {
@@ -32,6 +34,7 @@ const uploadProfileImage = async (req, res) => {
       data: document,
     });
   } catch (error) {
+    void logException(error);
     console.error(
       "UPLOAD PROFILE IMAGE ERROR:",
       error
@@ -62,6 +65,7 @@ const getProfileImage = async (req, res) => {
 
     return res.send(result.profile_image);
   } catch (error) {
+    void logException(error);
     console.error(
       "GET PROFILE IMAGE ERROR:",
       error
@@ -100,6 +104,7 @@ const deleteProfileImage = async (req, res) => {
       data: document,
     });
   } catch (error) {
+    void logException(error);
     console.error(
       "DELETE PROFILE IMAGE ERROR:",
       error

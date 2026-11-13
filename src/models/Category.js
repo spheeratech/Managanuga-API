@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 
 // ==========================================
@@ -142,6 +144,7 @@ const updateCategory = async (id, data) => {
 
     return updatedCategory;
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     throw error;
   } finally {
