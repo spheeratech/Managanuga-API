@@ -732,7 +732,8 @@ if (
 
     if (
       String(localPayment.payment_type || "").toUpperCase() === "MEMBERSHIP" &&
-      Number(localPayment.membership_plan_id) !== Number(membershipPlanId)
+      Number(localPayment.membership_plan_id) !==
+Number(membershipPlanId || localPayment.membership_plan_id)
     ) {
       return res.status(409).json({
         success: false,
@@ -1020,7 +1021,7 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
       }
 
       if (
-  (paymentType || "").toUpperCase() !== "MEMBERSHIP" &&
+  String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP" &&
   couponCode &&
   String(couponCode).trim()
 ) {
@@ -1373,7 +1374,7 @@ const updateLocalPayment = async (status, client = null) => {
       }
     };
 
-if ((paymentType || "").toUpperCase() !== "MEMBERSHIP") {
+if (String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP") {
   await updateLocalPayment("PAID");
 }
 
@@ -1391,7 +1392,7 @@ await Membership.checkAndResetMonthlyBenefits(userId);
         ? null
         : Number(localPayment.membership_id);
 
-    if ((paymentType || "").toUpperCase() !== "MEMBERSHIP") {
+    if (String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP") {
       /*
        * IMPORTANT:
        *
@@ -1562,14 +1563,14 @@ await Membership.checkAndResetMonthlyBenefits(userId);
    MEMBERSHIP PAYMENT
 ===================================================== */
 
-    if ((paymentType || "").toUpperCase() === "MEMBERSHIP") {
+    if (String(localPayment.payment_type || paymentType || "").toUpperCase() === "MEMBERSHIP") {
       const planResult = await pool.query(
         `
         SELECT *
         FROM lkp_subscription_plans
         WHERE id = $1
       `,
-        [membershipPlanId],
+        [membershipPlanId || localPayment.membership_plan_id],
       );
 
       const plan = planResult.rows[0];
@@ -2200,7 +2201,7 @@ try {
 
     let createdOrder = null;
 
-    if ((paymentType || "").toUpperCase() !== "MEMBERSHIP") {
+    if (String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP") {
       console.log("===== CREATING NORMAL ORDER =====");
 
       /* ===================================================
