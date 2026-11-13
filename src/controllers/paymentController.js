@@ -798,6 +798,7 @@ if (
     const paymentId = razorpayPayment.id || razorpay_payment_id;
 
     let recoverCapturedMembership = false;
+    let recoverCapturedOrder = false;
 
     if (String(localPayment.status || "").toUpperCase() === "PAID") {
       if (String(localPayment.payment_id || "") !== String(paymentId)) {
@@ -808,8 +809,9 @@ if (
       }
 
       if (String(localPayment.payment_type || "").toUpperCase() === "ORDER") {
-        const existingOrderResult = await pool.query(
-          `
+        const existingOrderResult = localPayment.order_id
+          ? await pool.query(
+              `
       SELECT *
       FROM orders
       WHERE order_id = $1
@@ -817,33 +819,30 @@ if (
         AND is_active = 1
       LIMIT 1
       `,
-          [localPayment.order_id, userId],
-        );
+              [localPayment.order_id, userId],
+            )
+          : { rows: [] };
         const existingOrder = existingOrderResult.rows[0];
 
         if (!existingOrder) {
-          return res.status(409).json({
-            success: false,
-            message:
-              "Captured payment is marked paid but its order requires reconciliation",
-            paymentId: localPayment.id,
+          recoverCapturedOrder = true;
+        } else {
+          return res.json({
+            success: true,
+            payment: localPayment,
+            order: existingOrder,
+            orderId: existingOrder.order_id,
+            membershipBenefits: null,
+            actualAmount: Number(existingOrder.actual_amount),
+            membershipDiscount: Number(existingOrder.membership_discount || 0),
+            walletClaim: Number(existingOrder.wallet_claim || 0),
+            deliveryCharge: Number(existingOrder.delivery_charge || 0),
+            payableAmount: Number(existingOrder.payable_amount),
+            message: "Payment verified and order already created.",
           });
         }
-
-        return res.json({
-          success: true,
-          payment: localPayment,
-          order: existingOrder,
-          orderId: existingOrder.order_id,
-          membershipBenefits: null,
-          actualAmount: Number(existingOrder.actual_amount),
-          membershipDiscount: Number(existingOrder.membership_discount || 0),
-          walletClaim: Number(existingOrder.wallet_claim || 0),
-          deliveryCharge: Number(existingOrder.delivery_charge || 0),
-          payableAmount: Number(existingOrder.payable_amount),
-          message: "Payment verified and order already created.",
-        });
       }
+
 
       if (
         String(localPayment.payment_type || "").toUpperCase() === "MEMBERSHIP"
@@ -963,7 +962,7 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
       }
     }
 
-    if (!recoverCapturedMembership) {
+    if (!recoverCapturedMembership && !recoverCapturedOrder) {
       return res.status(409).json({
         success: false,
         message: "Paid payment has no supported reconciliation path",
@@ -974,7 +973,8 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
 
   if (
     String(localPayment.status || "").toUpperCase() !== "PENDING" &&
-    !recoverCapturedMembership
+    !recoverCapturedMembership &&
+    !recoverCapturedOrder
   ) {
     return res.status(409).json({
       success: false,
@@ -982,6 +982,7 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
       paymentId: localPayment.id,
     });
   }
+
 
     const pendingOrderResult = await verificationLockClient.query(
       `
@@ -1584,7 +1585,7 @@ await Membership.checkAndResetMonthlyBenefits(userId);
       }
 
       if (
-        process.env.ALLOW_ONE_RUPEE_TEST !== "true" &&
+        !isRazorpayTestMode() &&
         Math.round(Number(plan.plan_price) * 100) !==
         Math.round(razorpayAmount * 100)
       ) {
