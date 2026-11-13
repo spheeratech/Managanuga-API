@@ -778,10 +778,11 @@ console.log("RAZORPAY_TEST_MODE:", isRazorpayTestMode());
 console.log("Expected Razorpay Amount:", expectedAmount);
 console.log("Razorpay Amount:", razorpayAmount);
 
+
 if (
   !Number.isFinite(razorpayAmountPaise) ||
   !Number.isFinite(expectedAmount) ||
-  !Number.isInteger(razorpayAmountPaise ||
+  !Number.isInteger(razorpayAmountPaise) ||
   Math.round(razorpayAmountPaise) !==
     Math.round(expectedAmount * 100)
 ) {
@@ -792,6 +793,7 @@ if (
     razorpayAmount,
   });
 }
+
 
 
     /* =====================================================
