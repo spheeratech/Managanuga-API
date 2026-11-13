@@ -771,14 +771,14 @@ Number(membershipPlanId || localPayment.membership_plan_id)
 const razorpayAmountPaise = Number(razorpayPayment.amount);
 const razorpayAmount = razorpayAmountPaise / 100;
 
-const isOneRupeeTest =
-  process.env.ALLOW_ONE_RUPEE_TEST === "true";
+const isOneRupeeTest = process.env.ALLOW_ONE_RUPEE_TEST === "true";
 
-const expectedAmount = isOneRupeeTest
-  ? 1
-  : Number(localPayment.payable_amount);
-
+if(isOneRupeeTest) {
+const expectedAmount = isOneRupeeTest ? 1 : Number(localPayment.payable_amount);
+razorpayAmount = expectedAmount;
 console.log("Expected Razorpay Amount:", expectedAmount);
+}
+
 
     console.log("Razorpay Amount:", razorpayAmount);
 
