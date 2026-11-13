@@ -766,6 +766,7 @@ Number(membershipPlanId || localPayment.membership_plan_id)
    DO NOT compare this with the real
    order payable amount.
 ===================================================== */
+
 const razorpayAmountPaise = Number(razorpayPayment.amount);
 const razorpayAmount = razorpayAmountPaise / 100;
 
@@ -780,8 +781,9 @@ console.log("Razorpay Amount:", razorpayAmount);
 if (
   !Number.isFinite(razorpayAmountPaise) ||
   !Number.isFinite(expectedAmount) ||
-  !Number.isInteger(razorpayAmountPaise) ||
-  Math.round(razorpayAmountPaise) !== Math.round(expectedAmount * 100)
+  !Number.isInteger(razorpayAmountPaise ||
+  Math.round(razorpayAmountPaise) !==
+    Math.round(expectedAmount * 100)
 ) {
   return res.status(400).json({
     success: false,
@@ -790,6 +792,7 @@ if (
     razorpayAmount,
   });
 }
+
 
     /* =====================================================
    RAZORPAY PAYMENT DETAILS

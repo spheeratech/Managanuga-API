@@ -7,16 +7,17 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-const createRazorpayOrder = async (amount) => {
 
-   const finalAmount = 1; 
+const createRazorpayOrder = async (amount) => {
+  const finalAmount = Math.round(Number(amount) * 100);
 
   return await razorpay.orders.create({
-     amount: finalAmount * 100,                                         // amount: Math.round(Number(amount) * 100),    (live amount)       
+    amount: finalAmount,
     currency: "INR",
     receipt: "rcpt_" + Date.now(),
   });
 };
+
 
 const verifyPaymentSignature = (
   razorpay_order_id,
