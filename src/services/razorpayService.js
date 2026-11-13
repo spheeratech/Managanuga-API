@@ -8,10 +8,11 @@ const razorpay = new Razorpay({
 });
 
 const createRazorpayOrder = async (amount) => {
-  const finalAmount = 1;
+
+  // const finalAmount = 1;---> for test mode
 
   return await razorpay.orders.create({
-    amount: finalAmount * 100,
+  amount: Math.round(Number(amount) * 100),           //amount: finalAmount * 100,(test mode)
     currency: "INR",
     receipt: "rcpt_" + Date.now(),
   });
