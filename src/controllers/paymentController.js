@@ -761,9 +761,7 @@ if (
 const razorpayAmountPaise = Number(razorpayPayment.amount);
 const razorpayAmount = razorpayAmountPaise / 100;
 
-const expectedAmount = isRazorpayTestMode()
-  ? 1
-  : Number(localPayment.payable_amount);
+const expectedAmount = 1;
 
 console.log("Expected Razorpay Amount:", expectedAmount);
 

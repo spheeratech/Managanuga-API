@@ -7,9 +7,7 @@ const razorpay = new Razorpay({
 });
 
 const createRazorpayOrder = async (amount) => {
-  const finalAmount = process.env.RAZORPAY_TEST_MODE === "true"
-    ? 1
-    : Number(amount);
+  const finalAmount = 1;
 
   return await razorpay.orders.create({
     amount: finalAmount * 100,
