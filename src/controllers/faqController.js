@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const FAQ = require("../models/FAQ");
 const pool = require("../../db");
 const { getRoleName } = require("../utils/userRoles");
@@ -84,6 +86,7 @@ const getFAQs = async (req, res) => {
       },
     });
   } catch (error) {
+    void logException(error);
     console.error("Get FAQs error:", error);
 
     return res.status(500).json({

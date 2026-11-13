@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Reseller = require("../models/Reseller");
 
 
@@ -28,6 +30,7 @@ const getCustomers = async (req, res) => {
     });
 
   } catch (err) {
+    void logException(err);
     console.error("GET RESELLER CUSTOMERS ERROR:", err);
 
     return res.status(500).json({
@@ -67,6 +70,7 @@ const getBenefits = async (req, res) => {
     });
 
   } catch (err) {
+    void logException(err);
     console.error("GET RESELLER BENEFITS ERROR:", err);
 
     return res.status(500).json({
@@ -110,6 +114,7 @@ const getProfile = async (req, res) => {
     });
 
   } catch (err) {
+    void logException(err);
     console.error("GET RESELLER PROFILE ERROR:", err);
 
     return res.status(500).json({

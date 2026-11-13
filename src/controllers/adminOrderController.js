@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 const AdminOrder = require("../models/AdminOrder");
 // const xpressbeesService = require("../services/xpressbeesService");
@@ -36,6 +38,7 @@ const createAdminOrder = async (req, res) => {
       data: order,
     });
   } catch (error) {
+    void logException(error);
     console.error("CREATE ADMIN ORDER ERROR:", error);
 
     return res.status(500).json({
@@ -59,6 +62,7 @@ const getAdminOrders = async (req, res) => {
       data: orders,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET ADMIN ORDERS ERROR:", error);
 
     return res.status(500).json({
@@ -90,6 +94,7 @@ const getAdminOrderById = async (req, res) => {
       data: order,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET ADMIN ORDER ERROR:", error);
 
     return res.status(500).json({
@@ -136,6 +141,7 @@ const updateAdminOrder = async (req, res) => {
       data: order,
     });
   } catch (error) {
+    void logException(error);
     console.error("UPDATE ADMIN ORDER ERROR:", error);
 
     return res.status(500).json({
@@ -168,6 +174,7 @@ const deleteAdminOrder = async (req, res) => {
       data: order,
     });
   } catch (error) {
+    void logException(error);
     console.error("DELETE ADMIN ORDER ERROR:", error);
 
     return res.status(500).json({
@@ -192,6 +199,7 @@ const deleteAllAdminOrders = async (req, res) => {
       data: deletedOrders,
     });
   } catch (error) {
+    void logException(error);
     console.error("DELETE ALL ADMIN ORDERS ERROR:", error);
 
     return res.status(500).json({
@@ -375,6 +383,7 @@ const verifyAdminOrder = async (req, res) => {
         );
       }
     } catch (notificationError) {
+      void logException(notificationError);
       console.error(
         `ORDER ACCEPTANCE NOTIFICATION FAILED FOR ORDER ${order.id}:`,
         notificationError.message,
@@ -660,6 +669,7 @@ const verifyAdminOrder = async (req, res) => {
           ),
         });
       } catch (shipmentError) {
+        void logException(shipmentError);
         const httpStatus = shipmentError.response?.status || null;
 
         console.error("========== SHIPMENT CREATION FAILED ==========");
@@ -770,6 +780,7 @@ const verifyAdminOrder = async (req, res) => {
           );
         }
       } catch (smsError) {
+        void logException(smsError);
         console.error(
           `ORDER CONFIRMATION SMS FAILED FOR ORDER ${order.id}:`,
           smsError.message,
@@ -796,6 +807,7 @@ const verifyAdminOrder = async (req, res) => {
     });
    
   } catch (error) {
+    void logException(error);
     console.error("VERIFY ADMIN ORDER ERROR:", error);
 
     // --------------------------------
@@ -1091,6 +1103,7 @@ const getShiprocketTracking = async (req, res) => {
       },
     });
   } catch (error) {
+    void logException(error);
     console.error("GET SHIPROCKET TRACKING ERROR:", {
       orderId: req.params.id,
       httpStatus: error.response?.status || null,

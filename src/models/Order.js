@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 // const xpressbeesService = require("../services/xpressbeesService");
 const Membership = require("./Membership");
@@ -454,6 +456,7 @@ if (!userId) {
 
     return order;
   } catch (error) {
+    void logException(error);
     if (client) {
       await client.query("ROLLBACK");
     }
@@ -722,6 +725,7 @@ if (!userId) {
 
     return order;
   } catch (error) {
+    void logException(error);
     if (client) {
       await client.query("ROLLBACK");
     }
@@ -1028,6 +1032,7 @@ const trackOrder = async (req, res) => {
 
     return res.json(tracking);
   } catch (err) {
+    void logException(err);
     console.error("TRACK ORDER ERROR:", err);
 
     return res.status(500).json({

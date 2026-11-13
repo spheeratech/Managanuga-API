@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 
 /* --------------------------------
@@ -211,6 +213,7 @@ const createAdminOrder = async ({
       ],
     };
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     throw error;
   } finally {

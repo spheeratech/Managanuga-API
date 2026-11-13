@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Wallet = require("../models/Wallet");
 const Notification = require("../models/Notification");
 
@@ -39,6 +41,7 @@ const getWallet = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     console.error("Get Wallet Error:", error);
 
     return res.status(500).json({
@@ -69,6 +72,7 @@ const getWalletTransactions = async (req, res) => {
       transactions,
     });
   } catch (error) {
+    void logException(error);
     console.error("Get Wallet Transactions Error:", error);
 
     return res.status(500).json({
@@ -105,6 +109,7 @@ const payOrderWithWallet = async (req, res) => {
           referenceId: result.payment.id,
         });
       } catch (notificationError) {
+        void logException(notificationError);
         console.error(
           "Wallet Payment Notification Error:",
           notificationError
@@ -120,6 +125,7 @@ const payOrderWithWallet = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    void logException(error);
     if (
       error.message === "Customer order not found" ||
       error.message === "Customer wallet not found"
@@ -214,6 +220,7 @@ const createRedeemRequest = async (req, res) => {
         `REDEEM IN_PROGRESS NOTIFICATION CREATED FOR USER ${result.redeem.user_id}`
       );
     } catch (notificationError) {
+      void logException(notificationError);
       /*
        * Notification failure must NOT break the successful
        * redeem request.
@@ -231,6 +238,7 @@ const createRedeemRequest = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
 
     if (
       error.message === "Wallet not found" ||
@@ -337,6 +345,7 @@ const updateRedeemStatus = async (req, res) => {
       `${type} NOTIFICATION CREATED FOR USER ${redeem.user_id}`
     );
   } catch (notificationError) {
+    void logException(notificationError);
     console.error(
       `${redeem.redeem_status} NOTIFICATION FAILED:`,
       notificationError.message
@@ -351,6 +360,7 @@ const updateRedeemStatus = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     if (
       error.message === "Redeem request not found" ||
       error.message === "Invalid redeem status"
@@ -401,6 +411,7 @@ const getRedeemStatus = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     console.error(
       "Get Redeem Status Error:",
       error
@@ -442,6 +453,7 @@ const getRedeemTransactions = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     console.error(
       "Get Redeem Transactions Error:",
       error
@@ -467,6 +479,7 @@ const getCustomerReferralWallet = async (req, res) => {
         CUSTOMER_REFERRAL_MIN_REDEMPTION_AMOUNT,
     });
   } catch (error) {
+    void logException(error);
     console.error("Customer Referral Wallet Error:", error);
 
     return res.status(500).json({
@@ -489,6 +502,7 @@ const getCustomerReferralTransactions = async (req, res) => {
       transactions,
     });
   } catch (error) {
+    void logException(error);
     console.error("Customer Referral Transactions Error:", error);
 
     return res.status(500).json({
@@ -528,6 +542,7 @@ const getCustomerReferralOrderPaymentBreakdown = async (req, res) => {
       breakdown,
     });
   } catch (error) {
+    void logException(error);
     console.error("Customer Referral Order Breakdown Error:", error);
 
     return res.status(500).json({
@@ -552,6 +567,7 @@ const getCustomerReferralSummary = async (req, res) => {
       summary,
     });
   } catch (error) {
+    void logException(error);
     console.error("Customer Referral Summary Error:", error);
 
     return res.status(500).json({

@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Cart = require("../models/Cart");
 
 
@@ -43,6 +45,7 @@ const addItem = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     console.error("ADD CART ITEM ERROR:", error);
 
     res.status(500).json({
@@ -76,6 +79,7 @@ const getItems = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     console.error("GET CART ITEMS ERROR:", error);
 
     res.status(500).json({
@@ -118,6 +122,7 @@ const getItemById = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     console.error("GET CART ITEM ERROR:", error);
 
     res.status(500).json({
@@ -176,6 +181,7 @@ const updateItem = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     console.error("UPDATE CART ITEM ERROR:", error);
 
     res.status(500).json({
@@ -219,6 +225,7 @@ const deleteItem = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     console.error("DELETE CART ITEM ERROR:", error);
 
     res.status(500).json({
@@ -251,6 +258,7 @@ const getCartCount = async (req, res) => {
     });
 
   } catch (error) {
+    void logException(error);
     console.error("GET CART COUNT ERROR:", error);
 
     res.status(500).json({

@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Category = require("../models/Category");
 
 // ==========================================
@@ -12,6 +14,7 @@ const getCategories = async (req, res) => {
       data: categories,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET CATEGORIES ERROR:", error);
 
     res.status(500).json({
@@ -34,6 +37,7 @@ const getActiveCategories = async (req, res) => {
       data: categories,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET ACTIVE CATEGORIES ERROR:", error);
 
     res.status(500).json({
@@ -62,6 +66,7 @@ const getCategoryById = async (req, res) => {
       data: category,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET CATEGORY ERROR:", error);
 
     res.status(500).json({
@@ -84,6 +89,7 @@ const createCategory = async (req, res) => {
       data: category,
     });
   } catch (error) {
+    void logException(error);
     console.error("CREATE CATEGORY ERROR:", error);
 
     res.status(500).json({
@@ -113,6 +119,7 @@ const updateCategory = async (req, res) => {
       data: category,
     });
   } catch (error) {
+    void logException(error);
     console.error("UPDATE CATEGORY ERROR:", error);
 
     res.status(500).json({
@@ -142,6 +149,7 @@ const deleteCategory = async (req, res) => {
       data: category,
     });
   } catch (error) {
+    void logException(error);
     console.error("DELETE CATEGORY ERROR:", error);
 
     res.status(500).json({

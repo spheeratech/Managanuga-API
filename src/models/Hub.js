@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 
 // 1. STATES - Dynamic from StateList
@@ -14,6 +16,7 @@ const getStates = async () => {
 
     return result.rows;
   } catch (err) {
+    void logException(err);
     console.error("Model getStates error:", err.message);
     return [];
   }
@@ -46,6 +49,7 @@ const getDistrictsByState = async (stateId) => {
 
     return result.rows;
   } catch (error) {
+    void logException(error);
     console.error("getDistrictsByState error:", error.message);
     throw error;
   }
@@ -119,6 +123,7 @@ const getPincodesByCity = async (stateId, distId, cityId) => {
 
     return result.rows;
   } catch (error) {
+    void logException(error);
     console.error("Model getPincodesByCity error:", error.message);
     throw error;
   }
@@ -204,6 +209,7 @@ const getHubs = async () => {
     `);
     return result.rows;
   } catch (error) {
+    void logException(error);
     console.error("Model getHubs error:", error.message);
     throw error;
   }
@@ -343,6 +349,7 @@ const createHub = async (hubData) => {
     ); // <-- ADD THIS
     return hubResult.rows[0];
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     console.error("CREATE HUB TRANSACTION FAILED:", error.message); // <-- ADD THIS
     throw error;
@@ -470,6 +477,7 @@ const updateHub = async (hubId, hubData) => {
     await client.query("COMMIT");
     return hubResult.rows[0];
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     throw error;
   } finally {
@@ -489,6 +497,7 @@ const deleteHub = async (hubId) => {
     await client.query("COMMIT");
     return result.rows[0] || null;
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     throw error;
   } finally {

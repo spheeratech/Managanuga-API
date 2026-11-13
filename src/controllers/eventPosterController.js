@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const EventPoster = require("../models/eventPosterModel");
 const fs = require("fs");
 const path = require("path");
@@ -11,6 +13,7 @@ const getActiveEventPoster = async (req, res) => {
       data: poster,
     });
   } catch (error) {
+    void logException(error);
     console.error("Error fetching event poster:", error);
 
     return res.status(500).json({
@@ -91,6 +94,7 @@ const createEventPoster = async (req, res) => {
       data: poster,
     });
   } catch (error) {
+    void logException(error);
     console.error("Error creating event poster:", error);
 
     return res.status(500).json({
@@ -108,6 +112,7 @@ const getAllEventPosters = async (req, res) => {
       data: posters,
     });
   } catch (error) {
+    void logException(error);
     console.error("Error fetching all event posters:", error);
 
     return res.status(500).json({
@@ -167,6 +172,7 @@ const updateEventPoster = async (req, res) => {
       data: poster,
     });
   } catch (error) {
+    void logException(error);
     console.error("Error updating event poster:", error);
 
     return res.status(500).json({
@@ -212,6 +218,7 @@ const deleteEventPoster = async (req, res) => {
           console.log("Event poster image deleted:", filePath);
         }
       } catch (fileError) {
+        void logException(fileError);
         if (fileError.code === "ENOENT") {
           console.log("Event poster image already missing:", poster.image_url);
         } else {
@@ -229,6 +236,7 @@ const deleteEventPoster = async (req, res) => {
       },
     });
   } catch (error) {
+    void logException(error);
     console.error("Error deleting event poster:", error);
 
     return res.status(500).json({

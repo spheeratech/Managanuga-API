@@ -1,4 +1,5 @@
 const pool = require("../../db");
+const { logException } = require("../utils/exceptionLogger");
 
 /**
  * Process Vendor / Reseller benefit for a membership.
@@ -295,9 +296,11 @@ const processMembershipBenefitInTransaction = async ({
     );
 
     if (beneficiaryResult.rows.length === 0) {
-      throw new Error(
-        `Active ${beneficiaryRole} user not found for ${beneficiaryId}`
+      const error = new Error(
+        `Active ${beneficiaryRole} user not found for ${beneficiaryId}`,
       );
+      void logException(error);
+      throw error;
     }
 
    // Create the wallet only if this user does not already have one.
@@ -487,6 +490,7 @@ const processMembershipBenefit = async ({
     await client.query("COMMIT");
     return result;
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     throw error;
   } finally {
