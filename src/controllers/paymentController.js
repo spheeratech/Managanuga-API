@@ -482,7 +482,7 @@ if (paymentTypeUpper !== "MEMBERSHIP") {
        actualAmount and payableAmount.
     ===================================================== */
 
-    const razorpayAmount = isRazorpayTestMode() ? 1 : payableAmount;
+    const razorpayAmount = payableAmount;   //const razorpayAmount = isRazorpayTestMode() ? 1 : payableAmount;(for test mode)
 
     const razorpayOrder =
       await razorpayService.createRazorpayOrder(razorpayAmount);
