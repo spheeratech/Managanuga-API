@@ -1011,9 +1011,13 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
         });
       }
 
-      if (couponCode && String(couponCode).trim()) {
-        verifiedCoupon = await Coupon.findByCode(String(couponCode).trim());
-        const orderLitres = await Membership.calculateOrderLitres(
+      if (
+  (paymentType || "").toUpperCase() !== "MEMBERSHIP" &&
+  couponCode &&
+  String(couponCode).trim()
+) {
+  verifiedCoupon = await Coupon.findByCode(String(couponCode).trim());
+  const orderLitres = await Membership.calculateOrderLitres(
           pendingOrder.item_id,
           pendingOrder.quantity,
           verificationLockClient,
