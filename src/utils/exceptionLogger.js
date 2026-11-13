@@ -79,8 +79,60 @@ const logException = (error, req = requestContext.getStore()?.req) => {
   return loggingPromise;
 };
 
+const logIntegrationCall = ({
+  service,
+  operation,
+  outcome,
+  durationMs,
+  error,
+  httpStatus,
+}) => {
+  const req = requestContext.getStore()?.req;
+  const errorType =
+    error && typeof error.name === "string" ? error.name.slice(0, 100) : null;
+  const errorMessage = error ? sanitizeErrorMessage(error.message) : null;
+  const errorCode = error ? getErrorCode(error) : null;
+  const safeHttpStatus =
+    Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599
+      ? httpStatus
+      : null;
+
+  return pool
+    .query(
+      `INSERT INTO api_integration_logs
+        (request_id, service, operation, outcome, duration_ms, http_status,
+         error_type, error_message, error_code, machine_hostname, node_version,
+         process_id, environment)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [
+        req?.requestId || null,
+        service.slice(0, 100),
+        operation.slice(0, 100),
+        outcome,
+        Math.max(0, Math.min(Math.round(durationMs), 2147483647)),
+        safeHttpStatus,
+        errorType,
+        errorMessage,
+        errorCode,
+        machineInfo.hostname,
+        machineInfo.nodeVersion,
+        machineInfo.processId,
+        machineInfo.environment,
+      ],
+    )
+    .catch((loggingError) => {
+      console.error("Failed to write API integration log:", {
+        requestId: req?.requestId || null,
+        service,
+        operation,
+        message: loggingError.message,
+      });
+    });
+};
+
 module.exports = {
   getErrorCode,
+  logIntegrationCall,
   logException,
   machineInfo,
   runWithRequestContext,
