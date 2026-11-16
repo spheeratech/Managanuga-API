@@ -868,72 +868,107 @@ if (!existingMembership) {
   recoverCapturedMembership = true;
 } else {
 
-        const requestedCustomerReferralId =
-          typeof customerReferralId === "string"
-            ? customerReferralId.trim()
-            : "";
+          const requestedReferralInput =
+          (typeof referralCode === "string" && referralCode.trim()) ||
+          (typeof customerReferralId === "string" &&
+            customerReferralId.trim()) ||
+          "";
 
-        if (requestedCustomerReferralId) {
-          let validatedReferrerId;
-          try {
-            const referralValidation = await validateCustomerReferral({
-              referrerId: requestedCustomerReferralId,
-              customerId: userId,
-            });
-            validatedReferrerId = referralValidation.referrerId;
-          } catch (error) {
-            void logException(error);
-            return res.status(400).json({
-              success: false,
-              message: error.message,
-            });
-          }
+        const existingAssignedRole = String(
+          existingMembership.assigned_role || "",
+        )
+          .trim()
+          .toUpperCase();
 
-          const recordedReferralId = String(
-            existingMembership.referral_code || "",
-          ).trim();
+        const isExistingVendorOrReseller =
+          existingAssignedRole === "VENDOR" ||
+          existingAssignedRole === "RESELLER";
 
-          if (!recordedReferralId) {
-            const referralUpdate = await pool.query(
-              `
-              UPDATE user_memberships
-              SET referral_code = $1,
-                  updated_at = NOW(),
-                  updated_by = $2
-              WHERE id = $3
-                AND user_id = $2
-                AND payment_id = $4
-                AND (referral_code IS NULL OR BTRIM(referral_code) = '')
-              RETURNING referral_code
-              `,
-              [
-                validatedReferrerId,
-                userId,
-                existingMembership.id,
-                localPayment.id,
-              ],
-            );
+        if (requestedReferralInput && !isExistingVendorOrReseller) {
+          const vendorResellerCheck = await pool.query(
+            `
+            SELECT ul.user_id
+            FROM user_login ul
+            LEFT JOIN user_info ui ON ui.user_id = ul.user_id
+            WHERE ul.is_active = 1
+              AND ul.role IN (3, 4)
+              AND (
+                UPPER(TRIM(ul.user_id)) = UPPER(TRIM($1))
+                OR (
+                  ui.is_active = 1
+                  AND UPPER(TRIM(ui.referral_code)) = UPPER(TRIM($1))
+                )
+              )
+            LIMIT 1
+            `,
+            [requestedReferralInput],
+          );
 
-            if (!referralUpdate.rows[0]) {
+          if (!vendorResellerCheck.rows.length) {
+            let validatedReferrerId;
+            try {
+              const referralValidation = await validateCustomerReferral({
+                referrerId: requestedReferralInput,
+                customerId: userId,
+              });
+              validatedReferrerId = referralValidation.referrerId;
+            } catch (error) {
+              void logException(error);
+              return res.status(400).json({
+                success: false,
+                message: error.message,
+              });
+            }
+
+            const recordedReferralId = String(
+              existingMembership.referral_code || "",
+            ).trim();
+
+            if (!recordedReferralId) {
+              const referralUpdate = await pool.query(
+                `
+                UPDATE user_memberships
+                SET referral_code = $1,
+                    updated_at = NOW(),
+                    updated_by = $2
+                WHERE id = $3
+                  AND user_id = $2
+                  AND payment_id = $4
+                  AND (referral_code IS NULL OR BTRIM(referral_code) = '')
+                RETURNING referral_code
+                `,
+                [
+                  validatedReferrerId,
+                  userId,
+                  existingMembership.id,
+                  localPayment.id,
+                ],
+              );
+
+              if (!referralUpdate.rows) {
+                return res.status(409).json({
+                  success: false,
+                  message:
+                    "Membership referral attribution changed; retry verification",
+                });
+              }
+              existingMembership.referral_code =
+                referralUpdate.rows.referral_code;
+            } else if (
+              recordedReferralId.toUpperCase() !==
+              String(validatedReferrerId).trim().toUpperCase()
+            ) {
               return res.status(409).json({
                 success: false,
                 message:
-                  "Membership referral attribution changed; retry verification",
+                  "A different referral is already recorded for this membership",
               });
             }
-            existingMembership.referral_code =
-              referralUpdate.rows[0].referral_code;
-          } else if (
-            recordedReferralId.toUpperCase() !==
-            String(validatedReferrerId).trim().toUpperCase()
-          ) {
-            return res.status(409).json({
-              success: false,
-              message:
-                "A different referral is already recorded for this membership",
-            });
           }
         }
+    
+
+
 
         const referralReward =
           await creditCustomerReferralRewardForMembership({
@@ -1713,12 +1748,15 @@ await Membership.checkAndResetMonthlyBenefits(userId);
       /* =================================================
    REFERRAL
 ================================================= */
-
       let validatedReferralCode = null;
+      let validatedCustomerReferralId = null;
 
-      if (typeof referralCode === "string" && referralCode.trim() !== "") {
-        const cleanReferralCode = referralCode.trim();
+      const cleanReferralInput =
+        (typeof referralCode === "string" && referralCode.trim()) ||
+        (typeof customerReferralId === "string" && customerReferralId.trim()) ||
+        "";
 
+      if (cleanReferralInput !== "") {
         const referralResult = await pool.query(
           `
     SELECT
@@ -1772,58 +1810,48 @@ await Membership.checkAndResetMonthlyBenefits(userId);
 
     LIMIT 1
     `,
-          [cleanReferralCode],
+          [cleanReferralInput],
         );
 
-        const referrer = referralResult.rows[0];
+        const referrer = referralResult.rows;
 
-        if (!referrer) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid referral code",
-          });
+        if (referrer) {
+          // Prevent self-referral
+          if (
+            String(referrer.referral_user_id).trim().toUpperCase() ===
+            String(userId).trim().toUpperCase()
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: "You cannot use your own referral code",
+            });
+          }
+
+          // Assign the referrer's public user ID
+          assignedBy = referrer.referral_user_id;
+          assignedRoleId = Number(referrer.role);
+          assignedRole = getRoleName(assignedRoleId);
+
+          // Store the generated code if valid; otherwise store the legacy user ID
+          validatedReferralCode = referrer.canonical_referral_code;
+        } else {
+          // Fallback: validate as a Customer referral ID
+          try {
+            const referralValidation = await validateCustomerReferral({
+              referrerId: cleanReferralInput,
+              customerId: userId,
+            });
+
+            validatedCustomerReferralId = referralValidation.referrerId;
+          } catch (error) {
+            void logException(error);
+            return res.status(400).json({
+              success: false,
+              message: error.message || "Invalid referral code",
+            });
+          }
         }
-
-        // Prevent self-referral
-        if (
-          String(referrer.referral_user_id).trim().toUpperCase() ===
-          String(userId).trim().toUpperCase()
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: "You cannot use your own referral code",
-          });
-        }
-
-        // Assign the referrer's public user ID
-        assignedBy = referrer.referral_user_id;
-
-        assignedRoleId = Number(referrer.role);
-        assignedRole = getRoleName(assignedRoleId);
-
-        // Store the generated code if valid; otherwise store the legacy user ID
-        validatedReferralCode = referrer.canonical_referral_code;
       }
-
-
-let validatedCustomerReferralId = null;
-
-if (customerReferralId?.trim()) {
-  try {
-    const referralValidation = await validateCustomerReferral({
-      referrerId: customerReferralId,
-      customerId: userId,
-    });
-
-    validatedCustomerReferralId = referralValidation.referrerId;
-  } catch (error) {
-    void logException(error);
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
-  }
-}
 
 
 
