@@ -945,15 +945,16 @@ if (!existingMembership) {
                 ],
               );
 
-              if (!referralUpdate.rows) {
-                return res.status(409).json({
-                  success: false,
-                  message:
-                    "Membership referral attribution changed; retry verification",
-                });
-              }
-              existingMembership.referral_code =
-                referralUpdate.rows.referral_code;
+            if (!referralUpdate.rows[0]) {
+  return res.status(409).json({
+    success: false,
+    message:
+      "Membership referral attribution changed; retry verification",
+  });
+}
+existingMembership.referral_code =
+  referralUpdate.rows[0].referral_code;
+
             } else if (
               recordedReferralId.toUpperCase() !==
               String(validatedReferrerId).trim().toUpperCase()
@@ -1813,7 +1814,8 @@ await Membership.checkAndResetMonthlyBenefits(userId);
           [cleanReferralInput],
         );
 
-        const referrer = referralResult.rows;
+        const referrer = referralResult.rows[0];
+
 
         if (referrer) {
           // Prevent self-referral
