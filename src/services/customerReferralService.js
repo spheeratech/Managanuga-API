@@ -107,7 +107,7 @@ const creditCustomerReferralRewardForMembership = async ({
       um.id AS membership_id,
       um.user_id AS referred_customer_id,
       um.referral_code,
-      COALESCE(NULLIF(p.actual_amount, 0), sp.plan_price) AS plan_amount
+      sp.plan_price AS plan_amount      
     FROM user_memberships um
     INNER JOIN payments p
       ON p.id = um.payment_id
