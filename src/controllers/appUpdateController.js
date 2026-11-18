@@ -1,4 +1,6 @@
 
+
+const { logException } = require("../utils/exceptionLogger.js");
 const AppUpdate = require("../models/AppUpdate");
 
 const checkAppUpdate = async (req, res, next) => {
@@ -66,6 +68,7 @@ const checkAppUpdate = async (req, res, next) => {
       storeUrl: config.store_url,
     });
   } catch (error) {
+    void logException(error);
     next(error);
   }
 };

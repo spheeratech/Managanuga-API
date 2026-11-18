@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Hub = require("../models/Hub");
 const Notification = require("../models/Notification");
 const getStates = async (req, res) => {
@@ -5,6 +7,7 @@ const getStates = async (req, res) => {
     const data = await Hub.getStates();
     res.json({ success: true, data });
   } catch (error) {
+    void logException(error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -15,6 +18,7 @@ const getDistricts = async (req, res) => {
     const data = await Hub.getDistrictsByState(state_id || "");
     res.json({ success: true, data });
   } catch (error) {
+    void logException(error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -39,6 +43,7 @@ const getCities = async (req, res) => {
 
     return res.json({ success: true, data });
   } catch (error) {
+    void logException(error);
     console.error("GET CITIES ERROR:", error);
     return res.status(500).json({
       success: false,
@@ -57,6 +62,7 @@ const getPincodes = async (req, res) => {
     );
     res.json({ success: true, data });
   } catch (error) {
+    void logException(error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -101,6 +107,7 @@ const createArea = async (req, res) => {
       data,
     });
   } catch (error) {
+    void logException(error);
     console.error("CREATE AREA ERROR:", error);
 
     if (error.code === "PINCODE_EXISTS") {
@@ -132,6 +139,7 @@ const getHubs = async (req, res) => {
     // Always return an explicit object containing the array under 'data'
     return res.status(200).json({ success: true, data });
   } catch (error) {
+    void logException(error);
     console.error("GET HUBS CONTROLLER ERROR:", error.message);
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -143,6 +151,7 @@ const getHubById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Hub not found" });
     res.json({ success: true, data });
   } catch (error) {
+    void logException(error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -164,6 +173,7 @@ const createHub = async (req, res) => {
       data,
     });
   } catch (error) {
+    void logException(error);
     return res.status(400).json({
       success: false,
       message: error.message,
@@ -195,6 +205,7 @@ const updateHub = async (req, res) => {
       data,
     });
   } catch (error) {
+    void logException(error);
     console.error("UPDATE HUB ERROR:", error);
     return res.status(500).json({
       success: false,
@@ -232,6 +243,7 @@ const deleteHub = async (req, res) => {
       data,
     });
   } catch (error) {
+    void logException(error);
     console.error("DELETE HUB ERROR:", error);
     return res.status(500).json({
       success: false,
@@ -255,6 +267,7 @@ const createHubNotification = async ({ userId, title, message, hubId }) => {
       referenceId: null,
     });
   } catch (error) {
+    void logException(error);
     // Notification failure must not undo a successful hub operation.
     console.error("Hub notification failed:", error.message);
   }

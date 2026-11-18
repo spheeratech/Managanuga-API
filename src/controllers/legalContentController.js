@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const LegalContent = require('../models/LegalContent');
 
 // GET LEGAL CONTENT
@@ -19,6 +21,7 @@ exports.getLegalContent = async (req, res) => {
       data: legalContent,
     });
   } catch (err) {
+    void logException(err);
     console.error('GET LEGAL CONTENT ERROR:', err);
 
     res.status(500).json({
@@ -78,6 +81,7 @@ exports.updateLegalContent = async (req, res) => {
       data: updatedContent,
     });
   } catch (err) {
+    void logException(err);
     console.error('UPDATE LEGAL CONTENT ERROR:', err);
 
     res.status(500).json({

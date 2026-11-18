@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 
 const UserLogin = {
@@ -204,6 +206,7 @@ const UserLogin = {
         numeric_user_id: createdLoginUser.id,
       };
     } catch (error) {
+      void logException(error);
       await client.query("ROLLBACK");
       throw error;
     } finally {
@@ -317,6 +320,7 @@ const UserLogin = {
 
       return result.rows[0];
     } catch (error) {
+      void logException(error);
       await client.query("ROLLBACK");
       throw error;
     } finally {

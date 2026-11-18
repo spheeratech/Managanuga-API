@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const PINBOT_PHONE_NUMBER_ID =
   process.env.PINBOT_PHONE_NUMBER_ID;
 
@@ -115,7 +117,8 @@ const sendOrderConfirmation = async ({
 
   try {
     data = JSON.parse(responseText);
-  } catch {
+  } catch (error) {
+    void logException(error);
     data = {
       raw: responseText,
     };
@@ -260,7 +263,8 @@ const sendSubscriptionWhatsApp = async ({
 
   try {
     data = JSON.parse(responseText);
-  } catch {
+  } catch (error) {
+    void logException(error);
     data = {
       raw: responseText,
     };
@@ -389,7 +393,8 @@ const sendUserRegistrationWhatsApp = async ({
 
   try {
     data = JSON.parse(responseText);
-  } catch {
+  } catch (error) {
+    void logException(error);
     data = {
       raw: responseText,
     };

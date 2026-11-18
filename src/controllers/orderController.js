@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Order = require("../models/Order");
 
 const { sendOrderConfirmation } = require("../services/whatsappService");
@@ -156,6 +158,7 @@ const createOrder = async (req, res) => {
         console.log("WhatsApp skipped: customer mobile number not found.");
       }
     } catch (whatsappError) {
+      void logException(whatsappError);
       /* --------------------------------
          WhatsApp failure must NOT fail
          the order itself.
@@ -173,6 +176,7 @@ const createOrder = async (req, res) => {
       data: order,
     });
   } catch (error) {
+    void logException(error);
     console.error("CREATE ORDER ERROR:", error);
 
     return res.status(500).json({
@@ -207,6 +211,7 @@ const getOrders = async (req, res) => {
       data: orders,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET ORDERS ERROR:", error);
 
     return res.status(500).json({
@@ -236,6 +241,7 @@ const getOrderById = async (req, res) => {
       data: order,
     });
   } catch (error) {
+    void logException(error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -257,6 +263,7 @@ const getOrderItems = async (req, res) => {
       data: items,
     });
   } catch (error) {
+    void logException(error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -278,6 +285,7 @@ const updateOrder = async (req, res) => {
       data: order,
     });
   } catch (error) {
+    void logException(error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -299,6 +307,7 @@ const deleteOrder = async (req, res) => {
       data: order,
     });
   } catch (error) {
+    void logException(error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -339,6 +348,7 @@ const trackOrder = async (req, res) => {
 
     res.json(tracking);
   } catch (err) {
+    void logException(err);
     console.error("Tracking Error:", err.response?.data || err.message);
 
     res.status(500).json({

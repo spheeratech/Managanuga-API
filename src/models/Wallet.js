@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 const Membership = require("./Membership");
 
@@ -27,7 +29,8 @@ const parseWalletReference = (description) => {
           referenceId: String(referenceId),
         };
       }
-    } catch {
+    } catch (error) {
+      void logException(error);
       return null;
     }
   }
@@ -406,6 +409,7 @@ const wallet = await ensureCustomerWallet(
     await client.query("COMMIT");
     return { ...result, duplicate: false };
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     throw error;
   } finally {
@@ -466,6 +470,7 @@ const Wallet = {
           updated_at: wallet.updated_at,
         };
       } catch (error) {
+        void logException(error);
         await client.query("ROLLBACK");
         throw error;
       } finally {
@@ -536,6 +541,7 @@ async getCustomerReferralWallet(userId) {
       updated_at: wallet.updated_at,
     };
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     throw error;
   } finally {
@@ -1131,6 +1137,7 @@ const orderResult = await client.query(
         duplicate: false,
       };
     } catch (error) {
+      void logException(error);
       await client.query("ROLLBACK");
       throw error;
     } finally {
@@ -1316,6 +1323,7 @@ async createRedeemRequest(userId, requestedAmount) {
       walletBalance: newBalance,
     };
   } catch (error) {
+    void logException(error);
     await client.query("ROLLBACK");
     throw error;
   } finally {

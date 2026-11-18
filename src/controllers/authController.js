@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 const {
   sendOtp,
@@ -41,6 +43,7 @@ exports.sendOtp = async (req, res) => {
 
     res.json({ message: "OTP sent successfully" });
   } catch (err) {
+    void logException(err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -77,6 +80,7 @@ exports.sendForgotPasswordOtp = async (req, res) => {
       message: "OTP sent successfully",
     });
   } catch (err) {
+    void logException(err);
     console.error("FORGOT PASSWORD OTP ERROR:", err);
 
     res.status(500).json({
@@ -158,6 +162,7 @@ exports.resetPasswordWithOtp = async (req, res) => {
       message: "Password reset successfully",
     });
   } catch (err) {
+    void logException(err);
     console.error("RESET PASSWORD ERROR:", err);
 
     return res.status(500).json({
@@ -270,6 +275,7 @@ try {
     mobile
   );
 } catch (whatsappError) {
+  void logException(whatsappError);
   console.error(
     "USER REGISTRATION WHATSAPP FAILED:",
     whatsappError.message
@@ -297,6 +303,7 @@ try {
     createdLoginUser.user_id
   );
 } catch (notificationError) {
+  void logException(notificationError);
   console.error(
     "WELCOME NOTIFICATION FAILED:",
     notificationError.message
@@ -344,6 +351,7 @@ try {
       requiresName: true,
     });
   } catch (err) {
+    void logException(err);
     console.log("VERIFY ERROR:", err);
 
     return res.status(500).json({
@@ -414,6 +422,7 @@ exports.loginWithPassword = async (req, res) => {
       user,
     });
   } catch (err) {
+    void logException(err);
     console.log("PASSWORD LOGIN ERROR:", err);
     res.status(500).json({
       message: err.message,
@@ -450,6 +459,7 @@ exports.updateFcmToken = async (req, res) => {
       user,
     });
   } catch (err) {
+    void logException(err);
     console.error("FCM TOKEN ERROR:", err);
 
     res.status(500).json({
@@ -490,6 +500,7 @@ exports.updateUsername = async (req, res) => {
       user: updatedUser,
     });
   } catch (err) {
+    void logException(err);
     console.error("UPDATE USERNAME ERROR:", err);
 
   // Duplicate username among ACTIVE accounts
@@ -551,6 +562,7 @@ exports.verifyForgotPasswordOtp = async (req, res) => {
       message: "OTP verified successfully",
     });
   } catch (err) {
+    void logException(err);
     console.error("VERIFY FORGOT PASSWORD OTP ERROR:", err);
 
     return res.status(500).json({
@@ -620,6 +632,7 @@ exports.changePassword = async (req, res) => {
       message: "Password changed successfully",
     });
   } catch (error) {
+    void logException(error);
     console.error("CHANGE PASSWORD ERROR:", error);
 
     return res.status(500).json({
@@ -654,6 +667,7 @@ exports.deleteAccount = async (req, res) => {
       data: deletedUser,
     });
   } catch (error) {
+    void logException(error);
     console.error("DELETE ACCOUNT ERROR:", error);
 
     return res.status(500).json({
@@ -769,6 +783,7 @@ exports.login = async (req, res) => {
 },
     });
   } catch (error) {
+    void logException(error);
     console.error("COMMON LOGIN ERROR:", error);
 
     return res.status(500).json({

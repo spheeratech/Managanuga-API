@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const axios = require("axios");
 
 const sendSMS = async (mobile, message, templateId) => {
@@ -26,6 +28,7 @@ const sendSMS = async (mobile, message, templateId) => {
 
     return response.data;
   } catch (error) {
+    void logException(error);
     console.log("========== SMS ERROR ==========");
     console.log("Status:", error.response?.status);
     console.log("Data:", error.response?.data);

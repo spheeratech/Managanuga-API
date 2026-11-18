@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const express = require("express");
 const axios = require("axios");
 
@@ -56,6 +58,7 @@ router.get("/search", async (req, res) => {
 
     return res.json(predictions);
   } catch (error) {
+    void logException(error);
     console.error(
       "Google Places search error:",
       error.response?.data || error.message,
@@ -113,6 +116,7 @@ router.get("/details", async (req, res) => {
       },
     });
   } catch (error) {
+    void logException(error);
     console.error(
       "Google Place details error:",
       error.response?.data || error.message,

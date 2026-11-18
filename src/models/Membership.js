@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 const { getUnitLitres } = require("../services/membershipCheckoutService");
 
@@ -257,6 +259,7 @@ return existingMembership;
 
     return result.rows[0];
 } catch (error) {
+  void logException(error);
   if (ownsClient) {
     await client.query("ROLLBACK");
   }
@@ -835,6 +838,7 @@ const updateMembershipUsage = async ({
     return updatedMembership;
 
   } catch (error) {
+    void logException(error);
     if (ownsClient) {
       await client.query("ROLLBACK");
     }

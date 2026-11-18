@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const razorpayService = require("../services/razorpayService");
 const pool = require("../../db");
 const generateUserId = require("../utils/generatedUserId");
@@ -19,6 +21,7 @@ const notifySubscriptionAdmin = async ({ userId, title, message, planId }) => {
       referenceId: planId ? Number(planId) : null,
     });
   } catch (error) {
+    void logException(error);
     // Notification failure should not undo a successful plan action.
     console.error("Failed to create subscription notification:", error);
   }
@@ -32,6 +35,7 @@ const getSubscriptionPlans = async (req, res) => {
       plans,
     });
   } catch (error) {
+    void logException(error);
     console.error("Subscription Plans Error:", error);
 
     res.status(500).json({
@@ -52,6 +56,7 @@ const getMyMembership = async (req, res) => {
       membership,
     });
   } catch (error) {
+    void logException(error);
     console.error("Get Membership Error:", error);
 
     res.status(500).json({
@@ -80,6 +85,7 @@ const acceptSubscriptionTerms = async (req, res) => {
       membership,
     });
   } catch (error) {
+    void logException(error);
     console.error("Accept Subscription Terms Error:", error);
 
     res.status(500).json({
@@ -97,6 +103,7 @@ const getAdminSubscriptionPlans = async (req, res) => {
       plans,
     });
   } catch (error) {
+    void logException(error);
     console.error("Admin Subscription Plans Error:", error);
 
     res.status(500).json({
@@ -157,6 +164,7 @@ const createSubscriptionPlan = async (req, res) => {
       plan,
     });
   } catch (error) {
+    void logException(error);
     console.error("Create Subscription Plan Error:", error);
 
     res.status(500).json({
@@ -579,6 +587,7 @@ const verifySubscriptionPayment = async (req, res) => {
       },
     });
   } catch (error) {
+    void logException(error);
     // =====================================================
     // ROLLBACK
     // =====================================================
@@ -586,6 +595,7 @@ const verifySubscriptionPayment = async (req, res) => {
     try {
       await client.query("ROLLBACK");
     } catch (rollbackError) {
+      void logException(rollbackError);
       console.error("Rollback error:", rollbackError);
     }
 
@@ -634,6 +644,7 @@ const createSubscriptionOrder = async (req, res) => {
       customer_email: customer_email || "",
     });
   } catch (error) {
+    void logException(error);
     console.error("Create Subscription Order Error:", error);
 
     res.status(500).json({
@@ -663,6 +674,7 @@ const assignSubscriptionToCustomer = async (req, res) => {
       customer,
     });
   } catch (error) {
+    void logException(error);
     console.error("Assign Subscription Error:", error);
 
     res.status(500).json({
@@ -704,6 +716,7 @@ const toggleSubscriptionPlanStatus = async (req, res) => {
       plan,
     });
   } catch (error) {
+    void logException(error);
     console.error("Toggle Subscription Plan Error:", error);
 
     res.status(500).json({
@@ -736,6 +749,7 @@ const deleteSubscriptionPlan = async (req, res) => {
       plan: deletedPlan,
     });
   } catch (error) {
+    void logException(error);
     console.error("Delete Subscription Plan Error:", error);
 
     res.status(500).json({
@@ -822,6 +836,7 @@ const validateReferralCode = async (req, res) => {
       referralCode: referrer.referral_code,
     });
   } catch (error) {
+    void logException(error);
     console.error("Validate Referral Code Error:", error);
 
     return res.status(500).json({
@@ -860,6 +875,7 @@ const getMembershipWallet = async (req, res) => {
       data: wallet,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET MEMBERSHIP WALLET ERROR:", error);
 
     return res.status(500).json({

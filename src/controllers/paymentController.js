@@ -1,3 +1,4 @@
+const { logException } = require("../utils/exceptionLogger.js");
 const Order = require("../models/Order");
 const Payment = require("../models/Payment");
 const Notification = require("../models/Notification");
@@ -37,7 +38,7 @@ const roundMoney = (amount) =>
   Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
 
 const isRazorpayTestMode = () =>
-  String(process.env.RAZORPAY_KEY_ID || "").startsWith("rzp_test_");
+  process.env.RAZORPAY_TEST_MODE === "true";
 
 const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
   const subtotal = Number(
@@ -481,8 +482,8 @@ if (paymentTypeUpper !== "MEMBERSHIP") {
        actualAmount and payableAmount.
     ===================================================== */
 
-    const razorpayAmount = isRazorpayTestMode() ? 1 : payableAmount;
-
+    // const razorpayAmount = payableAmount;   
+    const razorpayAmount = isRazorpayTestMode() ? 1 : payableAmount;    // // const razorpayAmount = payableAmount;   
     const razorpayOrder =
       await razorpayService.createRazorpayOrder(razorpayAmount);
 
@@ -535,6 +536,7 @@ if (paymentTypeUpper !== "MEMBERSHIP") {
       },
     });
   } catch (err) {
+    void logException(err);
     console.error("CREATE ORDER ERROR:", err);
     if (err.code === "MEMBERSHIP_COUPON_NOT_ELIGIBLE") {
       return res.status(400).json({
@@ -635,8 +637,14 @@ if (
        FETCH RAZORPAY PAYMENT
     ===================================================== */
 
-    const razorpayPayment =
-      await razorpayService.fetchRazorpayPayment(razorpay_payment_id);
+    let razorpayPayment;
+    try {
+      razorpayPayment =
+        await razorpayService.fetchRazorpayPayment(razorpay_payment_id);
+    } catch (error) {
+      await logException(error, req);
+      throw error;
+    }
 
 
       console.log("[PAYMENT DIAGNOSTIC]", {
@@ -729,7 +737,8 @@ if (
 
     if (
       String(localPayment.payment_type || "").toUpperCase() === "MEMBERSHIP" &&
-      Number(localPayment.membership_plan_id) !== Number(membershipPlanId)
+      Number(localPayment.membership_plan_id) !==
+Number(membershipPlanId || localPayment.membership_plan_id)
     ) {
       return res.status(409).json({
         success: false,
@@ -765,29 +774,36 @@ const expectedAmount = isRazorpayTestMode()
   ? 1
   : Number(localPayment.payable_amount);
 
+console.log("RAZORPAY_TEST_MODE:", isRazorpayTestMode());
 console.log("Expected Razorpay Amount:", expectedAmount);
+console.log("Razorpay Amount:", razorpayAmount);
 
-    console.log("Razorpay Amount:", razorpayAmount);
 
-    if (
-      !Number.isFinite(razorpayAmountPaise) ||
-      !Number.isFinite(expectedAmount) ||
-      !Number.isInteger(razorpayAmountPaise) ||
-      Math.round(razorpayAmountPaise) !== Math.round(expectedAmount * 100)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Payment amount mismatch",
-        expectedAmount,
-        razorpayAmount,
-      });
-    }
+if (
+  !Number.isFinite(razorpayAmountPaise) ||
+  !Number.isFinite(expectedAmount) ||
+  !Number.isInteger(razorpayAmountPaise) ||
+  Math.round(razorpayAmountPaise) !==
+    Math.round(expectedAmount * 100)
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Payment amount mismatch",
+    expectedAmount,
+    razorpayAmount,
+  });
+}
+
+
 
     /* =====================================================
    RAZORPAY PAYMENT DETAILS
 ===================================================== */
 
     const paymentId = razorpayPayment.id || razorpay_payment_id;
+
+    let recoverCapturedMembership = false;
+    let recoverCapturedOrder = false;
 
     if (String(localPayment.status || "").toUpperCase() === "PAID") {
       if (String(localPayment.payment_id || "") !== String(paymentId)) {
@@ -798,8 +814,9 @@ console.log("Expected Razorpay Amount:", expectedAmount);
       }
 
       if (String(localPayment.payment_type || "").toUpperCase() === "ORDER") {
-        const existingOrderResult = await pool.query(
-          `
+        const existingOrderResult = localPayment.order_id
+          ? await pool.query(
+              `
       SELECT *
       FROM orders
       WHERE order_id = $1
@@ -807,33 +824,30 @@ console.log("Expected Razorpay Amount:", expectedAmount);
         AND is_active = 1
       LIMIT 1
       `,
-          [localPayment.order_id, userId],
-        );
+              [localPayment.order_id, userId],
+            )
+          : { rows: [] };
         const existingOrder = existingOrderResult.rows[0];
 
         if (!existingOrder) {
-          return res.status(409).json({
-            success: false,
-            message:
-              "Captured payment is marked paid but its order requires reconciliation",
-            paymentId: localPayment.id,
+          recoverCapturedOrder = true;
+        } else {
+          return res.json({
+            success: true,
+            payment: localPayment,
+            order: existingOrder,
+            orderId: existingOrder.order_id,
+            membershipBenefits: null,
+            actualAmount: Number(existingOrder.actual_amount),
+            membershipDiscount: Number(existingOrder.membership_discount || 0),
+            walletClaim: Number(existingOrder.wallet_claim || 0),
+            deliveryCharge: Number(existingOrder.delivery_charge || 0),
+            payableAmount: Number(existingOrder.payable_amount),
+            message: "Payment verified and order already created.",
           });
         }
-
-        return res.json({
-          success: true,
-          payment: localPayment,
-          order: existingOrder,
-          orderId: existingOrder.order_id,
-          membershipBenefits: null,
-          actualAmount: Number(existingOrder.actual_amount),
-          membershipDiscount: Number(existingOrder.membership_discount || 0),
-          walletClaim: Number(existingOrder.wallet_claim || 0),
-          deliveryCharge: Number(existingOrder.delivery_charge || 0),
-          payableAmount: Number(existingOrder.payable_amount),
-          message: "Payment verified and order already created.",
-        });
       }
+
 
       if (
         String(localPayment.payment_type || "").toUpperCase() === "MEMBERSHIP"
@@ -850,80 +864,112 @@ console.log("Expected Razorpay Amount:", expectedAmount);
           [localPayment.id, userId],
         );
         const existingMembership = membershipResult.rows[0];
-        if (!existingMembership) {
-          return res.status(409).json({
-            success: false,
-            message:
-              "Membership payment is marked paid but membership activation requires reconciliation",
-            paymentId: localPayment.id,
-          });
-        }
+if (!existingMembership) {
+  recoverCapturedMembership = true;
+} else {
 
-        const requestedCustomerReferralId =
-          typeof customerReferralId === "string"
-            ? customerReferralId.trim()
-            : "";
+          const requestedReferralInput =
+          (typeof referralCode === "string" && referralCode.trim()) ||
+          (typeof customerReferralId === "string" &&
+            customerReferralId.trim()) ||
+          "";
 
-        if (requestedCustomerReferralId) {
-          let validatedReferrerId;
-          try {
-            const referralValidation = await validateCustomerReferral({
-              referrerId: requestedCustomerReferralId,
-              customerId: userId,
-            });
-            validatedReferrerId = referralValidation.referrerId;
-          } catch (error) {
-            return res.status(400).json({
-              success: false,
-              message: error.message,
-            });
-          }
+        const existingAssignedRole = String(
+          existingMembership.assigned_role || "",
+        )
+          .trim()
+          .toUpperCase();
 
-          const recordedReferralId = String(
-            existingMembership.referral_code || "",
-          ).trim();
+        const isExistingVendorOrReseller =
+          existingAssignedRole === "VENDOR" ||
+          existingAssignedRole === "RESELLER";
 
-          if (!recordedReferralId) {
-            const referralUpdate = await pool.query(
-              `
-              UPDATE user_memberships
-              SET referral_code = $1,
-                  updated_at = NOW(),
-                  updated_by = $2
-              WHERE id = $3
-                AND user_id = $2
-                AND payment_id = $4
-                AND (referral_code IS NULL OR BTRIM(referral_code) = '')
-              RETURNING referral_code
-              `,
-              [
-                validatedReferrerId,
-                userId,
-                existingMembership.id,
-                localPayment.id,
-              ],
-            );
+        if (requestedReferralInput && !isExistingVendorOrReseller) {
+          const vendorResellerCheck = await pool.query(
+            `
+            SELECT ul.user_id
+            FROM user_login ul
+            LEFT JOIN user_info ui ON ui.user_id = ul.user_id
+            WHERE ul.is_active = 1
+              AND ul.role IN (3, 4)
+              AND (
+                UPPER(TRIM(ul.user_id)) = UPPER(TRIM($1))
+                OR (
+                  ui.is_active = 1
+                  AND UPPER(TRIM(ui.referral_code)) = UPPER(TRIM($1))
+                )
+              )
+            LIMIT 1
+            `,
+            [requestedReferralInput],
+          );
+
+          if (!vendorResellerCheck.rows.length) {
+            let validatedReferrerId;
+            try {
+              const referralValidation = await validateCustomerReferral({
+                referrerId: requestedReferralInput,
+                customerId: userId,
+              });
+              validatedReferrerId = referralValidation.referrerId;
+            } catch (error) {
+              void logException(error);
+              return res.status(400).json({
+                success: false,
+                message: error.message,
+              });
+            }
+
+            const recordedReferralId = String(
+              existingMembership.referral_code || "",
+            ).trim();
+
+            if (!recordedReferralId) {
+              const referralUpdate = await pool.query(
+                `
+                UPDATE user_memberships
+                SET referral_code = $1,
+                    updated_at = NOW(),
+                    updated_by = $2
+                WHERE id = $3
+                  AND user_id = $2
+                  AND payment_id = $4
+                  AND (referral_code IS NULL OR BTRIM(referral_code) = '')
+                RETURNING referral_code
+                `,
+                [
+                  validatedReferrerId,
+                  userId,
+                  existingMembership.id,
+                  localPayment.id,
+                ],
+              );
 
             if (!referralUpdate.rows[0]) {
+  return res.status(409).json({
+    success: false,
+    message:
+      "Membership referral attribution changed; retry verification",
+  });
+}
+existingMembership.referral_code =
+  referralUpdate.rows[0].referral_code;
+
+            } else if (
+              recordedReferralId.toUpperCase() !==
+              String(validatedReferrerId).trim().toUpperCase()
+            ) {
               return res.status(409).json({
                 success: false,
                 message:
-                  "Membership referral attribution changed; retry verification",
+                  "A different referral is already recorded for this membership",
               });
             }
-            existingMembership.referral_code =
-              referralUpdate.rows[0].referral_code;
-          } else if (
-            recordedReferralId.toUpperCase() !==
-            String(validatedReferrerId).trim().toUpperCase()
-          ) {
-            return res.status(409).json({
-              success: false,
-              message:
-                "A different referral is already recorded for this membership",
-            });
           }
         }
+    
+
+
 
         const referralReward =
           await creditCustomerReferralRewardForMembership({
@@ -955,21 +1001,29 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
           message: "Membership payment was already verified.",
         });
       }
+    }
 
+    if (!recoverCapturedMembership && !recoverCapturedOrder) {
       return res.status(409).json({
         success: false,
         message: "Paid payment has no supported reconciliation path",
         paymentId: localPayment.id,
       });
     }
+  }
 
-    if (String(localPayment.status || "").toUpperCase() !== "PENDING") {
-      return res.status(409).json({
-        success: false,
-        message: "Payment is not in a reconcilable pending state",
-        paymentId: localPayment.id,
-      });
-    }
+  if (
+    String(localPayment.status || "").toUpperCase() !== "PENDING" &&
+    !recoverCapturedMembership &&
+    !recoverCapturedOrder
+  ) {
+    return res.status(409).json({
+      success: false,
+      message: "Payment is not in a reconcilable pending state",
+      paymentId: localPayment.id,
+    });
+  }
+
 
     const pendingOrderResult = await verificationLockClient.query(
       `
@@ -1009,9 +1063,13 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
         });
       }
 
-      if (couponCode && String(couponCode).trim()) {
-        verifiedCoupon = await Coupon.findByCode(String(couponCode).trim());
-        const orderLitres = await Membership.calculateOrderLitres(
+      if (
+  String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP" &&
+  couponCode &&
+  String(couponCode).trim()
+) {
+  verifiedCoupon = await Coupon.findByCode(String(couponCode).trim());
+  const orderLitres = await Membership.calculateOrderLitres(
           pendingOrder.item_id,
           pendingOrder.quantity,
           verificationLockClient,
@@ -1284,6 +1342,7 @@ await Payment.updateByTnxOrderId(
           message: "Captured payment reconciled with its existing order.",
         });
       } catch (recoveryError) {
+        void logException(recoveryError);
         await verificationLockClient.query("ROLLBACK");
         throw recoveryError;
       }
@@ -1350,6 +1409,7 @@ const updateLocalPayment = async (status, client = null) => {
           referenceId: payment.id,
         });
       } catch (notificationError) {
+        void logException(notificationError);
         console.error(
           "PAYMENT SUCCESS NOTIFICATION ERROR:",
           notificationError.message,
@@ -1357,9 +1417,11 @@ const updateLocalPayment = async (status, client = null) => {
       }
     };
 
-    await updateLocalPayment("PAID");
+if (String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP") {
+  await updateLocalPayment("PAID");
+}
 
-    await Membership.checkAndResetMonthlyBenefits(userId);
+await Membership.checkAndResetMonthlyBenefits(userId);
 
     /* =====================================================
    MEMBERSHIP BENEFITS
@@ -1373,7 +1435,7 @@ const updateLocalPayment = async (status, client = null) => {
         ? null
         : Number(localPayment.membership_id);
 
-    if ((paymentType || "").toUpperCase() !== "MEMBERSHIP") {
+    if (String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP") {
       /*
        * IMPORTANT:
        *
@@ -1544,14 +1606,14 @@ const updateLocalPayment = async (status, client = null) => {
    MEMBERSHIP PAYMENT
 ===================================================== */
 
-    if ((paymentType || "").toUpperCase() === "MEMBERSHIP") {
+    if (String(localPayment.payment_type || paymentType || "").toUpperCase() === "MEMBERSHIP") {
       const planResult = await pool.query(
         `
         SELECT *
         FROM lkp_subscription_plans
         WHERE id = $1
       `,
-        [membershipPlanId],
+        [membershipPlanId || localPayment.membership_plan_id],
       );
 
       const plan = planResult.rows[0];
@@ -1564,9 +1626,9 @@ const updateLocalPayment = async (status, client = null) => {
       }
 
       if (
-        process.env.ALLOW_ONE_RUPEE_TEST !== "true" &&
+        !isRazorpayTestMode() &&
         Math.round(Number(plan.plan_price) * 100) !==
-        Math.round(expectedAmount * 100)
+        Math.round(razorpayAmount * 100)
       ) {
         return res.status(409).json({
           success: false,
@@ -1687,12 +1749,15 @@ const updateLocalPayment = async (status, client = null) => {
       /* =================================================
    REFERRAL
 ================================================= */
-
       let validatedReferralCode = null;
+      let validatedCustomerReferralId = null;
 
-      if (typeof referralCode === "string" && referralCode.trim() !== "") {
-        const cleanReferralCode = referralCode.trim();
+      const cleanReferralInput =
+        (typeof referralCode === "string" && referralCode.trim()) ||
+        (typeof customerReferralId === "string" && customerReferralId.trim()) ||
+        "";
 
+      if (cleanReferralInput !== "") {
         const referralResult = await pool.query(
           `
     SELECT
@@ -1746,57 +1811,49 @@ const updateLocalPayment = async (status, client = null) => {
 
     LIMIT 1
     `,
-          [cleanReferralCode],
+          [cleanReferralInput],
         );
 
         const referrer = referralResult.rows[0];
 
-        if (!referrer) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid referral code",
-          });
+
+        if (referrer) {
+          // Prevent self-referral
+          if (
+            String(referrer.referral_user_id).trim().toUpperCase() ===
+            String(userId).trim().toUpperCase()
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: "You cannot use your own referral code",
+            });
+          }
+
+          // Assign the referrer's public user ID
+          assignedBy = referrer.referral_user_id;
+          assignedRoleId = Number(referrer.role);
+          assignedRole = getRoleName(assignedRoleId);
+
+          // Store the generated code if valid; otherwise store the legacy user ID
+          validatedReferralCode = referrer.canonical_referral_code;
+        } else {
+          // Fallback: validate as a Customer referral ID
+          try {
+            const referralValidation = await validateCustomerReferral({
+              referrerId: cleanReferralInput,
+              customerId: userId,
+            });
+
+            validatedCustomerReferralId = referralValidation.referrerId;
+          } catch (error) {
+            void logException(error);
+            return res.status(400).json({
+              success: false,
+              message: error.message || "Invalid referral code",
+            });
+          }
         }
-
-        // Prevent self-referral
-        if (
-          String(referrer.referral_user_id).trim().toUpperCase() ===
-          String(userId).trim().toUpperCase()
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: "You cannot use your own referral code",
-          });
-        }
-
-        // Assign the referrer's public user ID
-        assignedBy = referrer.referral_user_id;
-
-        assignedRoleId = Number(referrer.role);
-        assignedRole = getRoleName(assignedRoleId);
-
-        // Store the generated code if valid; otherwise store the legacy user ID
-        validatedReferralCode = referrer.canonical_referral_code;
       }
-
-
-let validatedCustomerReferralId = null;
-
-if (customerReferralId?.trim()) {
-  try {
-    const referralValidation = await validateCustomerReferral({
-      referrerId: customerReferralId,
-      customerId: userId,
-    });
-
-    validatedCustomerReferralId = referralValidation.referrerId;
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
-  }
-}
 
 
 
@@ -1872,6 +1929,7 @@ try {
 
         console.log(`Payment log created for membership ${membership.id}`);
     } catch (paymentLogError) {
+      void logException(paymentLogError);
   throw paymentLogError;
 }
 
@@ -1898,6 +1956,7 @@ try {
           );
         }
       } catch (whatsappError) {
+        void logException(whatsappError);
         console.error("WHATSAPP SUBSCRIPTION FAILED:", whatsappError.message);
       }
 
@@ -1959,6 +2018,7 @@ try {
           console.log(`No FCM token found for user ${userId}`);
         }
       } catch (notificationError) {
+        void logException(notificationError);
         console.error(
           "MEMBERSHIP NOTIFICATION FAILED:",
           notificationError.message,
@@ -2150,6 +2210,7 @@ try {
           }
         }
       } catch (notificationError) {
+        void logException(notificationError);
         /*
          * Notification failure must never break
          * successful membership activation or benefit
@@ -2177,7 +2238,7 @@ try {
 
     let createdOrder = null;
 
-    if ((paymentType || "").toUpperCase() !== "MEMBERSHIP") {
+    if (String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP") {
       console.log("===== CREATING NORMAL ORDER =====");
 
       /* ===================================================
@@ -2472,6 +2533,7 @@ try {
 
         console.log(`Transaction order ID ${razorpay_order_id} saved`);
       } catch (orderPaymentError) {
+        void logException(orderPaymentError);
         await verificationLockClient.query("ROLLBACK");
         console.error("ORDER PAYMENT STATUS ERROR:", orderPaymentError.message);
 
@@ -2505,6 +2567,7 @@ try {
 
         console.log(`Order payment log created for order ${createdOrderId}`);
       } catch (paymentLogError) {
+        void logException(paymentLogError);
         console.error("ORDER PAYMENT LOG ERROR:", paymentLogError.message);
       }
 
@@ -2566,6 +2629,7 @@ try {
           console.log(`No FCM token found for user ${userId}`);
         }
       } catch (notificationError) {
+        void logException(notificationError);
         console.error("ORDER NOTIFICATION ERROR:", notificationError.message);
       }
 
@@ -2607,6 +2671,7 @@ try {
           console.log(`ORDER WHATSAPP SENT FOR ORDER ${createdOrderId}`);
         }
       } catch (whatsappError) {
+        void logException(whatsappError);
         console.error("ORDER WHATSAPP FAILED:", whatsappError.message);
       }
 
@@ -2651,11 +2716,13 @@ try {
       message: "Payment verified successfully.",
     });
   } catch (error) {
+    void logException(error);
     if (membershipTransactionStarted && verificationLockClient) {
       try {
         await verificationLockClient.query("ROLLBACK");
         membershipTransactionStarted = false;
       } catch (rollbackError) {
+        void logException(rollbackError);
         console.error(
           "MEMBERSHIP TRANSACTION ROLLBACK ERROR:",
           rollbackError.message,
@@ -2692,6 +2759,7 @@ try {
             [couponVerificationLockKey],
           );
         } catch (unlockError) {
+          void logException(unlockError);
           console.error(
             "COUPON VERIFICATION LOCK RELEASE ERROR:",
             unlockError.message,
@@ -2707,6 +2775,7 @@ try {
           );
         }
       } catch (unlockError) {
+        void logException(unlockError);
         console.error(
           "RAZORPAY VERIFICATION LOCK RELEASE ERROR:",
           unlockError.message,
@@ -2759,6 +2828,7 @@ const recoverMembershipCustomerReferralReward = async (req, res) => {
       transactionId: reward.transaction.transaction.id,
     });
   } catch (error) {
+    void logException(error);
     console.error("CUSTOMER REFERRAL REWARD RECOVERY ERROR:", error);
     return res.status(500).json({
       success: false,
@@ -2793,6 +2863,7 @@ const getPayments = async (req, res) => {
       data: payments,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET PAYMENTS ERROR:", error);
 
     return res.status(500).json({
@@ -3044,6 +3115,7 @@ return res.json({
       finalPayableAmount,
     });
   } catch (error) {
+    void logException(error);
     console.error("CHECKOUT SUMMARY ERROR:", error);
 
     return res

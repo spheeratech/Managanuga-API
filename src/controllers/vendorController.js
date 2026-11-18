@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Vendor = require("../models/Vendor");
 
 const getVendorId = (req) => {
@@ -35,6 +37,7 @@ const getCustomers = async (req, res) => {
       data: customers,
     });
   } catch (err) {
+    void logException(err);
     console.log("Vendor getCustomers error:", err);
 
     res.status(500).json({
@@ -76,6 +79,7 @@ const getOrders = async (req, res) => {
       data: orders,
     });
   } catch (err) {
+    void logException(err);
     console.log("Vendor getOrders error:", err);
 
     res.status(500).json({
@@ -119,6 +123,7 @@ const getBenefits = async (req, res) => {
       data: benefits,
     });
   } catch (err) {
+    void logException(err);
     console.log("Vendor getBenefits error:", err);
 
     res.status(500).json({
@@ -160,6 +165,7 @@ const getProfile = async (req, res) => {
       data: profile,
     });
   } catch (err) {
+    void logException(err);
     console.log("Vendor getProfile error:", err);
 
     res.status(500).json({

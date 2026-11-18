@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Wishlist = require("../models/Wishlist");
 
 /*
@@ -23,6 +25,7 @@ const getWishlist = async (req, res) => {
       data: items,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET WISHLIST ERROR:", error);
 
     return res.status(500).json({
@@ -59,6 +62,7 @@ const addToWishlist = async (req, res) => {
       data: item,
     });
   } catch (error) {
+    void logException(error);
     console.error("ADD WISHLIST ERROR:", error);
 
     return res.status(500).json({
@@ -102,6 +106,7 @@ const removeFromWishlist = async (req, res) => {
       data: item,
     });
   } catch (error) {
+    void logException(error);
     console.error("REMOVE WISHLIST ERROR:", error);
 
     return res.status(500).json({
@@ -141,6 +146,7 @@ const saveForLater = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    void logException(error);
     console.error("SAVE FOR LATER ERROR:", error);
 
     return res.status(500).json({

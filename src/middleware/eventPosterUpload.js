@@ -1,10 +1,11 @@
+
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
 const uploadDir =
   process.env.EVENT_POSTER_UPLOAD_DIR ||
-  path.resolve(__dirname, "../../../Managanuga-WebApp/public/images");
+  path.resolve(process.cwd(), "uploads/event-posters");
 
 fs.mkdirSync(uploadDir, { recursive: true });
 

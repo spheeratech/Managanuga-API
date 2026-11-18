@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 
 /*
@@ -327,6 +329,7 @@ const saveForLater = async (userId, cartId) => {
       cart_id: Number(cartId),
     };
   } catch (error) {
+    void logException(error);
     /*
      * Roll back both wishlist and cart changes
      * if anything fails.

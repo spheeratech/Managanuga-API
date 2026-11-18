@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const AppImage = require("../models/AppImage");
 
 const getAppImages = async (req, res) => {
@@ -9,6 +11,7 @@ const getAppImages = async (req, res) => {
       data: images,
     });
   } catch (error) {
+    void logException(error);
     console.error("Error fetching app images:", error);
 
     res.status(500).json({

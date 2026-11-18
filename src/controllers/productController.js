@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Product = require("../models/Product");
 const Notification = require("../models/Notification");
 
@@ -29,6 +31,7 @@ const notifyProductChange = async (
 
     console.log("Product notification created.");
   } catch (error) {
+    void logException(error);
     console.error("Product notification failed:", error.message);
   }
 };
@@ -42,6 +45,7 @@ const getProducts = async (req, res) => {
       data: products,
     });
   } catch (error) {
+    void logException(error);
     console.error(error);
 
     res.status(500).json({
@@ -70,6 +74,7 @@ const getProductById = async (req, res) => {
       data: product,
     });
   } catch (error) {
+    void logException(error);
     console.error(error);
 
     res.status(500).json({
@@ -94,6 +99,7 @@ const createProduct = async (req, res) => {
       product.id,
     );
   } catch (error) {
+    void logException(error);
     console.error(error);
 
     res.status(500).json({
@@ -125,6 +131,7 @@ const updateProduct = async (req, res) => {
       product.id,
     );
   } catch (error) {
+    void logException(error);
     console.error(error);
 
     res.status(500).json({
@@ -156,6 +163,7 @@ const deleteProduct = async (req, res) => {
       null,
     );
   } catch (error) {
+    void logException(error);
     res.status(500).json({
       success: false,
       message: "Server Error",

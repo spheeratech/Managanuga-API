@@ -1,3 +1,5 @@
+
+const { logException } = require("../utils/exceptionLogger.js");
 const Address = require("../models/Address");
 
 const {
@@ -24,6 +26,7 @@ const addAddress = async (req, res) => {
       data: address,
     });
   } catch (error) {
+    void logException(error);
     console.error("ADD ADDRESS ERROR:", error);
 
     if (
@@ -57,6 +60,7 @@ const getAddresses = async (req, res) => {
       data: addresses,
     });
   } catch (error) {
+    void logException(error);
     console.error("GET ADDRESSES ERROR:", error);
 
     res.status(500).json({
@@ -92,6 +96,7 @@ const getPincodeDetails = async (req, res) => {
       data,
     });
   } catch (error) {
+    void logException(error);
     console.error("PINCODE ERROR:", error);
 
     res.status(500).json({
@@ -121,6 +126,7 @@ const updateAddress = async (req, res) => {
       data: address,
     });
   } catch (error) {
+    void logException(error);
     console.error("UPDATE ADDRESS ERROR:", error);
 
     res.status(500).json({
@@ -150,6 +156,7 @@ const deleteAddress = async (req, res) => {
       data: address,
     });
   } catch (error) {
+    void logException(error);
     console.error("DELETE ADDRESS ERROR:", error);
 
     // PostgreSQL foreign-key violation
