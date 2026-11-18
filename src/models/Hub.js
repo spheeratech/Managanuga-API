@@ -195,6 +195,7 @@ const createArea = async (areaData) => {
 
   return result.rows[0];
 };
+
 const getHubs = async () => {
   try {
     const result = await pool.query(`
@@ -203,10 +204,26 @@ const getHubs = async () => {
         h.hubname AS hub_name,
         h.hubpincode AS pincode,
         h.is_active,
-        '[]'::json AS routes
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'route_id', hr.hubrouteid,
+                'pincode', hr.hubroutepincode,
+                'area_name', hr.hubroutename,
+                'city_name', hr.hubroutename
+              )
+              ORDER BY hr.hubrouteid
+            )
+            FROM hubroute hr
+            WHERE hr.hubid = h.hubid
+          ),
+          '[]'::json
+        ) AS routes
       FROM hubs h
       ORDER BY h.hubid DESC
     `);
+
     return result.rows;
   } catch (error) {
     void logException(error);
@@ -276,9 +293,20 @@ const createHub = async (hubData) => {
     if (!pincodes || !Array.isArray(pincodes) || pincodes.length === 0) {
       throw new Error("At least one pincode must be selected");
     }
+    const areaName = String(
+      pincodes[0].area_name || pincodes[0].name || pincodes[0].areaName || "",
+    ).trim();
 
-    const areaName = String(pincodes[0].name ?? "").trim();
-    const hubName = areaName || String(requestedHubName ?? "").trim();
+    const hubName = areaName;
+
+    if (!hubName) {
+      throw new Error(
+        "Primary pincode area name is missing. Please select a valid pincode.",
+      );
+    }
+
+    // const areaName = String(pincodes[0].name ?? "").trim();
+    // const hubName = areaName || String(requestedHubName ?? "").trim();
     if (!hubName) throw new Error("Hub name or pincode area name is required");
 
     const primaryPincode = String(pincodes[0].pincode ?? "").trim();
@@ -328,8 +356,14 @@ const createHub = async (hubData) => {
       for (let i = 0; i < nonPrimaryPincodes.length; i++) {
         const routeItem = nonPrimaryPincodes[i];
         const routeId = `HR${String(baseRouteCount + i).padStart(3, "0")}`;
+        // const routeName =
+        //   routeItem.name || routeItem.city_name || `${hubName} Route ${i + 1}`;
         const routeName =
-          routeItem.name || routeItem.city_name || `${hubName} Route ${i + 1}`;
+          routeItem.area_name ||
+          routeItem.name ||
+          routeItem.areaName ||
+          routeItem.city_name ||
+          `${hubName} Route ${i + 1}`;
         const routePincode = String(routeItem.pincode).trim();
 
         await client.query(
@@ -376,8 +410,19 @@ const updateHub = async (hubId, hubData) => {
       throw new Error("At least one pincode must be selected");
     }
 
-    const areaName = String(pincodes[0].name ?? "").trim();
-    const hubName = areaName || String(requestedHubName ?? "").trim();
+    // const areaName = String(pincodes[0].name ?? "").trim();
+    // const hubName = areaName || String(requestedHubName ?? "").trim();
+    const areaName = String(
+      pincodes[0].area_name || pincodes[0].name || pincodes[0].areaName || "",
+    ).trim();
+
+    const hubName = areaName;
+
+    if (!hubName) {
+      throw new Error(
+        "Primary pincode area name is missing. Please select a valid pincode.",
+      );
+    }
 
     if (!hubName) {
       throw new Error("Hub name or pincode area name is required");
@@ -452,9 +497,14 @@ const updateHub = async (hubId, hubData) => {
         const routeItem = nonPrimaryPincodes[i];
         const routeId = `HR${String(baseRouteCount + i).padStart(3, "0")}`;
 
+        // const routeName =
+        //   routeItem.name || routeItem.city_name || `${hubName} Route ${i + 1}`;
         const routeName =
-          routeItem.name || routeItem.city_name || `${hubName} Route ${i + 1}`;
-
+          routeItem.area_name ||
+          routeItem.name ||
+          routeItem.areaName ||
+          routeItem.city_name ||
+          `${hubName} Route ${i + 1}`;
         const routePincode = String(routeItem.pincode ?? "").trim();
 
         if (!routePincode) {
