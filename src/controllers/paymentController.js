@@ -12,11 +12,15 @@ const Cart = require("../models/Cart");
 const User = require("../models/User");
 const Coupon = require("../models/Coupon");
 const Wallet = require("../models/Wallet");
+const {
+  getPendingReferral,
+} = require("../services/pendingCustomerReferralStore");
 
 const { sendPushNotification } = require("../services/fcmService");
 
 const {
   calculateCheckoutTotals,
+  getUnitLitres,
 } = require("../services/membershipCheckoutService");
 
 const {
@@ -37,8 +41,35 @@ const {
 const roundMoney = (amount) =>
   Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
 
+
+const calculateSnapshotOrderLitres = (cartItems) => {
+  if (!Array.isArray(cartItems) || cartItems.length === 0) {
+    throw new Error("Checkout snapshot items are missing");
+  }
+
+  return cartItems.reduce((total, item) => {
+    const quantity = Number(item.quantity);
+    const weight = Number(item.weight);
+
+    if (
+      !Number.isFinite(quantity) ||
+      quantity <= 0 ||
+      !Number.isFinite(weight) ||
+      weight <= 0
+    ) {
+      throw new Error("Invalid product quantity or weight in checkout snapshot");
+    }
+
+    return total + quantity * getUnitLitres(weight);
+  }, 0);
+};
+
+
 const isRazorpayTestMode = () =>
   process.env.RAZORPAY_TEST_MODE === "true";
+
+
+
 
 const applyCouponToCheckoutTotals = (checkoutTotals, couponPercentage) => {
   const subtotal = Number(
@@ -171,9 +202,10 @@ const {
   quantity,
   address_id,
   couponCode,
+  referralCode,
+  customerReferralId,
   referralBonus = 0,
 } = req.body;
-
 
     const publicUserId = user_id;
 
@@ -236,10 +268,11 @@ if (
         });
       }
     }
-
-    let actualAmount = 0;
-    let payableAmount = 0;
-    let checkoutTotals = null;
+let actualAmount = 0;
+let payableAmount = 0;
+let checkoutTotals = null;
+let cartItems = [];
+let membershipPlanSnapshot = null;
 
     /* =====================================================
        MEMBERSHIP PAYMENT
@@ -263,18 +296,27 @@ if (
           message: "Membership plan not found",
         });
       }
+actualAmount = Number(plan.plan_price);
 
-      actualAmount = Number(plan.plan_price);
+payableAmount = Number(plan.plan_price);
 
-      payableAmount = Number(plan.plan_price);
+membershipPlanSnapshot = {
+  id: plan.id,
+  plan_name: plan.plan_name ?? null,
+  plan_price: Number(plan.plan_price),
+  plan_discount: plan.plan_discount ?? null,
+  wallet_bonus: Number(plan.wallet_bonus || 0),
+  discount_percentage: Number(plan.discount_percentage || 0),
+  monthly_claim: Number(plan.monthly_claim || 0),
+};
+
     }
 
     /* =====================================================
        NORMAL PRODUCT ORDER
     ===================================================== */
 
-    if (paymentTypeUpper !== "MEMBERSHIP") {
-      let cartItems = [];
+if (paymentTypeUpper !== "MEMBERSHIP") {
 
       /* -----------------------------------------------
          BUY NOW
@@ -472,69 +514,115 @@ if (paymentTypeUpper !== "MEMBERSHIP") {
 
     console.log("Payable Amount:", payableAmount);
 
+
     /* =====================================================
-       CREATE RAZORPAY ORDER
+       FREEZE CHECKOUT SNAPSHOT BEFORE RAZORPAY
+    ===================================================== */
+const pendingCustomerReferralId =
+  getPendingReferral(publicUserId);
 
-       TEST MODE:
-       Razorpay will charge only ₹1.
 
-       Database still stores the REAL
-       actualAmount and payableAmount.
+    const checkoutSnapshot = {
+      version: 1,
+      userId: publicUserId,
+      paymentType: paymentTypeUpper,
+      referralCode: referralCode ?? null,
+      customerReferralId:
+  (typeof customerReferralId === "string" &&
+    customerReferralId.trim()) ||
+  pendingCustomerReferralId ||
+  null,
+      addressId:
+        paymentTypeUpper === "MEMBERSHIP" ? null : address_id,
+      buyNow: Boolean(buyNow),
+      productId: buyNow ? Number(productId) : null,
+      quantity: buyNow ? Number(quantity ?? 1) : null,
+
+      cartItems: cartItems.map((item) => ({
+        cart_id: item.cart_id ?? null,
+        item_id: Number(
+          item.item_id ?? item.product_id ?? item.id
+        ),
+        product_id: Number(
+          item.product_id ?? item.item_id ?? item.id
+        ),
+        product_name: item.product_name ?? item.name ?? null,
+        quantity: Number(item.quantity),
+        price: Number(item.price),
+        weight: Number(item.weight ?? 0),
+      })),
+
+      checkoutTotals,
+      membershipPlan: membershipPlanSnapshot,
+
+      membershipId:
+        checkoutTotals?.membershipBenefits?.membership?.id ?? null,
+
+      coupon: couponDetails,
+      couponDiscount: Number(couponDiscount || 0),
+      referralBonus: Number(requestedReferralBonus || 0),
+      actualAmount: Number(actualAmount),
+      payableAmount: Number(payableAmount),
+      createdAt: new Date().toISOString(),
+    };
+
+    /* =====================================================
+       CREATE LOCAL PAYMENT FIRST
     ===================================================== */
 
-    // const razorpayAmount = payableAmount;   
-    const razorpayAmount = isRazorpayTestMode() ? 1 : payableAmount;    // // const razorpayAmount = payableAmount;   
+    const payment = await Payment.createPayment({
+      order_id: null,
+      tnx_order_id: null,
+      payment_gateway: "RAZORPAY",
+      actual_amount: actualAmount,
+      payable_amount: payableAmount,
+      status: "PENDING",
+      payment_type: paymentTypeUpper,
+      membership_plan_id: membershipPlanId || null,
+      membership_id:
+        checkoutTotals?.membershipBenefits?.membership?.id ?? null,
+      fulfillment_data: {
+        checkout_snapshot: checkoutSnapshot,
+      },
+      fulfillment_status: "PENDING",
+      created_by: publicUserId,
+    });
+
+    /* =====================================================
+       CREATE RAZORPAY ORDER
+    ===================================================== */
+
+    const razorpayAmount = isRazorpayTestMode()
+      ? 1
+      : payableAmount;
+
     const razorpayOrder =
       await razorpayService.createRazorpayOrder(razorpayAmount);
 
     console.log("RAZORPAY ORDER:", razorpayOrder);
 
     /* =====================================================
-       CREATE LOCAL PAYMENT
-
-       IMPORTANT:
-       Store REAL amounts here.
+       ATTACH RAZORPAY ORDER ID TO SAVED PAYMENT
     ===================================================== */
 
-    const payment = await Payment.createPayment({
-      order_id: null,
-
-      tnx_order_id: razorpayOrder.id,
-
-      payment_gateway: "RAZORPAY",
-
-      actual_amount: actualAmount,
-
-      payable_amount: payableAmount,
-
-      status: "PENDING",
-
-      payment_type: paymentTypeUpper,
-
-      membership_plan_id: membershipPlanId || null,
-
-      membership_id: checkoutTotals?.membershipBenefits?.membership?.id ?? null,
-
-      created_by: publicUserId,
+    const updatedPayment = await Payment.updateRazorpayOrderId({
+      paymentRecordId: payment.id,
+      razorpayOrderId: razorpayOrder.id,
+      userId: publicUserId,
     });
 
     return res.status(201).json({
       success: true,
-
       data: {
-        payment,
-
+        payment: updatedPayment,
         razorpayOrder,
-
         key: process.env.RAZORPAY_KEY_ID,
-
         actualAmount,
-
         payableAmount,
-
         razorpayAmount,
       },
     });
+
   } catch (err) {
     void logException(err);
     console.error("CREATE ORDER ERROR:", err);
@@ -581,40 +669,7 @@ const verifyPayment = async (req, res) => {
   couponCode,
 } = req.body;
 
-const referralBonusAmount = Number(referralBonus);
-if (
-  !Number.isFinite(referralBonusAmount) ||
-  referralBonusAmount < 0 ||
-  roundMoney(referralBonusAmount) !== referralBonusAmount
-) {
-  return res.status(400).json({
-    success: false,
-    message: "Invalid referral wallet amount",
-  });
-}
-const verifiedReferralBonus = roundMoney(referralBonusAmount);
-
-const MIN_REFERRAL_REDEMPTION = 100;
-
-if (
-  verifiedReferralBonus > 0 &&
-  verifiedReferralBonus < MIN_REFERRAL_REDEMPTION
-) {
-  return res.status(400).json({
-    success: false,
-    message: `Minimum referral wallet redemption is ₹${MIN_REFERRAL_REDEMPTION}`,
-  });
-}
-
-if (
-  String(paymentType || "ORDER").toUpperCase() === "MEMBERSHIP" &&
-  verifiedReferralBonus > 0
-) {
-  return res.status(400).json({
-    success: false,
-    message: "Referral wallet cannot be used for membership",
-  });
-}
+let verifiedReferralBonus = 0;
 
     /* =====================================================
        VERIFY SIGNATURE
@@ -626,7 +681,7 @@ if (
       razorpay_signature,
     );
 
-    if (!isValid) {
+    if (!isValid && !req.isRazorpayWebhook) {
       return res.status(400).json({
         success: false,
         message: "Invalid signature",
@@ -724,27 +779,156 @@ if (
         message: "Payment does not belong to the authenticated user",
       });
     }
+    
+    /* =====================================================
+   LOAD AND VALIDATE SAVED CHECKOUT SNAPSHOT
+===================================================== */
 
-    if (
-      String(localPayment.payment_type || "ORDER").toUpperCase() !==
-      String(paymentType || "ORDER").toUpperCase()
-    ) {
-      return res.status(409).json({
-        success: false,
-        message: "Payment type does not match the local payment request",
-      });
-    }
+const paymentFulfillmentData =
+  typeof localPayment.fulfillment_data === "string"
+    ? JSON.parse(localPayment.fulfillment_data)
+    : (localPayment.fulfillment_data || {});
 
-    if (
-      String(localPayment.payment_type || "").toUpperCase() === "MEMBERSHIP" &&
-      Number(localPayment.membership_plan_id) !==
-Number(membershipPlanId || localPayment.membership_plan_id)
-    ) {
-      return res.status(409).json({
-        success: false,
-        message: "Membership plan does not match the local payment request",
-      });
-    }
+const savedCheckoutSnapshot =
+  paymentFulfillmentData.checkout_snapshot;
+
+if (
+  !savedCheckoutSnapshot ||
+  String(savedCheckoutSnapshot.userId) !== String(localPayment.created_by) ||
+  String(savedCheckoutSnapshot.paymentType).toUpperCase() !==
+    String(localPayment.payment_type).toUpperCase()
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Saved checkout snapshot is missing or invalid",
+  });
+}
+
+if (
+  savedCheckoutSnapshot.gatewayOrderId &&
+  String(savedCheckoutSnapshot.gatewayOrderId) !== String(razorpay_order_id)
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Razorpay order ID does not match checkout snapshot",
+  });
+}
+
+/* =====================================================
+   USE SAVED CHECKOUT SNAPSHOT AS SOURCE OF TRUTH
+===================================================== */
+
+const snapshotPaymentType =
+  String(savedCheckoutSnapshot.paymentType || "").toUpperCase();
+
+const snapshotAddressId = savedCheckoutSnapshot.addressId ?? null;
+
+const snapshotBuyNow = Boolean(savedCheckoutSnapshot.buyNow);
+
+const snapshotProductId = savedCheckoutSnapshot.productId ?? null;
+
+const snapshotQuantity = Number(savedCheckoutSnapshot.quantity ?? 1);
+
+const snapshotReferralBonus = roundMoney(
+  Number(savedCheckoutSnapshot.referralBonus || 0)
+);
+
+const snapshotReferralCode =
+  savedCheckoutSnapshot.referralCode ?? referralCode ?? null;
+
+const snapshotCustomerReferralId =
+  savedCheckoutSnapshot.customerReferralId ?? customerReferralId ?? null;
+
+const snapshotCoupon =
+  savedCheckoutSnapshot.coupon ?? null;
+
+const snapshotCouponCode =
+  snapshotCoupon?.coupon_code ?? null;
+
+const snapshotCouponDiscount = roundMoney(
+  Number(savedCheckoutSnapshot.couponDiscount || 0)
+);
+
+const snapshotCheckoutTotals =
+  savedCheckoutSnapshot.checkoutTotals ?? null;
+
+const snapshotCartItems = Array.isArray(savedCheckoutSnapshot.cartItems)
+  ? savedCheckoutSnapshot.cartItems.map((item) => ({
+      ...item,
+      item_id: item.item_id ?? item.product_id,
+    }))
+  : [];
+
+const snapshotMembershipId =
+  savedCheckoutSnapshot.membershipId ??
+  localPayment.membership_id ??
+  null;
+
+  /* =====================================================
+   VALIDATE REFERRAL BONUS FROM SAVED SNAPSHOT
+===================================================== */
+
+const snapshotReferralBonusAmount = Number(
+  savedCheckoutSnapshot.referralBonus ?? 0
+);
+
+if (
+  !Number.isFinite(snapshotReferralBonusAmount) ||
+  snapshotReferralBonusAmount < 0 ||
+  roundMoney(snapshotReferralBonusAmount) !==
+    snapshotReferralBonusAmount
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Saved referral wallet amount is invalid",
+  });
+}
+
+verifiedReferralBonus = roundMoney(snapshotReferralBonusAmount);
+
+const MIN_REFERRAL_REDEMPTION = 100;
+
+if (
+  verifiedReferralBonus > 0 &&
+  verifiedReferralBonus < MIN_REFERRAL_REDEMPTION
+) {
+  return res.status(400).json({
+    success: false,
+    message: `Minimum referral wallet redemption is ₹${MIN_REFERRAL_REDEMPTION}`,
+  });
+}
+
+if (
+  snapshotPaymentType === "MEMBERSHIP" &&
+  verifiedReferralBonus > 0
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Referral wallet cannot be used for membership",
+  });
+}
+
+
+
+  if (
+  String(localPayment.payment_type || "").toUpperCase() !==
+  String(savedCheckoutSnapshot.paymentType || "").toUpperCase()
+) {
+  return res.status(409).json({
+    success: false,
+    message: "Payment type does not match saved checkout snapshot",
+  });
+}
+if (
+  String(savedCheckoutSnapshot.paymentType).toUpperCase() === "MEMBERSHIP" &&
+  Number(localPayment.membership_plan_id) !==
+    Number(savedCheckoutSnapshot.membershipPlan?.id)
+) {
+  return res.status(409).json({
+    success: false,
+    message: "Membership plan does not match saved checkout snapshot",
+  });
+}
 
     if (
       localPayment.payment_id &&
@@ -968,31 +1152,60 @@ existingMembership.referral_code =
           }
         }
     
-
-
+        await verificationLockClient.query("BEGIN");
+        membershipTransactionStarted = true;
 
         const referralReward =
           await creditCustomerReferralRewardForMembership({
             membershipId: existingMembership.id,
+            client: verificationLockClient,
           });
 
-await Payment.updateByTnxOrderId(razorpay_order_id, {
-  created_by: userId,
-  payment_record_id: localPayment.id,
-  fulfillment_status: "COMPLETED",
-  fulfillment_data: {
-    membership_id: existingMembership.id,
-  },
-}, verificationLockClient);
+const membershipPaymentUpdate =
+  await verificationLockClient.query(
+    `
+    UPDATE payments
+    SET
+      fulfillment_status = 'COMPLETED',
+      fulfillment_data = jsonb_set(
+        COALESCE(fulfillment_data, '{}'::jsonb),
+        '{membership_id}',
+        to_jsonb($1::integer),
+        true
+      ),
+      updated_at = CURRENT_TIMESTAMP,
+      updated_by = $2
+    WHERE id = $3
+      AND created_by = $2
+      AND tnx_order_id = $4
+    RETURNING *
+    `,
+    [
+      existingMembership.id,
+      userId,
+      localPayment.id,
+      razorpay_order_id,
+    ],
+  );
+
+if (!membershipPaymentUpdate.rows[0]) {
+  throw new Error("Failed to save membership payment fulfillment");
+}
 
 
         if (requestedCustomerReferralId && !referralReward) {
+          await verificationLockClient.query("ROLLBACK");
+          membershipTransactionStarted = false;
+
           return res.status(409).json({
             success: false,
             message:
               "The recorded customer referral is not eligible for a reward",
           });
         }
+
+        await verificationLockClient.query("COMMIT");
+        membershipTransactionStarted = false;
 
         return res.json({
           success: true,
@@ -1063,86 +1276,35 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
         });
       }
 
+
       if (
-  String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP" &&
-  couponCode &&
-  String(couponCode).trim()
-) {
-  verifiedCoupon = await Coupon.findByCode(String(couponCode).trim());
-  const orderLitres = await Membership.calculateOrderLitres(
-          pendingOrder.item_id,
-          pendingOrder.quantity,
-          verificationLockClient,
-        );
+        String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP" &&
+        snapshotCoupon
+      ) {
+        const savedCouponId = Number(snapshotCoupon.coupon_id);
+        const savedCouponPercentage = Number(snapshotCoupon.coupon_percentage);
 
-        if (!verifiedCoupon || Number(verifiedCoupon.is_active) !== 1) {
-          return res.status(400).json({
-            success: false,
-            message: !verifiedCoupon ? "Invalid coupon" : "Coupon expired",
-          });
-        }
-        if (orderLitres < 2) {
-          return res.status(400).json({
-            success: false,
-            message: "This coupon requires a minimum purchase of 2 litres",
-          });
-        }
-
-        if (paymentMembershipId !== null) {
-          const planResult = await verificationLockClient.query(
-            `
-        SELECT sp.discount_percentage
-        FROM user_memberships um
-        INNER JOIN lkp_subscription_plans sp
-          ON sp.id = um.plan_id
-        WHERE um.id = $1
-          AND um.user_id = $2
-        LIMIT 1
-        `,
-            [paymentMembershipId, userId],
-          );
-          const planPercentage = Number(
-            planResult.rows[0]?.discount_percentage,
-          );
-
-          if (
-            !Number.isFinite(planPercentage) ||
-            Number(verifiedCoupon.coupon_percentage) <= planPercentage
-          ) {
-            return res.status(400).json({
-              success: false,
-              message: "Coupon is invalid for this user.",
-            });
-          }
-        }
-
-        couponVerificationLockKey = `COUPON_USE:${req.authenticatedUser.id}:${verifiedCoupon.coupon_id}`;
-        await verificationLockClient.query(
-          "SELECT pg_advisory_lock(hashtext($1))",
-          [couponVerificationLockKey],
-        );
         if (
-          await Coupon.hasSuccessfulUseForUser({
-            userId: req.authenticatedUser.id,
-            couponId: verifiedCoupon.coupon_id,
-            excludePaymentId: localPayment.id,
-            client: verificationLockClient,
-          })
+          !Number.isInteger(savedCouponId) ||
+          savedCouponId <= 0 ||
+          !Number.isFinite(savedCouponPercentage) ||
+          savedCouponPercentage <= 0
         ) {
           return res.status(409).json({
             success: false,
-            message: "You have already used this coupon",
+            message: "Saved coupon details are invalid; payment requires reconciliation",
+            paymentId: localPayment.id,
           });
         }
 
-        verifiedCouponDiscount = roundMoney(
-          Math.min(
-            Number(pendingOrder.actual_amount),
-            (Number(pendingOrder.actual_amount) *
-              Number(verifiedCoupon.coupon_percentage)) /
-              100,
-          ),
-        );
+        verifiedCoupon = {
+          coupon_id: savedCouponId,
+          coupon_code: snapshotCoupon.coupon_code,
+          coupon_percentage: savedCouponPercentage,
+        };
+
+        verifiedCouponDiscount = roundMoney(snapshotCouponDiscount);
+
         const expectedCouponPayable = roundMoney(
           Math.max(
             0,
@@ -1153,27 +1315,28 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
         );
 
         if (
-          Number(pendingOrder.coupon_discount || 0) !==
-            verifiedCouponDiscount ||
-          (paymentMembershipId !== null &&
-            Number(pendingOrder.membership_discount || 0) !== 0) ||
+          Math.round(Number(pendingOrder.coupon_discount || 0) * 100) !==
+            Math.round(verifiedCouponDiscount * 100) ||
           Math.round(expectedCouponPayable * 100) !==
-            Math.round(Number(pendingOrder.payable_amount) * 100)
+            Math.round(Number(pendingOrder.payable_amount) * 100) ||
+          (paymentMembershipId !== null &&
+            Number(pendingOrder.membership_discount || 0) !== 0)
         ) {
           return res.status(409).json({
             success: false,
             message:
-              "Captured payment and coupon totals require reconciliation",
+              "Saved coupon snapshot and captured payment totals require reconciliation",
             paymentId: localPayment.id,
           });
         }
       } else if (Number(pendingOrder.coupon_discount || 0) > 0) {
         return res.status(409).json({
           success: false,
-          message: "Coupon code is required to reconcile this captured payment",
+          message: "Saved coupon details are missing; payment requires reconciliation",
           paymentId: localPayment.id,
         });
       }
+
 
       if (
         (Number(pendingOrder.membership_discount || 0) > 0 ||
@@ -1191,11 +1354,7 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
       await verificationLockClient.query("BEGIN");
       try {
         if (paymentMembershipId !== null) {
-          const litresUsed = await Membership.calculateOrderLitres(
-            pendingOrder.item_id,
-            pendingOrder.quantity,
-            verificationLockClient,
-          );
+          const litresUsed = calculateSnapshotOrderLitres(snapshotCartItems);
 
           await Membership.updateMembershipUsage({
             userId,
@@ -1240,7 +1399,7 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
           AND is_active = 1
         LIMIT 1
         `,
-            [req.authenticatedUser.id],
+            [userId],
           );
           const couponNumericUserId = couponUserResult.rows[0]?.id;
           if (!couponNumericUserId) {
@@ -1277,7 +1436,7 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
         AND created_by = $6
         AND tnx_order_id = $7
         AND payment_gateway = 'RAZORPAY'
-        AND status = 'PENDING'
+        AND status IN ('PENDING', 'PAID')
         AND membership_id IS NOT DISTINCT FROM $8::integer
       RETURNING *
       `,
@@ -1297,33 +1456,39 @@ await Payment.updateByTnxOrderId(razorpay_order_id, {
           throw new Error("Captured payment recovery update failed");
         }
 
-        await verificationLockClient.query(
-  `
-  UPDATE payments
-  SET
-    fulfillment_status = 'COMPLETED',
-    fulfillment_data = $1,
-    updated_at = CURRENT_TIMESTAMP
-  WHERE id = $2
-  `,
-  [
-    JSON.stringify({ order_id: orderUpdate.rows[0].order_id }),
-    localPayment.id,
-  ],
-);
+const recoveryFulfillmentUpdate =
+  await verificationLockClient.query(
+    `
+    UPDATE payments
+    SET
+      fulfillment_status = 'COMPLETED',
+      fulfillment_data = jsonb_set(
+        COALESCE(fulfillment_data, '{}'::jsonb),
+        '{order_id}',
+        to_jsonb($1::text),
+        true
+      ),
+      updated_at = CURRENT_TIMESTAMP,
+      updated_by = $2
+    WHERE id = $3
+      AND created_by = $2
+      AND tnx_order_id = $4
+    RETURNING *
+    `,
+    [
+      orderUpdate.rows[0].order_id,
+      userId,
+      localPayment.id,
+      razorpay_order_id,
+    ],
+  );
 
-await Payment.updateByTnxOrderId(
-  razorpay_order_id,
-  {
-    created_by: userId,
-    payment_record_id: payment.id,
-    fulfillment_status: "COMPLETED",
-    fulfillment_data: {
-      order_id: createdOrderId,
-    },
-  },
-  verificationLockClient,
-);
+if (!recoveryFulfillmentUpdate.rows[0]) {
+  throw new Error("Failed to complete recovered payment fulfillment");
+}
+
+
+
 
         await verificationLockClient.query("COMMIT");
         return res.json({
@@ -1417,191 +1582,74 @@ const updateLocalPayment = async (status, client = null) => {
       }
     };
 
-if (String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP") {
-  await updateLocalPayment("PAID");
-}
+await updateLocalPayment("PAID");
 
-await Membership.checkAndResetMonthlyBenefits(userId);
 
-    /* =====================================================
-   MEMBERSHIP BENEFITS
+/* =====================================================
+   MEMBERSHIP BENEFITS / SAVED CHECKOUT SNAPSHOT
 ===================================================== */
 
-    let membershipBenefits = null;
-    let checkoutTotals = null;
-    let checkoutItems = [];
-    const persistedMembershipId =
-      localPayment.membership_id == null
-        ? null
-        : Number(localPayment.membership_id);
+let membershipBenefits = null;
+let checkoutTotals = null;
+let checkoutItems = [];
 
-    if (String(localPayment.payment_type || paymentType || "").toUpperCase() !== "MEMBERSHIP") {
-      /*
-       * IMPORTANT:
-       *
-       * Cart.getItems() now accepts the public
-       * MGU user_id.
-       *
-       * userId is the public value received from
-       * the frontend.
-       */
-      let cartItems = [];
+const persistedMembershipId =
+  localPayment.membership_id == null
+    ? null
+    : Number(localPayment.membership_id);
 
-      /*
-       * BUY NOW
-       *
-       * Buy Now is not necessarily stored in the cart,
-       * so create the same temporary item structure
-       * used during createOrder().
-       */
-      if (buyNow && productId) {
-        const productResult = await pool.query(
-          `
-          SELECT
-            id,
-            name,
-            price,
-            weight,
-            stock
-          FROM lkp_products
-          WHERE id = $1
-            AND is_active = 1
-          LIMIT 1
-        `,
-          [productId],
-        );
+if (snapshotPaymentType !== "MEMBERSHIP") {
+  // Use the cart items and totals saved BEFORE Razorpay payment.
+  checkoutItems = snapshotCartItems;
 
-        if (productResult.rows.length) {
-          const product = productResult.rows[0];
+  checkoutTotals = snapshotCheckoutTotals;
 
-          const buyNowQuantity = Number(quantity ?? 1);
+  if (!checkoutItems.length || !checkoutTotals) {
+    throw new Error(
+      "Captured payment has no valid saved checkout snapshot"
+    );
+  }
 
-          cartItems = [
-            {
-              cart_id: null,
-
-              user_id: userId,
-
-              product_id: product.id,
-
-              product_name: product.name,
-
-              price: Number(product.price || 0),
-
-              weight: Number(product.weight || 0),
-
-              stock: Number(product.stock || 0),
-
-              quantity: buyNowQuantity,
-
-              total_price: Number(product.price || 0) * buyNowQuantity,
-            },
-          ];
-        }
-      } else {
-        /*
-         * NORMAL CART
-         */
-        cartItems = await Cart.getItems(userId);
+  // Restore coupon details from the saved snapshot.
+  verifiedCoupon = snapshotCoupon
+    ? {
+        coupon_id: snapshotCoupon.coupon_id,
+        coupon_code: snapshotCoupon.coupon_code,
+        coupon_percentage: snapshotCoupon.coupon_percentage,
       }
+    : null;
 
-      if (!cartItems || cartItems.length === 0) {
-        return res.status(409).json({
-          success: false,
-          message:
-            "Captured payment requires reconciliation because checkout items are no longer available",
-          paymentId: localPayment.id,
-          paymentStatus: localPayment.status,
-        });
-      }
+  verifiedCouponDiscount = snapshotCouponDiscount;
 
-      checkoutItems = cartItems.map((item) => ({
-        ...item,
-        item_id: item.item_id ?? item.product_id,
-      }));
-      checkoutTotals = await calculateCheckoutTotals(
-        userId,
-        cartItems,
-        persistedMembershipId,
-      );
+  // Verify the saved amounts match the payment record.
+  const expectedPayable = roundMoney(
+    Number(localPayment.payable_amount)
+  );
 
-      if (couponCode && String(couponCode).trim()) {
-        verifiedCoupon = await Coupon.findByCode(String(couponCode).trim());
+  const expectedActual = roundMoney(
+    Number(localPayment.actual_amount)
+  );
 
-        if (!verifiedCoupon) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid coupon",
-          });
-        }
+  const snapshotPayable = roundMoney(
+    Number(checkoutTotals.payableAmount) -
+      verifiedReferralBonus
+  );
 
-        if (Number(verifiedCoupon.is_active) !== 1) {
-          return res.status(400).json({
-            success: false,
-            message: "Coupon expired",
-          });
-        }
+  const snapshotActual = roundMoney(
+    Number(checkoutTotals.actualAmount)
+  );
 
-        if (Number(checkoutTotals.totalLitres) < 2) {
-          return res.status(400).json({
-            success: false,
-            message: "This coupon requires a minimum purchase of 2 litres",
-          });
-        }
-
-        couponVerificationLockKey = `COUPON_USE:${req.authenticatedUser.id}:${verifiedCoupon.coupon_id}`;
-        await verificationLockClient.query(
-          "SELECT pg_advisory_lock(hashtext($1))",
-          [couponVerificationLockKey],
-        );
-
-        if (
-          await Coupon.hasSuccessfulUseForUser({
-            userId: req.authenticatedUser.id,
-            couponId: verifiedCoupon.coupon_id,
-            excludePaymentId: localPayment.id,
-            client: verificationLockClient,
-          })
-        ) {
-          return res.status(409).json({
-            success: false,
-            message: "You have already used this coupon",
-          });
-        }
-
-        const couponTotals = applyCouponToCheckoutTotals(
-          checkoutTotals,
-          verifiedCoupon.coupon_percentage,
-        );
-        verifiedCouponDiscount = couponTotals.couponDiscount;
-        checkoutTotals = couponTotals.checkoutTotals;
-      }
-
-  const expectedPayable = Number(localPayment.payable_amount);
-  const expectedActual = Number(localPayment.actual_amount);
-  const calculatedPayable = roundMoney(
-  Number(checkoutTotals.payableAmount) -
-    verifiedReferralBonus
-);
-  const calculatedActual = Number(checkoutTotals.actualAmount);
   if (
     !Number.isFinite(expectedPayable) ||
     !Number.isFinite(expectedActual) ||
-    Math.round(expectedPayable * 100) !==
-      Math.round(calculatedPayable * 100) ||
-    Math.round(expectedActual * 100) !==
-      Math.round(calculatedActual * 100)
+    expectedPayable !== snapshotPayable ||
+    expectedActual !== snapshotActual
   ) {
-    return res.status(409).json({
-      success: false,
-      message:
-        "Captured payment requires reconciliation because checkout totals changed",
-      paymentId: localPayment.id,
-      paymentStatus: localPayment.status,
-    });
+    throw new Error(
+      "Saved checkout snapshot amounts do not match captured payment"
+    );
   }
-    }
-
+}
     /* =====================================================
    MEMBERSHIP PAYMENT
 ===================================================== */
@@ -1613,7 +1661,10 @@ await Membership.checkAndResetMonthlyBenefits(userId);
         FROM lkp_subscription_plans
         WHERE id = $1
       `,
-        [membershipPlanId || localPayment.membership_plan_id],
+        [
+  savedCheckoutSnapshot.membershipPlan?.id ||
+  localPayment.membership_plan_id
+],
       );
 
       const plan = planResult.rows[0];
@@ -1625,18 +1676,20 @@ await Membership.checkAndResetMonthlyBenefits(userId);
         });
       }
 
-      if (
-        !isRazorpayTestMode() &&
-        Math.round(Number(plan.plan_price) * 100) !==
-        Math.round(razorpayAmount * 100)
-      ) {
-        return res.status(409).json({
-          success: false,
-          message:
-            "Captured membership payment amount does not match its persisted plan price",
-          paymentId: localPayment.id,
-        });
-      }
+const savedPlanPrice = Number(
+  savedCheckoutSnapshot.membershipPlan?.plan_price
+);
+
+if (
+  !Number.isFinite(savedPlanPrice) ||
+  savedPlanPrice <= 0 ||
+  roundMoney(savedPlanPrice) !==
+    roundMoney(Number(localPayment.actual_amount))
+) {
+  throw new Error(
+    "Saved membership plan price does not match payment record"
+  );
+}
 
       const expiryDate = new Date();
 
@@ -1752,10 +1805,15 @@ await Membership.checkAndResetMonthlyBenefits(userId);
       let validatedReferralCode = null;
       let validatedCustomerReferralId = null;
 
-      const cleanReferralInput =
-        (typeof referralCode === "string" && referralCode.trim()) ||
-        (typeof customerReferralId === "string" && customerReferralId.trim()) ||
-        "";
+const cleanReferralInput =
+  (typeof snapshotReferralCode === "string" &&
+    snapshotReferralCode.trim()) ||
+  (typeof snapshotCustomerReferralId === "string" &&
+    snapshotCustomerReferralId.trim()) ||
+  (typeof referralCode === "string" && referralCode.trim()) ||
+  (typeof customerReferralId === "string" &&
+    customerReferralId.trim()) ||
+  "";
 
       if (cleanReferralInput !== "") {
         const referralResult = await pool.query(
@@ -1861,6 +1919,7 @@ await Membership.checkAndResetMonthlyBenefits(userId);
          CREATE MEMBERSHIP
       ================================================= */
       await verificationLockClient.query("BEGIN");
+      membershipTransactionStarted = true;
 
       const membership = await Membership.createMembership({
         userId: userId,
@@ -1869,11 +1928,14 @@ await Membership.checkAndResetMonthlyBenefits(userId);
 
         paymentId: payment.id,
 
-        walletBalance: plan.wallet_bonus,
+walletBalance:
+  savedCheckoutSnapshot.membershipPlan.wallet_bonus,
 
-        discountPercent: plan.discount_percentage,
+discountPercent:
+  savedCheckoutSnapshot.membershipPlan.discount_percentage,
 
-        monthlyClaim: plan.monthly_claim,
+monthlyClaim:
+  savedCheckoutSnapshot.membershipPlan.monthly_claim,
 
         expiryDate,
 
@@ -2059,22 +2121,57 @@ try {
         client: verificationLockClient,
       });
 
-      await updateLocalPayment("PAID", verificationLockClient);
-      await verificationLockClient.query("COMMIT");
-      await createPaymentSuccessNotification();
+if (validatedCustomerReferralId) {
+  const referralReward =
+    await creditCustomerReferralRewardForMembership({
+      membershipId: membership.id,
+      client: verificationLockClient,
+    });
 
-      if (validatedCustomerReferralId) {
-        const referralReward =
-          await creditCustomerReferralRewardForMembership({
-            membershipId: membership.id,
-          });
+  if (referralReward) {
+    console.log(
+      `CUSTOMER REFERRAL REWARD: ₹${referralReward.rewardAmount} credited to ${validatedCustomerReferralId}`,
+    );
+  }
+}
+const membershipFulfillmentUpdate =
+  await verificationLockClient.query(
+    `
+    UPDATE payments
+    SET
+      fulfillment_status = 'COMPLETED',
+      fulfillment_data = jsonb_set(
+        COALESCE(fulfillment_data, '{}'::jsonb),
+        '{membership_id}',
+        to_jsonb($1::integer),
+        true
+      ),
+      updated_at = CURRENT_TIMESTAMP,
+      updated_by = $2
+    WHERE id = $3
+      AND created_by = $2
+      AND tnx_order_id = $4
+    RETURNING id
+    `,
+    [
+      membership.id,
+      userId,
+      localPayment.id,
+      razorpay_order_id,
+    ],
+  );
 
-        if (referralReward) {
-          console.log(
-            `CUSTOMER REFERRAL REWARD: ₹${referralReward.rewardAmount} credited to ${validatedCustomerReferralId}`,
-          );
-        }
-      }
+if (!membershipFulfillmentUpdate.rows[0]) {
+  throw new Error("Failed to complete membership payment fulfillment");
+}
+
+
+
+await updateLocalPayment("PAID", verificationLockClient);
+
+await verificationLockClient.query("COMMIT");
+membershipTransactionStarted = false;
+await createPaymentSuccessNotification();
 
       console.log("===== MEMBERSHIP WALLET BENEFITS =====");
 
@@ -2244,13 +2341,12 @@ try {
       /* ===================================================
          VALIDATE ADDRESS
       =================================================== */
-
-      if (!address_id) {
-        return res.status(400).json({
-          success: false,
-          message: "Delivery address is required",
-        });
-      }
+if (!snapshotAddressId) {
+  return res.status(400).json({
+    success: false,
+    message: "Saved delivery address is missing",
+  });
+}
 
       const addressResult = await pool.query(
         `
@@ -2260,7 +2356,7 @@ try {
               AND user_id = $2
             LIMIT 1
           `,
-        [address_id, userId],
+        [snapshotAddressId, userId],
       );
 
       const selectedAddress = addressResult.rows[0];
@@ -2274,12 +2370,21 @@ try {
 
       console.log("SELECTED ADDRESS:", selectedAddress);
 
+
+      
+
       /* ===================================================
          BUY NOW ORDER
       =================================================== */
+let createdOrderDbId = null;
+let createdOrderId = null;
 
-      if (buyNow && productId) {
-        const buyNowQuantity = Number(quantity ?? 1);
+try {
+  await verificationLockClient.query("BEGIN");
+
+
+      if (snapshotBuyNow && snapshotProductId) {
+        const buyNowQuantity = snapshotQuantity;
 
         console.log("===== BUY NOW ORDER =====");
 
@@ -2290,18 +2395,14 @@ try {
           address_id,
         });
 
-        createdOrder = await Order.createBuyNowOrder(
-          userId,
-          address_id,
-          productId,
-          buyNowQuantity,
-          {
-            cartItems: checkoutItems,
-            checkoutTotals,
-            membershipId: persistedMembershipId,
-            gatewayOrderId: razorpay_order_id,
-          },
-        );
+createdOrder = await Order.createBuyNowOrder(
+  userId,
+  snapshotAddressId,
+  snapshotProductId,
+  snapshotQuantity,
+  savedCheckoutSnapshot,
+  verificationLockClient
+);
       } else {
         /* =================================================
            NORMAL CART ORDER
@@ -2309,27 +2410,20 @@ try {
 
         console.log("===== CART ORDER =====");
 
-        createdOrder = await Order.createOrder(
-          userId,
-          address_id,
-          false,
-          null,
-          1,
-          {
-            cartItems: checkoutItems,
-            checkoutTotals,
-            membershipId: persistedMembershipId,
-            gatewayOrderId: razorpay_order_id,
-          },
-        );
+createdOrder = await Order.createOrder(
+  userId,
+  snapshotAddressId,
+  false,
+  null,
+  1,
+  savedCheckoutSnapshot,
+  verificationLockClient
+);
       }
 
-      if (!createdOrder) {
-        return res.status(500).json({
-          success: false,
-          message: "Failed to create order",
-        });
-      }
+if (!createdOrder) {
+  throw new Error("Failed to create order");
+}
 
       console.log("ORDER CREATED:", createdOrder);
 
@@ -2337,15 +2431,12 @@ try {
          ORDER ID
       =================================================== */
 
-      const createdOrderDbId = createdOrder.id;
-      const createdOrderId = createdOrder.order_id;
+      createdOrderDbId = createdOrder.id;
+      createdOrderId = createdOrder.order_id;
 
-      if (!createdOrderDbId || !createdOrderId) {
-        return res.status(500).json({
-          success: false,
-          message: "Order created but order ID was not returned",
-        });
-      }
+if (!createdOrderDbId || !createdOrderId) {
+  throw new Error("Order created but order ID was not returned");
+}
 
       /* ===================================================
          SAVE ORDER BREAKDOWN
@@ -2373,9 +2464,6 @@ try {
         payableAmount,
       });
 
-      try {
-        await verificationLockClient.query("BEGIN");
-
         if (
           Number(createdOrder.membership_id || 0) !==
           Number(persistedMembershipId || 0)
@@ -2386,11 +2474,7 @@ try {
         }
 
         if (persistedMembershipId !== null) {
-          const litresUsed = await Membership.calculateOrderLitres(
-            createdOrder.item_id,
-            createdOrder.quantity,
-            verificationLockClient,
-          );
+         const litresUsed = calculateSnapshotOrderLitres(snapshotCartItems);
 
           await Membership.updateMembershipUsage({
             userId,
@@ -2444,6 +2528,10 @@ try {
             ],
           );
 
+          if (!updatedOrderResult.rows[0]) {
+  throw new Error("Failed to mark created order as PAID");
+}
+
 
 
         if (verifiedCoupon && payment) {
@@ -2455,7 +2543,7 @@ try {
       AND is_active = 1
     LIMIT 1
     `,
-            [req.authenticatedUser.id],
+            [userId],
           );
 
           const couponNumericUserId = couponUserResult.rows[0]?.id;
@@ -2487,29 +2575,37 @@ try {
           });
         }
 
-          const updatedPaymentResult = await verificationLockClient.query(
-            `
-            UPDATE payments
-            SET
-              order_id = $1,
-              status = 'PAID',
-              payment_id = $2,
-              method = $3,
-              upi_transaction_id = $4,
-              updated_at = CURRENT_TIMESTAMP,
-              updated_by = $6
-            WHERE id = $5
-            RETURNING *
-            `,
-            [
-              createdOrder.order_id,
-              paymentId,
-              method,
-              upiTransactionId,
-              localPayment.id,
-              userId,
-            ],
-          );
+const updatedPaymentResult = await verificationLockClient.query(
+  `
+  UPDATE payments
+  SET
+   order_id = $1::varchar,
+    status = 'PAID',
+    fulfillment_status = 'COMPLETED',
+    fulfillment_data = jsonb_set(
+      COALESCE(fulfillment_data, '{}'::jsonb),
+      '{order_id}',
+      to_jsonb($1::varchar),
+      true
+    ),
+    payment_id = $2,
+    method = $3,
+    upi_transaction_id = $4,
+    updated_at = CURRENT_TIMESTAMP,
+    updated_by = $6
+  WHERE id = $5
+    AND created_by = $6
+  RETURNING *
+  `,
+  [
+    createdOrder.order_id,
+    paymentId,
+    method,
+    upiTransactionId,
+    localPayment.id,
+    userId,
+  ],
+);
 
           if (!updatedPaymentResult.rows[0]) {
             const currentPaymentCheck = await verificationLockClient.query(
@@ -2663,7 +2759,7 @@ try {
 
             orderId: createdOrderId,
 
-            amount: Number(payableAmount).toFixed(2),
+            amount: Number(createdOrder.payable_amount).toFixed(2),
 
             orderSummary: "Order placed successfully",
           });
@@ -2689,16 +2785,16 @@ try {
         orderId: createdOrderId,
 
         membershipBenefits,
+        
+actualAmount: Number(createdOrder.actual_amount),
 
-        actualAmount,
+membershipDiscount: Number(createdOrder.membership_discount),
 
-        membershipDiscount,
+walletClaim: Number(createdOrder.wallet_claim),
 
-        walletClaim,
+deliveryCharge: Number(createdOrder.delivery_charge),
 
-        deliveryCharge,
-
-        payableAmount,
+payableAmount: Number(createdOrder.payable_amount),
 
         message: "Payment verified and order created successfully.",
       });
@@ -3128,6 +3224,106 @@ return res.json({
   }
 };
 
+const razorpayWebhook = async (req, res) => {
+  try {
+    const signature = req.get("x-razorpay-signature");
+
+    // Verify Razorpay webhook signature using the raw request body.
+    const isValid = razorpayService.verifyWebhookSignature(
+      req.body,
+      signature,
+    );
+
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid webhook signature",
+      });
+    }
+
+    const event = JSON.parse(req.body.toString("utf8"));
+
+    // Process only captured payments.
+    if (event.event !== "payment.captured") {
+      return res.status(200).json({
+        success: true,
+        message: "Event ignored",
+      });
+    }
+
+    const paymentEntity = event?.payload?.payment?.entity;
+    const razorpay_order_id = paymentEntity?.order_id;
+    const razorpay_payment_id = paymentEntity?.id;
+
+    if (!razorpay_order_id || !razorpay_payment_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing Razorpay payment details",
+      });
+    }
+
+    const result = await pool.query(
+      `SELECT created_by, payment_type, membership_plan_id, fulfillment_data
+       FROM payments
+       WHERE tnx_order_id = $1
+         AND payment_gateway = 'RAZORPAY'
+       ORDER BY id DESC
+       LIMIT 1`,
+      [razorpay_order_id],
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error("Local payment record not found for webhook order");
+    }
+
+    const localPayment = result.rows[0];
+
+    const fulfillmentData =
+      typeof localPayment.fulfillment_data === "string"
+        ? JSON.parse(localPayment.fulfillment_data)
+        : localPayment.fulfillment_data;
+
+    const snapshot = fulfillmentData?.checkout_snapshot;
+
+    if (!snapshot || !snapshot.userId) {
+      throw new Error("Checkout snapshot missing for webhook payment");
+    }
+
+    if (String(snapshot.userId) !== String(localPayment.created_by)) {
+      throw new Error("Webhook payment user does not match checkout snapshot");
+    }
+
+    // Reuse the existing verified payment fulfillment flow.
+    req.body = {
+      razorpay_order_id,
+      razorpay_payment_id,
+      userId: snapshot.userId,
+      paymentType: snapshot.paymentType ?? localPayment.payment_type,
+      membershipPlanId:
+        snapshot.membershipPlan?.id ?? localPayment.membership_plan_id,
+      address_id: snapshot.addressId ?? null,
+      buyNow: Boolean(snapshot.buyNow),
+      productId: snapshot.productId ?? null,
+      quantity: snapshot.quantity ?? 1,
+      referralCode: snapshot.referralCode ?? null,
+      customerReferralId: snapshot.customerReferralId ?? null,
+      couponCode: snapshot.coupon?.coupon_code ?? null,
+      referralBonus: snapshot.referralBonus ?? 0,
+    };
+
+    req.isRazorpayWebhook = true;
+
+    return await verifyPayment(req, res);
+  } catch (error) {
+    await logException(error, req);
+
+    return res.status(500).json({
+      success: false,
+      message: "Webhook processing failed",
+    });
+  }
+};
+
 /* =========================================================
    MODULE EXPORTS
 ========================================================= */
@@ -3139,4 +3335,5 @@ module.exports = {
   getPayments,
   checkoutSummary,
   applyCouponToCheckoutTotals,
+  razorpayWebhook,
 };

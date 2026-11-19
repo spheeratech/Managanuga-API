@@ -308,7 +308,7 @@ const createCustomerWalletTransaction = async ({
   benefitType,
   benefitedBy = null,
   benefitPercentage = 0,
-}) => {
+}, suppliedClient = null) => {
   const cleanUserId = String(userId || "").trim();
   const cleanReferenceType = String(referenceType || "").trim();
   const cleanReferenceId = String(referenceId || "").trim();
@@ -343,10 +343,13 @@ const createCustomerWalletTransaction = async ({
       : ` [${cleanReferenceType}:${cleanReferenceId}]`;
   const transactionDescription =
     `${cleanDescription}${referenceMarker}`;
-  const client = await pool.connect();
 
-  try {
+    const client = suppliedClient || await pool.connect();
+
+try {
+  if (!suppliedClient) {
     await client.query("BEGIN");
+  }
 
     const idempotencyKey = JSON.stringify([
       cleanUserId,
@@ -769,11 +772,104 @@ async getCustomerTransactions(userId, benefitType = null) {
   return result.rows;
 },
 
-  async creditCustomerWallet(details) {
+    async creditCustomerWallet(details) {
     return createCustomerWalletTransaction({
       ...details,
       transactionType: "CREDIT",
     });
+  },
+
+  async creditCustomerWalletWithClient(client, details) {
+    if (!client) {
+      throw new Error("Database transaction client is required");
+    }
+
+    const {
+      userId,
+      amount,
+      referenceType,
+      referenceId,
+      description,
+      benefitType,
+      benefitedBy = null,
+      benefitPercentage = 0,
+    } = details;
+
+    const cleanUserId = String(userId || "").trim();
+    const cleanReferenceType = String(referenceType || "").trim();
+    const cleanReferenceId = String(referenceId || "").trim();
+    const cleanBenefitType = String(benefitType || "").trim();
+
+    if (!cleanUserId || !cleanReferenceType || !cleanReferenceId) {
+      throw new Error("Wallet transaction reference is required");
+    }
+
+    const referenceMarker =
+      ` [wallet-reference:${JSON.stringify([
+        cleanReferenceType,
+        cleanReferenceId,
+      ])}]`;
+
+    const legacyReferenceMarker =
+      cleanReferenceType.includes(":") || cleanReferenceId.includes(":")
+        ? null
+        : ` [${cleanReferenceType}:${cleanReferenceId}]`;
+
+    const idempotencyKey = JSON.stringify([
+      cleanUserId,
+      "CREDIT",
+      cleanBenefitType,
+      cleanReferenceType,
+      cleanReferenceId,
+    ]);
+
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext($1))`,
+      [`CUSTOMER_WALLET_TRANSACTION:${idempotencyKey}`]
+    );
+
+    const walletBenefitType =
+      cleanBenefitType === "CUSTOMER_REFERRAL"
+        ? "CUSTOMER_REFERRAL"
+        : "MEMBERSHIP";
+
+    const wallet = await ensureCustomerWallet(
+      client,
+      cleanUserId,
+      walletBenefitType
+    );
+
+    const existingTransaction = await findCustomerTransaction(client, {
+      userId: cleanUserId,
+      walletId: wallet.wallet_id,
+      transactionType: "CREDIT",
+      benefitType: cleanBenefitType,
+      referenceMarker,
+      legacyReferenceMarker,
+    });
+
+    if (existingTransaction) {
+      return {
+        wallet,
+        transaction: existingTransaction,
+        duplicate: true,
+      };
+    }
+
+    const result = await applyCustomerWalletTransaction(client, wallet, {
+      userId: cleanUserId,
+      amount,
+      transactionType: "CREDIT",
+      description: `${String(description || "").trim()}${referenceMarker}`,
+      benefitType: cleanBenefitType,
+      benefitedBy,
+      benefitPercentage,
+    });
+
+    return {
+      ...result,
+      duplicate: false,
+    };
   },
 
   async debitCustomerWallet(details) {

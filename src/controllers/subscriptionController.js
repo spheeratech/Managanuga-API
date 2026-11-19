@@ -6,6 +6,10 @@ const generateUserId = require("../utils/generatedUserId");
 const Subscription = require("../models/Subscription");
 const Membership = require("../models/Membership");
 const Notification = require("../models/Notification");
+
+const {
+  savePendingReferral,
+} = require("../services/pendingCustomerReferralStore");
 const notifySubscriptionAdmin = async ({ userId, title, message, planId }) => {
   if (!userId) {
     console.warn("Subscription notification skipped: admin user ID missing");
@@ -828,6 +832,7 @@ const validateReferralCode = async (req, res) => {
         message: "You cannot use your own referral code",
       });
     }
+    savePendingReferral(userId, referrer.referral_code);
 
     return res.status(200).json({
       success: true,
