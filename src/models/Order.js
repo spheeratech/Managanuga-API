@@ -7,6 +7,10 @@ const {
 } = require("../services/membershipCheckoutService");
 const shiprocketService = require("../services/shiprocketService");
 
+const {
+  findActiveHubForPincode,
+} = require("../services/hubService");
+
 /* =========================================================
    VERIFY EXISTING ORDER AGAINST CHECKOUT SNAPSHOT
 ========================================================= */
@@ -136,17 +140,17 @@ const createOrder = async (
        VALIDATE ADDRESS
     ----------------------------------------------------- */
 
-    const addressResult = await db.query(
-      `
-      SELECT id
-      FROM user_address
-      WHERE id = $1
-        AND user_id = $2
-        AND is_active = 1
-      LIMIT 1
-      `,
-      [address_id, userId]
-    );
+   const addressResult = await db.query(
+  `
+  SELECT id, postal_code
+  FROM user_address
+  WHERE id = $1
+    AND user_id = $2
+    AND is_active = 1
+  LIMIT 1
+  `,
+  [address_id, userId]
+);
 
     if (!addressResult.rows[0]) {
       throw new Error(
@@ -444,6 +448,11 @@ const createOrder = async (
 
     const mgoOrderId = await generateMgoOrderId(client);
 
+    const hub = await findActiveHubForPincode(
+  addressResult.rows[0].postal_code,
+  client
+);
+
     /* -----------------------------------------------------
        INSERT ORDER
     ----------------------------------------------------- */
@@ -468,13 +477,14 @@ const createOrder = async (
         referral_bonus,
         status,
         payment_status,
-        address_id
+        address_id,
+        hubcode
       )
       VALUES
       (
         $1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14,
-        'PLACED', 'PENDING', $15
+        'PLACED', 'PENDING', $15, $16
       )
       RETURNING *
       `,
@@ -494,6 +504,7 @@ const createOrder = async (
         couponDiscount,
         referralBonus,
         address_id,
+        hub.id,
       ]
     );
 
@@ -586,8 +597,8 @@ const createBuyNowOrder = async (
 
     const addressResult = await db.query(
       `
-      SELECT id
-      FROM user_address
+ SELECT id, postal_code
+FROM user_address
       WHERE id = $1
         AND user_id = $2
         AND is_active = 1
@@ -836,6 +847,11 @@ const createBuyNowOrder = async (
 
     const mgoOrderId = await generateMgoOrderId(client);
 
+    const hub = await findActiveHubForPincode(
+  addressResult.rows[0].postal_code,
+  client
+);
+
     /* -----------------------------------------------------
        INSERT BUY NOW ORDER
     ----------------------------------------------------- */
@@ -860,13 +876,14 @@ const createBuyNowOrder = async (
         referral_bonus,
         status,
         payment_status,
-        address_id
+        address_id,
+        hubcode
       )
       VALUES
       (
         $1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14,
-        'PLACED', 'PENDING', $15
+        'PLACED', 'PENDING', $15, $16
       )
       RETURNING *
       `,
@@ -886,6 +903,7 @@ const createBuyNowOrder = async (
         couponDiscount,
         referralBonus,
         address_id,
+        hub.id,
       ]
     );
 
