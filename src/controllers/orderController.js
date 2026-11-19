@@ -1,7 +1,6 @@
-
 const { logException } = require("../utils/exceptionLogger.js");
 const Order = require("../models/Order");
-
+const Notification = require("../models/Notification");
 const { sendOrderConfirmation } = require("../services/whatsappService");
 
 // const xpressbeesService = require("../services/xpressbeesService");
@@ -42,6 +41,25 @@ const createOrder = async (req, res) => {
         success: false,
         message: "Cart is empty",
       });
+    }
+
+    // --------------------------------
+    // NOTIFY SUPER_ADMIN ABOUT NEW ORDER
+    // --------------------------------
+
+    try {
+      const notificationResult = await Notification.notifySuperAdmins({
+        title: "New Order Received",
+        message: `A new order ${order.order_id} has been placed.`,
+        type: "ORDER_PLACED",
+        referenceId: order.id,
+      });
+
+      console.log("SUPER_ADMIN ORDER NOTIFICATION RESULT:", notificationResult);
+    } catch (notificationError) {
+      void logException(notificationError);
+
+      console.error("Order notification failed:", notificationError.message);
     }
 
     // --------------------------------

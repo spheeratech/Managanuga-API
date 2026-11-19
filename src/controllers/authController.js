@@ -1,4 +1,3 @@
-
 const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 const {
@@ -14,9 +13,7 @@ const generateToken = require("../utils/generateToken");
 const { sendSMS } = require("../services/smsService");
 const Notification = require("../models/Notification");
 
-const {
-  sendUserRegistrationWhatsApp,
-} = require("../services/whatsappService");
+const { sendUserRegistrationWhatsApp } = require("../services/whatsappService");
 
 // SEND OTP
 exports.sendOtp = async (req, res) => {
@@ -261,54 +258,75 @@ exports.verifyOtp = async (req, res) => {
     }
 
     /* --------------------------------
+   NOTIFY ALL SUPER_ADMINS ABOUT
+   NEW USER REGISTRATION
+-------------------------------- */
+
+    try {
+      const registeredRole = createdLoginUser.role_name || "USER";
+
+      const notificationResult = await Notification.notifySuperAdmins({
+        title: `New ${registeredRole} Registered`,
+        message:
+          `A new ${registeredRole} has successfully registered. ` +
+          `User ID: ${createdLoginUser.user_id}`,
+        type: "USER_REGISTERED",
+        referenceId: null,
+      });
+
+      console.log(
+        "SUPER_ADMIN USER REGISTRATION NOTIFICATION RESULT:",
+        notificationResult,
+      );
+    } catch (notificationError) {
+      void logException(notificationError);
+
+      console.error(
+        "SUPER_ADMIN REGISTRATION NOTIFICATION FAILED:",
+        notificationError.message,
+      );
+    }
+
+    /* --------------------------------
    SEND USER REGISTRATION WHATSAPP
 -------------------------------- */
 
-try {
-  await sendUserRegistrationWhatsApp({
-    mobile: createdLoginUser.mobile_no || mobile,
-    password: randomPassword,
-  });
+    try {
+      await sendUserRegistrationWhatsApp({
+        mobile: createdLoginUser.mobile_no || mobile,
+        password: randomPassword,
+      });
 
-  console.log(
-    "USER REGISTRATION WHATSAPP SENT:",
-    mobile
-  );
-} catch (whatsappError) {
-  void logException(whatsappError);
-  console.error(
-    "USER REGISTRATION WHATSAPP FAILED:",
-    whatsappError.message
-  );
-}
+      console.log("USER REGISTRATION WHATSAPP SENT:", mobile);
+    } catch (whatsappError) {
+      void logException(whatsappError);
+      console.error(
+        "USER REGISTRATION WHATSAPP FAILED:",
+        whatsappError.message,
+      );
+    }
 
-/* --------------------------------
+    /* --------------------------------
    CREATE IN-APP WELCOME NOTIFICATION
 -------------------------------- */
 
-try {
-  await Notification.createNotification({
-    userId: createdLoginUser.user_id,
-    title: "🎉 Welcome to ManaGanuga!",
-    message:
-      `Your account has been created successfully.\n` +
-      `User ID: ${createdLoginUser.mobile_no || mobile}\n` +
-      `For your security, please use the password sent to your registered mobile/WhatsApp and change it after your first login.`,
-    type: "WELCOME",
-    referenceId: null,
-  });
+    try {
+      await Notification.createNotification({
+        userId: createdLoginUser.user_id,
+        title: "🎉 Welcome to ManaGanuga!",
+        message:
+          `Your account has been created successfully.\n` +
+          `User ID: ${createdLoginUser.mobile_no || mobile}\n` +
+          `For your security, please use the password sent to your registered mobile/WhatsApp and change it after your first login.`,
+        type: "WELCOME",
+        referenceId: null,
+      });
 
-  console.log(
-    "WELCOME NOTIFICATION CREATED:",
-    createdLoginUser.user_id
-  );
-} catch (notificationError) {
-  void logException(notificationError);
-  console.error(
-    "WELCOME NOTIFICATION FAILED:",
-    notificationError.message
-  );
-}
+      console.log("WELCOME NOTIFICATION CREATED:", createdLoginUser.user_id);
+    } catch (notificationError) {
+      void logException(notificationError);
+      console.error("WELCOME NOTIFICATION FAILED:", notificationError.message);
+    }
 
     // Send initial password SMS
     const passwordMessage =
@@ -503,17 +521,17 @@ exports.updateUsername = async (req, res) => {
     void logException(err);
     console.error("UPDATE USERNAME ERROR:", err);
 
-  // Duplicate username among ACTIVE accounts
-if (
-  err.code === "23505" &&
-  err.constraint === "user_login_username_active_key"
-) {
-  return res.status(409).json({
-    success: false,
-    message:
-      "This name is already registered. Please choose a different name.",
-  });
-}
+    // Duplicate username among ACTIVE accounts
+    if (
+      err.code === "23505" &&
+      err.constraint === "user_login_username_active_key"
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This name is already registered. Please choose a different name.",
+      });
+    }
 
     return res.status(500).json({
       success: false,
@@ -764,23 +782,23 @@ exports.login = async (req, res) => {
       message: "Login successful",
 
       user: {
-  // Public ManaGanuga ID — this is what the app should use everywhere
-  id: user.user_id,
-  user_id: user.user_id,
-  userId: user.user_id,
+        // Public ManaGanuga ID — this is what the app should use everywhere
+        id: user.user_id,
+        user_id: user.user_id,
+        userId: user.user_id,
 
-  // Keep internal DB ID available separately for legacy/internal use
-  login_id: user.id,
+        // Keep internal DB ID available separately for legacy/internal use
+        login_id: user.id,
 
-  username: user.username,
-  email: user.email,
-  name: fullName || user.username,
-  role: user.role,
-  mobile: user.mobile_no,
-  createdBy: user.created_by,
-  assignedBy: user.assigned_by,
-  relationshipType: user.relationship_type,
-},
+        username: user.username,
+        email: user.email,
+        name: fullName || user.username,
+        role: user.role,
+        mobile: user.mobile_no,
+        createdBy: user.created_by,
+        assignedBy: user.assigned_by,
+        relationshipType: user.relationship_type,
+      },
     });
   } catch (error) {
     void logException(error);

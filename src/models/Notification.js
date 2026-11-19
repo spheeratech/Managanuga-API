@@ -1,5 +1,5 @@
 const pool = require("../../db");
-
+const { sendPushNotification } = require("../services/fcmService");
 // Create notification
 const createNotification = async ({
   userId,
@@ -91,10 +91,108 @@ const markAllAsRead = async (userId) => {
   return result.rows;
 };
 
+// Notify all active SUPER_ADMIN users
+const notifySuperAdmins = async ({
+  title,
+  message,
+  type = "ORDER_PLACED",
+  referenceId = null,
+}) => {
+  try {
+    const result = await pool.query(`
+      SELECT user_id, fcm_token
+      FROM user_login
+      WHERE role = 1
+        AND is_active = 1
+    `);
+
+    console.log("SUPER_ADMIN QUERY ROW COUNT:", result.rows.length);
+    console.log("SUPER_ADMIN QUERY RESULTS:", result.rows);
+    console.log(
+      "ACTIVE SUPER_ADMINS:",
+      result.rows.map((admin) => admin.user_id),
+    );
+
+    let notifiedAdmins = 0;
+    const failedAdmins = [];
+
+    for (const admin of result.rows) {
+      try {
+        // Create in-app notification for each SUPER_ADMIN
+        const notification = await createNotification({
+          userId: admin.user_id,
+          title,
+          message,
+          type,
+          referenceId,
+        });
+
+        notifiedAdmins++;
+
+        console.log(
+          "ORDER NOTIFICATION CREATED:",
+          admin.user_id,
+          notification.id,
+        );
+
+        // Send push notification if FCM token exists
+        if (admin.fcm_token) {
+          try {
+            await sendPushNotification({
+              fcmToken: admin.fcm_token,
+              title,
+              body: message,
+              data: {
+                notificationId: String(notification.id),
+                userId: String(admin.user_id),
+                type: String(type),
+                referenceId: String(referenceId || ""),
+              },
+            });
+          } catch (pushError) {
+            console.error(
+              "SUPER_ADMIN push failed:",
+              admin.user_id,
+              pushError.message,
+            );
+          }
+        }
+      } catch (adminError) {
+        failedAdmins.push(admin.user_id);
+
+        console.error(
+          "SUPER_ADMIN notification creation failed:",
+          admin.user_id,
+          adminError.message,
+        );
+      }
+    }
+
+    const response = {
+      success: failedAdmins.length === 0,
+      notifiedAdmins,
+      failedAdmins,
+    };
+
+    console.log("SUPER_ADMIN NOTIFICATION RESULT:", response);
+
+    return response;
+  } catch (error) {
+    console.error("SUPER_ADMIN notification service error:", error);
+
+    return {
+      success: false,
+      notifiedAdmins: 0,
+      error: error.message,
+    };
+  }
+};
+
 module.exports = {
   createNotification,
   getUserNotifications,
   getUnreadCount,
   markAsRead,
   markAllAsRead,
+  notifySuperAdmins,
 };
