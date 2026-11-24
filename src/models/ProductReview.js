@@ -6,6 +6,7 @@ const pool = require("../../db");
    CREATE SINGLE PRODUCT REVIEW
    Existing product-detail review
 -------------------------------- */
+
 const createReview = async (
   productId,
   userId,
@@ -27,11 +28,11 @@ const createReview = async (
 };
 
 /* --------------------------------
-   CREATE / UPDATE ORDER REVIEW
+   CREATE ORDER REVIEW
 
-   One review submitted for an order
-   is applied to every product in
-   that order.
+   One review per order.
+   The same review is applied to
+   every product in that order.
 -------------------------------- */
 const createOrderReview = async (
   orderId,
@@ -44,13 +45,10 @@ const createOrderReview = async (
   try {
     await client.query("BEGIN");
 
-    /* --------------------------------
-       RESOLVE PUBLIC USER ID
-       MGU2609xxxx -> user_login.id
-    -------------------------------- */
+    // Resolve public user ID
     const userResult = await client.query(
       `
-      SELECT id, user_id
+      SELECT user_id
       FROM user_login
       WHERE user_id = $1
       LIMIT 1
@@ -62,23 +60,21 @@ const createOrderReview = async (
       throw new Error("User not found");
     }
 
-    const publicUserId = userResult.rows[0].user_id;
+    const publicUserId = String(
+      userResult.rows[0].user_id
+    ).trim();
 
-    /* --------------------------------
-       VERIFY ORDER BELONGS TO USER
-    -------------------------------- */
+    // Verify order ownership and lock the order row.
+    // This prevents simultaneous duplicate submissions.
     const orderResult = await client.query(
       `
       SELECT id
       FROM orders
       WHERE id = $1
         AND user_id = $2
-      LIMIT 1
+      FOR UPDATE
       `,
-      [
-        Number(orderId),
-        String(publicUserId).trim(),
-      ]
+      [Number(orderId), publicUserId]
     );
 
     if (orderResult.rows.length === 0) {
@@ -87,20 +83,31 @@ const createOrderReview = async (
       );
     }
 
-    /* --------------------------------
-       GET ALL PRODUCTS IN ORDER
+    // Reject if this order has already been reviewed.
+    const existingReview = await client.query(
+      `
+      SELECT id
+      FROM product_reviews
+      WHERE order_id = $1
+        AND user_id = $2
+      LIMIT 1
+      `,
+      [Number(orderId), publicUserId]
+    );
 
-       order_items table is no longer used.
+    if (existingReview.rows.length > 0) {
+      const error = new Error(
+        "You have already reviewed this order"
+      );
+      error.code = "ORDER_REVIEW_EXISTS";
+      throw error;
+    }
 
-       Products come from:
-       item_id[]
-       quantity[]
-       unit_price[]
-    -------------------------------- */
+    // Get actual product IDs from order variant IDs.
     const productsResult = await client.query(
       `
       SELECT DISTINCT
-        x.item_id AS product_id
+        pv.product_id AS product_id
       FROM orders o
       CROSS JOIN LATERAL
         unnest(
@@ -113,6 +120,10 @@ const createOrderReview = async (
           quantity,
           unit_price
         )
+      JOIN product_variants pv
+        ON pv.id = x.item_id
+      JOIN lkp_products p
+        ON p.id = pv.product_id
       WHERE o.id = $1
       `,
       [Number(orderId)]
@@ -124,77 +135,29 @@ const createOrderReview = async (
 
     const reviewedProducts = [];
 
-    /* --------------------------------
-       APPLY SAME REVIEW TO EACH PRODUCT
-    -------------------------------- */
+    // Insert the same order review for each product.
     for (const item of productsResult.rows) {
-      const productId = item.product_id;
-
-      /* Check whether this product was
-         already reviewed for this order */
-      const existingReview = await client.query(
-  `
-  SELECT id
-  FROM product_reviews
-  WHERE product_id = $1
-    AND user_id = $2
-  LIMIT 1
-  `,
-  [
-    Number(productId),
-    String(publicUserId).trim(),
-  ]
-);
-
-      let result;
-
-      if (existingReview.rows.length > 0) {
-        /* --------------------------------
-           UPDATE EXISTING ORDER REVIEW
-        -------------------------------- */
-        result = await client.query(
-          `
-          UPDATE product_reviews
-          SET
-            rating = $1,
-            review = $2,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = $3
-          RETURNING *
-          `,
-          [
-            Number(rating),
-            review || null,
-            existingReview.rows[0].id,
-          ]
-        );
-      } else {
-        /* --------------------------------
-           CREATE REVIEW FOR PRODUCT
-        -------------------------------- */
-        result = await client.query(
-          `
-          INSERT INTO product_reviews
-            (
-              product_id,
-              user_id,
-              rating,
-              review,
-              order_id
-            )
-          VALUES
-            ($1, $2, $3, $4, $5)
-          RETURNING *
-          `,
-          [
-            Number(productId),
-            String(publicUserId).trim(),
-            Number(rating),
-            review || null,
-            Number(orderId),
-          ]
-        );
-      }
+      const result = await client.query(
+        `
+        INSERT INTO product_reviews
+          (
+            product_id,
+            user_id,
+            rating,
+            review,
+            order_id
+          )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+        `,
+        [
+          Number(item.product_id),
+          publicUserId,
+          Number(rating),
+          review || null,
+          Number(orderId),
+        ]
+      );
 
       reviewedProducts.push(result.rows[0]);
     }
@@ -207,13 +170,58 @@ const createOrderReview = async (
       reviews: reviewedProducts,
     };
   } catch (error) {
-    void logException(error);
     await client.query("ROLLBACK");
+    void logException(error);
     throw error;
   } finally {
     client.release();
   }
 };
+
+
+/* --------------------------------
+   GET REVIEW BY ORDER
+-------------------------------- */
+const getOrderReview = async (orderId, userId) => {
+  const publicUserId = String(userId).trim();
+
+  const orderResult = await pool.query(
+    `
+    SELECT id
+    FROM orders
+    WHERE id = $1
+      AND user_id = $2
+    LIMIT 1
+    `,
+    [Number(orderId), publicUserId]
+  );
+
+  if (orderResult.rows.length === 0) {
+    throw new Error(
+      "Order not found or does not belong to this user"
+    );
+  }
+
+  const result = await pool.query(
+    `
+    SELECT
+      order_id,
+      rating,
+      review,
+      created_at
+    FROM product_reviews
+    WHERE order_id = $1
+      AND user_id = $2
+    ORDER BY id ASC
+    LIMIT 1
+    `,
+    [Number(orderId), publicUserId]
+  );
+
+  return result.rows[0] || null;
+};
+
+
 
 /* --------------------------------
    GET PRODUCT REVIEWS
@@ -264,6 +272,7 @@ const getProductRating = async (productId) => {
 module.exports = {
   createReview,
   createOrderReview,
+  getOrderReview,
   getReviewsByProductId,
   getProductRating,
 };

@@ -33,6 +33,33 @@ const verifyPaymentSignature = (
 
   return expected === razorpay_signature;
 };
+
+const verifyWebhookSignature = (rawBody, signature) => {
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+
+  if (!webhookSecret || !Buffer.isBuffer(rawBody) || !signature) {
+    return false;
+  }
+
+  const expected = crypto
+    .createHmac("sha256", webhookSecret)
+    .update(rawBody)
+    .digest();
+
+  let received;
+
+  try {
+    received = Buffer.from(signature, "hex");
+  } catch {
+    return false;
+  }
+
+  return (
+    received.length === expected.length &&
+    crypto.timingSafeEqual(received, expected)
+  );
+};
+
 console.log("RAZORPAY KEY ID:", process.env.RAZORPAY_KEY_ID);
 console.log(
   "RAZORPAY SECRET:",
@@ -73,5 +100,6 @@ const fetchRazorpayPayment = async (paymentId) => {
 module.exports = {
   createRazorpayOrder,
   verifyPaymentSignature,
+  verifyWebhookSignature,
   fetchRazorpayPayment
 };

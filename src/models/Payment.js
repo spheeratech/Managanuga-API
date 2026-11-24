@@ -246,6 +246,45 @@ const createPaymentLog = async (data, suppliedClient = null) => {
 };
 
 
+const updateRazorpayOrderId = async ({
+  paymentRecordId,
+  razorpayOrderId,
+  userId,
+}) => {
+  const result = await pool.query(
+    `
+    UPDATE payments
+    SET
+      tnx_order_id = $1,
+      fulfillment_data = jsonb_set(
+        COALESCE(fulfillment_data, '{}'::jsonb),
+        '{checkout_snapshot,gatewayOrderId}',
+        to_jsonb($1::text),
+        true
+      ),
+      updated_at = CURRENT_TIMESTAMP,
+      updated_by = $2
+    WHERE id = $3
+      AND created_by = $2
+      AND (
+        tnx_order_id IS NULL
+        OR tnx_order_id = $1
+      )
+    RETURNING *
+    `,
+    [razorpayOrderId, userId, paymentRecordId]
+  );
+
+  if (!result.rows[0]) {
+    throw new Error(
+      "Unable to attach Razorpay order ID to payment record"
+    );
+  }
+
+  return result.rows[0];
+};
+
+
 module.exports = {
   createPayment,
   getPayments,
@@ -255,4 +294,5 @@ module.exports = {
   updateByTnxOrderId,
   linkPaymentToOrder,
   createPaymentLog,
+  updateRazorpayOrderId,
 };
