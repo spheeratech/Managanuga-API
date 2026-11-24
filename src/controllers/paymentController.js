@@ -199,6 +199,7 @@ const {
   membershipPlanId,
   buyNow,
   productId,
+  variantId,
   quantity,
   address_id,
   couponCode,
@@ -322,75 +323,87 @@ if (paymentTypeUpper !== "MEMBERSHIP") {
          BUY NOW
       ------------------------------------------------ */
 
-      if (buyNow && productId) {
-        const productResult = await pool.query(
-          `
-              SELECT
-                id,
-                name,
-                price,
-                weight,
-                stock
-              FROM lkp_products
-              WHERE id = $1
-                AND is_active = 1
-              LIMIT 1
-            `,
-          [productId],
-        );
 
-        if (!productResult.rows.length) {
-          return res.status(404).json({
-            success: false,
-            message: "Product not found",
-          });
-        }
+if (buyNow && productId) {
+  const selectedVariantId = Number(variantId);
+  const buyNowQuantity = Number(quantity ?? 1);
 
-        const product = productResult.rows[0];
+  if (!Number.isInteger(selectedVariantId) || selectedVariantId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid product variant is required",
+    });
+  }
 
-        const buyNowQuantity = Number(quantity ?? 1);
+  if (!Number.isInteger(buyNowQuantity) || buyNowQuantity <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid product quantity",
+    });
+  }
 
-        /*
-         * Create the same item structure that
-         * calculateMembershipBenefits() expects.
-         *
-         * This is only an in-memory item.
-         * It is NOT inserted into cart_items.
-         */
-        cartItems = [
-          {
-            cart_id: null,
+  const productResult = await pool.query(
+    `
+    SELECT
+      p.id,
+      p.name,
+      p.weight,
+      pv.id AS variant_id,
+      pv.size AS variant_size,
+      pv.price,
+      pv.stock
+    FROM lkp_products p
+    INNER JOIN product_variants pv
+      ON pv.product_id = p.id
+    WHERE p.id = $1
+      AND pv.id = $2
+      AND p.is_active = 1
+      AND pv.is_active = 1
+    LIMIT 1
+    `,
+    [productId, selectedVariantId],
+  );
 
-            user_id: publicUserId,
+  if (productResult.rows.length === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Selected product variant not found or inactive",
+    });
+  }
 
-            product_id: product.id,
+  const product = productResult.rows[0];
 
-            product_name: product.name,
+  if (Number(product.stock) < buyNowQuantity) {
+    return res.status(400).json({
+      success: false,
+      message: "Insufficient stock for the selected variant",
+    });
+  }
 
-            price: Number(product.price || 0),
+  cartItems = [
+    {
+      cart_id: null,
+      user_id: publicUserId,
+      item_id: Number(product.id),
+      product_id: Number(product.id),
+      variant_id: Number(product.variant_id),
+      variant_size: product.variant_size,
+      product_name: product.name,
+      price: Number(product.price),
+      weight: Number(product.weight || 0),
+      stock: Number(product.stock),
+      quantity: buyNowQuantity,
+      total_price: Number(product.price) * buyNowQuantity,
+    },
+  ];
+} else {
+  /* =================================================
+     NORMAL CART
+  ================================================= */
 
-            weight: Number(product.weight || 0),
+  cartItems = await Cart.getItems(publicUserId);
+}
 
-            stock: Number(product.stock || 0),
-
-            quantity: buyNowQuantity,
-
-            total_price: Number(product.price || 0) * buyNowQuantity,
-          },
-        ];
-      } else {
-        /* -----------------------------------------------
-         NORMAL CART
-      ------------------------------------------------ */
-        /*
-         * IMPORTANT:
-         *
-         * New Cart model:
-         *
-         * Cart.getItems(user_id)
-         */
-        cartItems = await Cart.getItems(publicUserId);
-      }
 
       if (!cartItems || cartItems.length === 0) {
         return res.status(400).json({
@@ -398,6 +411,19 @@ if (paymentTypeUpper !== "MEMBERSHIP") {
           message: "Cart is empty",
         });
       }
+
+      const invalidVariantItem = cartItems.find((item) => {
+  const id = Number(item.variant_id);
+  return !Number.isInteger(id) || id <= 0;
+});
+
+if (invalidVariantItem) {
+  return res.status(400).json({
+    success: false,
+    message:
+      "A valid variant is missing for one or more cart items. Please update your cart.",
+  });
+}
 
       checkoutTotals = await calculateCheckoutTotals(publicUserId, cartItems);
       actualAmount = checkoutTotals.actualAmount;
@@ -534,23 +560,31 @@ const pendingCustomerReferralId =
   null,
       addressId:
         paymentTypeUpper === "MEMBERSHIP" ? null : address_id,
-      buyNow: Boolean(buyNow),
-      productId: buyNow ? Number(productId) : null,
-      quantity: buyNow ? Number(quantity ?? 1) : null,
+buyNow: Boolean(buyNow),
+productId: buyNow ? Number(productId) : null,
+variantId: buyNow ? Number(variantId) : null,
+quantity: buyNow ? Number(quantity ?? 1) : null,
 
-      cartItems: cartItems.map((item) => ({
-        cart_id: item.cart_id ?? null,
-        item_id: Number(
-          item.item_id ?? item.product_id ?? item.id
-        ),
-        product_id: Number(
-          item.product_id ?? item.item_id ?? item.id
-        ),
-        product_name: item.product_name ?? item.name ?? null,
-        quantity: Number(item.quantity),
-        price: Number(item.price),
-        weight: Number(item.weight ?? 0),
-      })),
+cartItems: cartItems.map((item) => ({
+  cart_id: item.cart_id ?? null,
+
+  // Parent product ID
+  item_id: Number(
+    item.item_id ?? item.product_id ?? item.id
+  ),
+  product_id: Number(
+    item.product_id ?? item.item_id ?? item.id
+  ),
+
+  // Selected variant details
+  variant_id: Number(item.variant_id),
+  variant_size: item.variant_size ?? null,
+
+  product_name: item.product_name ?? item.name ?? null,
+  quantity: Number(item.quantity),
+  price: Number(item.price),
+  weight: Number(item.weight ?? 0),
+})),
 
       checkoutTotals,
       membershipPlan: membershipPlanSnapshot,
@@ -2401,7 +2435,8 @@ createdOrder = await Order.createBuyNowOrder(
   snapshotProductId,
   snapshotQuantity,
   savedCheckoutSnapshot,
-  verificationLockClient
+  verificationLockClient,
+  "PAID"
 );
       } else {
         /* =================================================
@@ -2417,7 +2452,8 @@ createdOrder = await Order.createOrder(
   null,
   1,
   savedCheckoutSnapshot,
-  verificationLockClient
+  verificationLockClient,
+  "PAID"
 );
       }
 
@@ -2975,7 +3011,7 @@ const getPayments = async (req, res) => {
 
 const checkoutSummary = async (req, res) => {
   try {
-    const { user_id, buyNow, productId, quantity, couponCode } = req.body;
+    const { user_id, buyNow, productId, quantity, variantId,couponCode } = req.body;
 
     const publicUserId = user_id;
 
@@ -2996,69 +3032,87 @@ const checkoutSummary = async (req, res) => {
        BUY NOW
     ===================================================== */
 
-    if (buyNow && productId) {
-      const productResult = await pool.query(
-        `
-            SELECT
-              id,
-              name,
-              price,
-              weight,
-              stock
-            FROM lkp_products
-            WHERE id = $1
-              AND is_active = 1
-            LIMIT 1
-          `,
-        [productId],
-      );
 
-      if (productResult.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Product not found",
-        });
-      }
+if (buyNow && productId) {
+  const selectedVariantId = Number(variantId);
+  const buyNowQuantity = Number(quantity ?? 1);
 
-      const product = productResult.rows[0];
+  if (!Number.isInteger(selectedVariantId) || selectedVariantId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid product variant is required",
+    });
+  }
 
-      const buyNowQuantity = Number(quantity ?? 1);
+  if (!Number.isInteger(buyNowQuantity) || buyNowQuantity <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid product quantity",
+    });
+  }
 
-      /*
-       * Create the same in-memory cart
-       * structure used by createOrder()
-       * and verifyPayment().
-       *
-       * Nothing is inserted into cart_items.
-       */
-      cartItems = [
-        {
-          cart_id: null,
+  const productResult = await pool.query(
+    `
+    SELECT
+      p.id,
+      p.name,
+      p.weight,
+      pv.id AS variant_id,
+      pv.size AS variant_size,
+      pv.price,
+      pv.stock
+    FROM lkp_products p
+    INNER JOIN product_variants pv
+      ON pv.product_id = p.id
+    WHERE p.id = $1
+      AND pv.id = $2
+      AND p.is_active = 1
+      AND pv.is_active = 1
+    LIMIT 1
+    `,
+    [productId, selectedVariantId],
+  );
 
-          user_id: publicUserId,
+  if (productResult.rows.length === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Selected product variant not found or inactive",
+    });
+  }
 
-          product_id: product.id,
+  const product = productResult.rows[0];
 
-          product_name: product.name,
+  if (Number(product.stock) < buyNowQuantity) {
+    return res.status(400).json({
+      success: false,
+      message: "Insufficient stock for the selected variant",
+    });
+  }
 
-          price: Number(product.price || 0),
+  cartItems = [
+    {
+      cart_id: null,
+      user_id: publicUserId,
+      item_id: Number(product.id),
+      product_id: Number(product.id),
+      variant_id: Number(product.variant_id),
+      variant_size: product.variant_size,
+      product_name: product.name,
+      price: Number(product.price),
+      weight: Number(product.weight || 0),
+      stock: Number(product.stock),
+      quantity: buyNowQuantity,
+      total_price: Number(product.price) * buyNowQuantity,
+    },
+  ];
+} else {
+  /* =================================================
+     NORMAL CART
+  ================================================= */
 
-          weight: Number(product.weight || 0),
+  cartItems = await Cart.getItems(publicUserId);
+}
 
-          stock: Number(product.stock || 0),
-
-          quantity: buyNowQuantity,
-
-          total_price: Number(product.price || 0) * buyNowQuantity,
-        },
-      ];
-    } else {
-      /* =================================================
-         NORMAL CART
-      ================================================= */
-
-      cartItems = await Cart.getItems(publicUserId);
-    }
 
     /* =====================================================
        EMPTY CART
@@ -3302,9 +3356,15 @@ const razorpayWebhook = async (req, res) => {
       membershipPlanId:
         snapshot.membershipPlan?.id ?? localPayment.membership_plan_id,
       address_id: snapshot.addressId ?? null,
-      buyNow: Boolean(snapshot.buyNow),
-      productId: snapshot.productId ?? null,
-      quantity: snapshot.quantity ?? 1,
+buyNow: Boolean(snapshot.buyNow),
+productId: snapshot.productId ?? null,
+
+variantId:
+  snapshot.variantId ??
+  snapshot.cartItems?.[0]?.variant_id ??
+  null,
+
+quantity: snapshot.quantity ?? 1,
       referralCode: snapshot.referralCode ?? null,
       customerReferralId: snapshot.customerReferralId ?? null,
       couponCode: snapshot.coupon?.coupon_code ?? null,

@@ -96,6 +96,50 @@ const createOrderReview = async (req, res) => {
     void logException(error);
     console.error("CREATE ORDER REVIEW ERROR:", error);
 
+    if (error.code === "ORDER_REVIEW_EXISTS") {
+      return res.status(409).json({
+        success: false,
+        message: "You have already reviewed this order",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
+
+/* --------------------------------
+   GET ORDER REVIEW
+-------------------------------- */
+const getOrderReview = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { user_id } = req.query;
+
+    if (!orderId || !user_id) {
+      return res.status(400).json({
+        success: false,
+        message: "orderId and user_id are required",
+      });
+    }
+
+    const review = await ProductReview.getOrderReview(
+      Number(orderId),
+      user_id
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: review,
+    });
+  } catch (error) {
+    void logException(error);
+    console.error("GET ORDER REVIEW ERROR:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message,
@@ -138,5 +182,6 @@ const getProductReviews = async (req, res) => {
 module.exports = {
   createReview,
   createOrderReview,
+  getOrderReview,
   getProductReviews,
 };

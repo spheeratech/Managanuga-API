@@ -49,6 +49,18 @@ const isOrderWalletReference = (referenceType) =>
   referenceType === "ORDER_REFERRAL_REDEMPTION";
 
 
+const parseReferralAmount = (description) => {
+  const marker = String(description || "").match(
+    /\[referral-amount:([0-9]+(?:\.[0-9]{1,2})?)\]/
+  );
+
+  if (!marker) return null;
+
+  const amount = Number(marker[1]);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+};
+
+
 const ensureCustomerWallet = async (
   client,
   userId,
@@ -595,7 +607,11 @@ async getCustomerReferralTransactions(userId) {
           ? reference.referenceId
           : null,
       transaction_id: transaction.id,
-      amount: transaction.benefit_amount,
+      amount:
+        transaction.transaction_type === "DEBIT"
+          ? parseReferralAmount(transaction.description) ??
+            Number(transaction.benefit_amount || 0)
+          : transaction.benefit_amount,
       transaction_date: transaction.created_at,
       wallet_type: transaction.benefit_type,
     };
@@ -712,7 +728,7 @@ async getCustomerReferralOrderPaymentBreakdown(userId, orderId) {
   const referralWalletTransactions = [...transactionsByReference.values()];
   const referralWalletAmountCents = referralWalletTransactions.reduce(
     (total, transaction) =>
-      total + Math.round(Number(transaction.benefit_amount || 0) * 100),
+      total + Math.round(Number(transaction.amount || 0) * 100),
     0
   );
   const otherPayments = paymentsResult.rows.map((payment) => ({

@@ -12,6 +12,33 @@ const {
 } = require("../services/hubService");
 
 /* =========================================================
+   HELPERS
+========================================================= */
+
+const getProductId = (item) =>
+  Number(item.product_id ?? item.item_id);
+
+const getVariantId = (item) =>
+  Number(item.variant_id ?? item.variantId ?? 0);
+
+const validateVariantItems = (items) => {
+  for (const item of items) {
+    if (
+      !Number.isInteger(getProductId(item)) ||
+      getProductId(item) <= 0 ||
+      !Number.isInteger(getVariantId(item)) ||
+      getVariantId(item) <= 0 ||
+      !Number.isInteger(Number(item.quantity)) ||
+      Number(item.quantity) <= 0
+    ) {
+      throw new Error(
+        "Invalid product or variant details. Please select a valid product variant."
+      );
+    }
+  }
+};
+
+/* =========================================================
    VERIFY EXISTING ORDER AGAINST CHECKOUT SNAPSHOT
 ========================================================= */
 
@@ -27,12 +54,16 @@ const verifyOrderSnapshot = (
     left.length === right.length &&
     left.every((value, index) => Number(value) === Number(right[index]));
 
-  const itemIds = cartItems.map((item) =>
-    Number(item.item_id ?? item.product_id)
+  // New orders always store product_variants.id.
+  const itemIds = cartItems.map(getVariantId);
+
+  const quantities = cartItems.map((item) =>
+    Number(item.quantity)
   );
 
-  const quantities = cartItems.map((item) => Number(item.quantity));
-  const unitPrices = cartItems.map((item) => Number(item.price));
+  const unitPrices = cartItems.map((item) =>
+    Number(item.price)
+  );
 
   const expectedActualAmount = Number(
     checkoutSnapshot?.actualAmount ?? checkoutTotals.actualAmount
@@ -123,7 +154,8 @@ const createOrder = async (
   productId = null,
   quantity = 1,
   checkoutSnapshot = null,
-  suppliedClient = null
+  suppliedClient = null,
+  paymentStatus = "PENDING"
 ) => {
   let client = suppliedClient;
   const ownsClient = !suppliedClient;
@@ -140,17 +172,17 @@ const createOrder = async (
        VALIDATE ADDRESS
     ----------------------------------------------------- */
 
-   const addressResult = await db.query(
-  `
-  SELECT id, postal_code
-  FROM user_address
-  WHERE id = $1
-    AND user_id = $2
-    AND is_active = 1
-  LIMIT 1
-  `,
-  [address_id, userId]
-);
+    const addressResult = await db.query(
+      `
+      SELECT id, postal_code
+      FROM user_address
+      WHERE id = $1
+        AND user_id = $2
+        AND is_active = 1
+      LIMIT 1
+      `,
+      [address_id, userId]
+    );
 
     if (!addressResult.rows[0]) {
       throw new Error(
@@ -161,8 +193,8 @@ const createOrder = async (
     /* -----------------------------------------------------
        GET CART ITEMS
 
-       Snapshot checkout uses frozen items.
-       Normal checkout reads the current cart.
+       item_id/product_id = parent product ID
+       variant_id = product_variants.id
     ----------------------------------------------------- */
 
     const cartResult = checkoutSnapshot
@@ -170,70 +202,47 @@ const createOrder = async (
           rows: checkoutSnapshot.cartItems || [],
           rowCount: (checkoutSnapshot.cartItems || []).length,
         }
-      : await pool.query(
+      : await db.query(
           `
           SELECT
             c.id AS cart_id,
+            c.user_id,
             c.item_id,
+            c.item_id AS product_id,
+            c.variant_id,
+            pv.size AS variant_size,
             c.quantity,
-            p.price,
+            pv.price AS price,
             p.weight,
-            p.stock
+            pv.stock,
+            (pv.price * c.quantity) AS total_price
           FROM cart_items c
           JOIN lkp_products p
             ON p.id = c.item_id
+          JOIN product_variants pv
+            ON pv.id = c.variant_id
+           AND pv.product_id = p.id
           WHERE c.user_id = $1
             AND c.is_active = 1
             AND p.is_active = 1
+            AND pv.is_active = 1
           ORDER BY c.id DESC
           `,
           [userId]
         );
 
-    let cartItems = cartResult.rows;
-
-    /* -----------------------------------------------------
-       BUY NOW SUPPORT
-    ----------------------------------------------------- */
-
-    if (buyNow && !checkoutSnapshot) {
-      const productResult = await db.query(
-        `
-        SELECT
-          id AS item_id,
-          price,
-          weight,
-          stock
-        FROM lkp_products
-        WHERE id = $1
-          AND is_active = 1
-        `,
-        [productId]
-      );
-
-      if (productResult.rowCount === 0) {
-        return null;
-      }
-
-      cartItems = [
-        {
-          item_id: productResult.rows[0].item_id,
-          quantity: Number(quantity),
-          price: Number(productResult.rows[0].price),
-          weight: Number(productResult.rows[0].weight || 0),
-          stock: Number(productResult.rows[0].stock),
-        },
-      ];
-    }
+    const cartItems = cartResult.rows;
 
     if (!cartItems.length) {
       return null;
     }
 
+    validateVariantItems(cartItems);
+
     /* -----------------------------------------------------
        MEMBERSHIP AND CHECKOUT TOTALS
 
-       Never recalculate a captured payment.
+       Captured payment uses the saved checkout totals.
     ----------------------------------------------------- */
 
     if (!checkoutSnapshot) {
@@ -291,11 +300,11 @@ const createOrder = async (
 
     /* -----------------------------------------------------
        PREPARE ORDER ARRAYS
+
+       orders.item_id stores VARIANT IDs.
     ----------------------------------------------------- */
 
-    const itemIds = cartItems.map((item) =>
-      Number(item.item_id ?? item.product_id)
-    );
+    const itemIds = cartItems.map(getVariantId);
 
     const quantities = cartItems.map((item) =>
       Number(item.quantity)
@@ -316,15 +325,16 @@ const createOrder = async (
 
     /* -----------------------------------------------------
        LOCK CART FOR NORMAL CHECKOUT ONLY
-
-       Snapshot checkout does not lock or reread the current
-       cart because the payment uses its frozen cart items.
     ----------------------------------------------------- */
 
     if (!buyNow && !checkoutSnapshot) {
       const lockedCartResult = await client.query(
         `
-        SELECT id AS cart_id, item_id, quantity
+        SELECT
+          id AS cart_id,
+          item_id,
+          variant_id,
+          quantity
         FROM cart_items
         WHERE user_id = $1
           AND is_active = 1
@@ -339,7 +349,8 @@ const createOrder = async (
         lockedCartResult.rows.some(
           (item, index) =>
             Number(item.cart_id) !== Number(cartItems[index].cart_id) ||
-            Number(item.item_id) !== Number(cartItems[index].item_id) ||
+            Number(item.item_id) !== getProductId(cartItems[index]) ||
+            Number(item.variant_id) !== getVariantId(cartItems[index]) ||
             Number(item.quantity) !== Number(cartItems[index].quantity)
         )
       ) {
@@ -389,56 +400,65 @@ const createOrder = async (
     }
 
     /* -----------------------------------------------------
-       VALIDATE CURRENT PRODUCT AVAILABILITY
-
-       Captured checkout:
-       Do not reject a payment because product price or
-       weight changed after checkout.
-
-       Still verify product availability and stock.
+       VALIDATE VARIANT AVAILABILITY AND STOCK
     ----------------------------------------------------- */
 
-    const productResult = await client.query(
+    const variantIds = cartItems.map(getVariantId);
+
+    const variantResult = await client.query(
       `
-      SELECT id, price, weight, stock
-      FROM lkp_products
-      WHERE id = ANY($1::int[])
-        AND is_active = 1
-      FOR SHARE
+      SELECT
+        pv.id AS variant_id,
+        pv.product_id,
+        pv.price,
+        pv.stock,
+        pv.size,
+        p.weight
+      FROM product_variants pv
+      JOIN lkp_products p
+        ON p.id = pv.product_id
+      WHERE pv.id = ANY($1::int[])
+        AND p.is_active = 1
+        AND pv.is_active = 1
+      FOR SHARE OF pv, p
       `,
-      [itemIds]
+      [variantIds]
     );
 
-    const productsById = new Map(
-      productResult.rows.map((product) => [
-        Number(product.id),
-        product,
+    const variantsById = new Map(
+      variantResult.rows.map((variant) => [
+        Number(variant.variant_id),
+        variant,
       ])
     );
 
     for (const item of cartItems) {
-      const itemId = Number(item.item_id ?? item.product_id);
-      const product = productsById.get(itemId);
+      const currentProductId = getProductId(item);
+      const variantId = getVariantId(item);
+      const variant = variantsById.get(variantId);
 
       if (
-        !product ||
+        !variant ||
+        Number(variant.product_id) !== currentProductId ||
         !Number.isInteger(Number(item.quantity)) ||
         Number(item.quantity) <= 0 ||
-        Number(item.quantity) > Number(product.stock)
+        Number(item.quantity) > Number(variant.stock)
       ) {
         throw new Error(
-          "Product is unavailable or stock is insufficient"
+          "Product variant is unavailable or stock is insufficient"
         );
       }
 
       if (
         !checkoutSnapshot &&
         (
-          Number(product.price) !== Number(item.price) ||
-          Number(product.weight || 0) !== Number(item.weight || 0)
+          Number(variant.price) !== Number(item.price) ||
+          Number(variant.weight || 0) !== Number(item.weight || 0)
         )
       ) {
-        throw new Error("Product changed; order was not created");
+        throw new Error(
+          "Product variant changed; order was not created"
+        );
       }
     }
 
@@ -449,9 +469,9 @@ const createOrder = async (
     const mgoOrderId = await generateMgoOrderId(client);
 
     const hub = await findActiveHubForPincode(
-  addressResult.rows[0].postal_code,
-  client
-);
+      addressResult.rows[0].postal_code,
+      client
+    );
 
     /* -----------------------------------------------------
        INSERT ORDER
@@ -484,7 +504,7 @@ const createOrder = async (
       (
         $1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14,
-        'PLACED', 'PENDING', $15, $16
+        'PLACED', $17, $15, $16
       )
       RETURNING *
       `,
@@ -505,6 +525,7 @@ const createOrder = async (
         referralBonus,
         address_id,
         hub.id,
+        paymentStatus,
       ]
     );
 
@@ -512,10 +533,6 @@ const createOrder = async (
 
     /* -----------------------------------------------------
        CLEAR CART
-
-       Snapshot: delete only the cart rows from the snapshot.
-       Normal checkout: preserve existing behavior.
-       Buy Now: do not clear the cart.
     ----------------------------------------------------- */
 
     if (!buyNow) {
@@ -578,7 +595,8 @@ const createBuyNowOrder = async (
   productId,
   quantity = 1,
   checkoutSnapshot = null,
-  suppliedClient = null
+  suppliedClient = null,
+  paymentStatus = "PENDING"
 ) => {
   let client = suppliedClient;
   const ownsClient = !suppliedClient;
@@ -597,8 +615,8 @@ const createBuyNowOrder = async (
 
     const addressResult = await db.query(
       `
- SELECT id, postal_code
-FROM user_address
+      SELECT id, postal_code
+      FROM user_address
       WHERE id = $1
         AND user_id = $2
         AND is_active = 1
@@ -614,49 +632,70 @@ FROM user_address
     }
 
     /* -----------------------------------------------------
-       GET PRODUCT
+       GET VARIANT ID FROM CHECKOUT SNAPSHOT
+    ----------------------------------------------------- */
+
+    const snapshotItem = checkoutSnapshot?.cartItems?.[0];
+
+    if (checkoutSnapshot && !snapshotItem) {
+      throw new Error("Buy Now checkout snapshot item is missing");
+    }
+
+    const variantId = Number(
+      checkoutSnapshot?.variantId ??
+        snapshotItem?.variant_id ??
+        snapshotItem?.variantId ??
+        0
+    );
+
+    if (!Number.isInteger(variantId) || variantId <= 0) {
+      throw new Error(
+        "Buy Now variant ID is missing from the checkout snapshot"
+      );
+    }
+
+    /* -----------------------------------------------------
+       GET PARENT PRODUCT AND SELECTED VARIANT
     ----------------------------------------------------- */
 
     const productResult = await db.query(
       `
       SELECT
-        id,
-        price,
-        weight,
-        stock
-      FROM lkp_products
-      WHERE id = $1
-        AND is_active = 1
+        p.id AS product_id,
+        p.weight,
+        pv.id AS variant_id,
+        pv.size AS variant_size,
+        pv.price,
+        pv.stock
+      FROM lkp_products p
+      JOIN product_variants pv
+        ON pv.product_id = p.id
+      WHERE p.id = $1
+        AND pv.id = $2
+        AND p.is_active = 1
+        AND pv.is_active = 1
+      LIMIT 1
       `,
-      [productId]
+      [productId, variantId]
     );
 
     if (productResult.rowCount === 0) {
-      return null;
+      throw new Error("Selected product variant is unavailable");
     }
 
     const product = productResult.rows[0];
     const orderQuantity = Number(quantity);
 
-    const snapshotItem = checkoutSnapshot?.cartItems?.[0];
-
-    if (
-      checkoutSnapshot &&
-      !snapshotItem
-    ) {
-      throw new Error("Buy Now checkout snapshot item is missing");
-    }
-
     if (
       snapshotItem &&
       (
-        Number(snapshotItem.product_id ?? snapshotItem.item_id) !==
-          Number(product.id) ||
+        getProductId(snapshotItem) !== Number(product.product_id) ||
+        getVariantId(snapshotItem) !== Number(product.variant_id) ||
         Number(snapshotItem.quantity) !== orderQuantity
       )
     ) {
       throw new Error(
-        "Buy Now product or quantity does not match the captured checkout snapshot"
+        "Buy Now product, variant or quantity does not match the captured checkout snapshot"
       );
     }
 
@@ -666,14 +705,23 @@ FROM user_address
       orderQuantity > Number(product.stock)
     ) {
       throw new Error(
-        "Invalid product quantity or insufficient stock"
+        "Invalid product quantity or insufficient variant stock"
       );
     }
 
+    const buyNowItem = {
+      item_id: Number(product.product_id),
+      product_id: Number(product.product_id),
+      variant_id: Number(product.variant_id),
+      variant_size: product.variant_size,
+      quantity: orderQuantity,
+      price: Number(snapshotItem?.price ?? product.price),
+      weight: Number(product.weight || 0),
+      stock: Number(product.stock),
+    };
+
     /* -----------------------------------------------------
        MEMBERSHIP AND TOTALS
-
-       Captured payment uses saved checkout totals.
     ----------------------------------------------------- */
 
     if (!checkoutSnapshot) {
@@ -684,15 +732,7 @@ FROM user_address
       checkoutSnapshot?.checkoutTotals ||
       await calculateCheckoutTotals(
         userId,
-        [
-          {
-            item_id: product.id,
-            quantity: orderQuantity,
-            price: product.price,
-            weight: product.weight,
-            stock: product.stock,
-          },
-        ],
+        [buyNowItem],
         checkoutSnapshot?.membershipId
       );
 
@@ -738,18 +778,17 @@ FROM user_address
     );
 
     /* -----------------------------------------------------
-       USE FROZEN PRICE FOR CAPTURED CHECKOUT
+       PREPARE ORDER ARRAYS
+
+       orders.item_id stores VARIANT ID.
     ----------------------------------------------------- */
 
-    const itemIds = [Number(product.id)];
+    const itemIds = [Number(product.variant_id)];
     const quantities = [orderQuantity];
-
-    const unitPrices = [
-      Number(snapshotItem?.price ?? product.price),
-    ];
+    const unitPrices = [Number(buyNowItem.price)];
 
     /* -----------------------------------------------------
-       START TRANSACTION IF THIS FUNCTION OWNS IT
+       START TRANSACTION
     ----------------------------------------------------- */
 
     if (ownsClient) {
@@ -782,13 +821,7 @@ FROM user_address
       if (existingOrder) {
         verifyOrderSnapshot(
           existingOrder,
-          checkoutSnapshot?.cartItems || [
-            {
-              item_id: product.id,
-              quantity: orderQuantity,
-              price: unitPrices[0],
-            },
-          ],
+          [buyNowItem],
           checkoutTotals,
           membershipId,
           checkoutSnapshot
@@ -803,41 +836,45 @@ FROM user_address
     }
 
     /* -----------------------------------------------------
-       LOCK AND VALIDATE PRODUCT STOCK
+       LOCK AND VALIDATE VARIANT STOCK
     ----------------------------------------------------- */
 
-    const lockedProductResult = await client.query(
+    const lockedVariantResult = await client.query(
       `
-      SELECT price, weight, stock
-      FROM lkp_products
-      WHERE id = $1
-        AND is_active = 1
-      FOR UPDATE
+      SELECT
+        pv.id AS variant_id,
+        pv.product_id,
+        pv.price,
+        pv.stock
+      FROM product_variants pv
+      JOIN lkp_products p
+        ON p.id = pv.product_id
+      WHERE pv.id = $1
+        AND pv.product_id = $2
+        AND pv.is_active = 1
+        AND p.is_active = 1
+      FOR UPDATE OF pv
       `,
-      [product.id]
+      [variantId, productId]
     );
 
-    const lockedProduct = lockedProductResult.rows[0];
+    const lockedVariant = lockedVariantResult.rows[0];
 
     if (
-      !lockedProduct ||
-      orderQuantity > Number(lockedProduct.stock)
+      !lockedVariant ||
+      orderQuantity > Number(lockedVariant.stock)
     ) {
       throw new Error(
-        "Product is unavailable or stock is insufficient"
+        "Product variant is unavailable or stock is insufficient"
       );
     }
 
     if (
       !checkoutSnapshot &&
-      (
-        Number(lockedProduct.price) !== Number(product.price) ||
-        Number(lockedProduct.weight || 0) !==
-          Number(product.weight || 0)
-      )
+      Number(lockedVariant.price) !== Number(product.price)
     ) {
       throw new Error(
-        "Product changed; order was not created"
+        "Product variant price changed; order was not created"
       );
     }
 
@@ -848,9 +885,9 @@ FROM user_address
     const mgoOrderId = await generateMgoOrderId(client);
 
     const hub = await findActiveHubForPincode(
-  addressResult.rows[0].postal_code,
-  client
-);
+      addressResult.rows[0].postal_code,
+      client
+    );
 
     /* -----------------------------------------------------
        INSERT BUY NOW ORDER
@@ -883,7 +920,7 @@ FROM user_address
       (
         $1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14,
-        'PLACED', 'PENDING', $15, $16
+        'PLACED', $17, $15, $16
       )
       RETURNING *
       `,
@@ -904,6 +941,7 @@ FROM user_address
         referralBonus,
         address_id,
         hub.id,
+        paymentStatus,
       ]
     );
 
@@ -984,6 +1022,8 @@ const getOrderById = async (id) => {
 
 /* =========================================================
    GET ORDERS BY PUBLIC USER ID
+
+   orders.item_id contains product_variants.id.
 ========================================================= */
 
 const getOrdersByUserId = async (userId) => {
@@ -1009,21 +1049,31 @@ const getOrdersByUserId = async (userId) => {
       o.admin_accepted,
       o.delivery_method,
       o.created_at,
-      o.item_id[1] AS product_id,
+
+      pv.product_id,
+      pv.id AS variant_id,
+      pv.size AS variant_size,
+
       COALESCE(
         (
           SELECT ai.url
           FROM app_images ai
-          WHERE ai.product_id = o.item_id[1]
+          WHERE ai.product_id = pv.product_id
             AND ai.image_type = 'PRODUCT_IMAGE'
           ORDER BY ai.id ASC
           LIMIT 1
         ),
         p.image
       ) AS image
+
     FROM orders o
+
+    LEFT JOIN product_variants pv
+      ON pv.id = o.item_id[1]
+
     LEFT JOIN lkp_products p
-      ON p.id = o.item_id[1]
+      ON p.id = pv.product_id
+
     WHERE o.user_id = $1
     ORDER BY o.id DESC
     `,
@@ -1035,6 +1085,8 @@ const getOrdersByUserId = async (userId) => {
 
 /* =========================================================
    GET ORDER ITEMS
+
+   orders.item_id contains product_variants.id.
 ========================================================= */
 
 const getOrderItems = async (orderId) => {
@@ -1042,23 +1094,31 @@ const getOrderItems = async (orderId) => {
     `
     SELECT
       x.item_index AS id,
-      x.item_id AS product_id,
+
+      pv.product_id,
+      pv.id AS variant_id,
+      pv.size AS variant_size,
+
       p.name AS product_name,
+
       COALESCE(
         (
           SELECT ai.url
           FROM app_images ai
-          WHERE ai.product_id = x.item_id
+          WHERE ai.product_id = pv.product_id
             AND ai.image_type = 'PRODUCT_IMAGE'
           ORDER BY ai.id ASC
           LIMIT 1
         ),
         p.image
       ) AS image,
+
       x.quantity,
       x.unit_price,
       (x.quantity * x.unit_price) AS total_price
+
     FROM orders o
+
     CROSS JOIN LATERAL
       unnest(
         o.item_id,
@@ -1072,14 +1132,20 @@ const getOrderItems = async (orderId) => {
         unit_price,
         item_index
       )
+
+    JOIN product_variants pv
+      ON pv.id = x.item_id
+
     JOIN lkp_products p
-      ON p.id = x.item_id
+      ON p.id = pv.product_id
+
     WHERE
       (
         $1::text ~ '^[0-9]+$'
         AND o.id = $1::integer
       )
       OR o.order_id = $1::text
+
     ORDER BY x.item_index
     `,
     [String(orderId)]

@@ -13,6 +13,14 @@ const UserLogin = require("../models/UserLogin");
 const generateToken = require("../utils/generateToken");
 const { sendSMS } = require("../services/smsService");
 const Notification = require("../models/Notification");
+const getReferralCode = async (userId) => {
+  const result = await pool.query(
+    `SELECT referral_code FROM user_info WHERE user_id = $1 LIMIT 1`,
+    [userId]
+  );
+
+  return result.rows[0]?.referral_code || null;
+};
 
 const {
   sendUserRegistrationWhatsApp,
@@ -207,16 +215,19 @@ exports.verifyOtp = async (req, res) => {
     // --------------------------------------------------
     // EXISTING ACTIVE USER
     // --------------------------------------------------
-    if (loginUser) {
-      const authenticatedUser = {
-        id: loginUser.user_id,
-        user_id: loginUser.user_id,
-        login_id: loginUser.id,
-        username: loginUser.username,
-        mobile: loginUser.mobile_no,
-        role: loginUser.role_name,
-        requiresName: false,
-      };
+if (loginUser) {
+  const referralCode = await getReferralCode(loginUser.user_id);
+
+  const authenticatedUser = {
+    id: loginUser.user_id,
+    user_id: loginUser.user_id,
+    login_id: loginUser.id,
+    username: loginUser.username,
+    mobile: loginUser.mobile_no,
+    role: loginUser.role_name,
+    referral_code: referralCode,
+    requiresName: false,
+  };
 
       const token = generateToken(authenticatedUser);
 
@@ -332,15 +343,20 @@ try {
       process.env.SMS_PASSWORD_TEMPLATE_ID,
     );
 
-    const authenticatedUser = {
-      id: createdLoginUser.user_id,
-      user_id: createdLoginUser.user_id,
-      login_id: createdLoginUser.id,
-      username: createdLoginUser.username,
-      mobile: createdLoginUser.mobile_no,
-      role: createdLoginUser.role_name,
-      requiresName: true,
-    };
+const referralCode = await getReferralCode(
+  createdLoginUser.user_id
+);
+
+const authenticatedUser = {
+  id: createdLoginUser.user_id,
+  user_id: createdLoginUser.user_id,
+  login_id: createdLoginUser.id,
+  username: createdLoginUser.username,
+  mobile: createdLoginUser.mobile_no,
+  role: createdLoginUser.role_name,
+  referral_code: referralCode,
+  requiresName: true,
+};
 
     const token = generateToken(authenticatedUser);
 
@@ -402,16 +418,19 @@ exports.loginWithPassword = async (req, res) => {
         message: "Invalid password",
       });
     }
-    // Find user
-    // Build authenticated user from PostgreSQL user_login record
-    const user = {
-      id: loginUser.user_id,
-      user_id: loginUser.user_id,
-      login_id: loginUser.id,
-      username: loginUser.username,
-      mobile: loginUser.mobile_no,
-      role: loginUser.role_name,
-    };
+// Fetch generated referral code
+const referralCode = await getReferralCode(loginUser.user_id);
+
+// Build authenticated user
+const user = {
+  id: loginUser.user_id,
+  user_id: loginUser.user_id,
+  login_id: loginUser.id,
+  username: loginUser.username,
+  mobile: loginUser.mobile_no,
+  role: loginUser.role_name,
+  referral_code: referralCode,
+};
 
     // Generate token
     const token = generateToken(user);
@@ -708,7 +727,8 @@ exports.login = async (req, res) => {
         ul.relationship_type,
         ui.first_name,
         ui.last_name,
-        ui.email
+        ui.email,
+        ui.referral_code
       FROM user_login ul
       LEFT JOIN user_info ui
         ON ui.user_id = ul.user_id
@@ -776,6 +796,7 @@ exports.login = async (req, res) => {
   email: user.email,
   name: fullName || user.username,
   role: user.role,
+  referral_code: user.referral_code,
   mobile: user.mobile_no,
   createdBy: user.created_by,
   assignedBy: user.assigned_by,
