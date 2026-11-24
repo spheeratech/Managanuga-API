@@ -783,17 +783,23 @@ const validateReferralCode = async (req, res) => {
       });
     }
 
-    const referralResult = await pool.query(
-      `
+const referralResult = await pool.query(
+  `
   SELECT
-    ul.user_id AS referral_code
-  FROM user_login ul
-  WHERE ul.user_id = $1
+    ul.user_id,
+    ui.referral_code
+  FROM user_info ui
+  INNER JOIN user_login ul
+    ON ul.user_id = ui.user_id
+  WHERE (
+    UPPER(TRIM(ui.referral_code)) = UPPER(TRIM($1))
+    OR UPPER(TRIM(ul.user_id)) = UPPER(TRIM($1))
+  )
     AND ul.is_active = 1
   LIMIT 1
   `,
-      [referralCode.trim()],
-    );
+  [referralCode.trim()],
+);
 
     const referrer = referralResult.rows[0];
 
@@ -825,7 +831,10 @@ const validateReferralCode = async (req, res) => {
       });
     }
 
-    if (String(referrer.referral_code).trim() === String(userId).trim()) {
+    if (
+  String(referrer.user_id).trim().toUpperCase() ===
+  String(userId).trim().toUpperCase()
+) {
       return res.status(400).json({
         success: false,
         valid: false,
