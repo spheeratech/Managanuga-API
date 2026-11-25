@@ -46,12 +46,12 @@ const validateCustomerReferral = async ({
     referrerId: result.rows[0].user_id,
   };
 };
-
 const creditCustomerReferralReward = async ({
   referrerId,
   referredCustomerId,
   membershipId,
   planAmount,
+  client = null,
 }) => {
   const cleanPlanAmount = Number(planAmount);
 
@@ -60,11 +60,9 @@ const creditCustomerReferralReward = async ({
   }
 
   const rewardAmount =
-    Math.round(
-      cleanPlanAmount * REFERRAL_PERCENTAGE
-    ) / 100;
+    Math.round(cleanPlanAmount * REFERRAL_PERCENTAGE) / 100;
 
-  const transaction = await Wallet.creditCustomerWallet({
+  const walletDetails = {
     userId: referrerId,
     amount: rewardAmount,
     referenceType: "CUSTOMER_REFERRAL",
@@ -73,7 +71,11 @@ const creditCustomerReferralReward = async ({
     benefitType: "CUSTOMER_REFERRAL",
     benefitedBy: referredCustomerId,
     benefitPercentage: REFERRAL_PERCENTAGE,
-  });
+  };
+
+  const transaction = client
+    ? await Wallet.creditCustomerWalletWithClient(client, walletDetails)
+    : await Wallet.creditCustomerWallet(walletDetails);
 
   return {
     rewardAmount,
@@ -81,11 +83,12 @@ const creditCustomerReferralReward = async ({
     transaction,
   };
 };
-
 const creditCustomerReferralRewardForMembership = async ({
   membershipId,
   customerId = null,
+  client = null,
 }) => {
+    const db = client || pool;
   const cleanMembershipId = Number(membershipId);
 
   if (!Number.isInteger(cleanMembershipId) || cleanMembershipId <= 0) {
@@ -101,7 +104,7 @@ const creditCustomerReferralRewardForMembership = async ({
     throw new Error("Valid customer ID is required");
   }
 
-  const membershipResult = await pool.query(
+  const membershipResult = await db.query(
     `
     SELECT
       um.id AS membership_id,
@@ -137,7 +140,7 @@ const creditCustomerReferralRewardForMembership = async ({
     return null;
   }
 
-  const referrerResult = await pool.query(
+  const referrerResult = await db.query(
     `
     SELECT ul.user_id
     FROM user_login ul
@@ -168,12 +171,13 @@ const creditCustomerReferralRewardForMembership = async ({
     return null;
   }
 
-  const reward = await creditCustomerReferralReward({
-    referrerId: referrer.user_id,
-    referredCustomerId: membership.referred_customer_id,
-    membershipId: membership.membership_id,
-    planAmount: Number(membership.plan_amount),
-  });
+const reward = await creditCustomerReferralReward({
+  referrerId: referrer.user_id,
+  referredCustomerId: membership.referred_customer_id,
+  membershipId: membership.membership_id,
+  planAmount: Number(membership.plan_amount),
+  client,
+});
 
   console.info(
     "CUSTOMER_REFERRAL_REWARD_PROCESSED",

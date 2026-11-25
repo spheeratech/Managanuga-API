@@ -1,4 +1,3 @@
-
 const pool = require("../../db");
 
 // =====================================================
@@ -10,10 +9,14 @@ const getCartItemDetails = async (cartId, user_id = null) => {
       c.id AS cart_id,
       c.user_id,
       c.item_id AS product_id,
+      c.variant_id,
+      pv.size AS variant_size,
       p.name AS product_name,
-      p.price,
+
+      COALESCE(pv.price, p.price) AS price,
       p.weight,
-      p.stock,
+      COALESCE(pv.stock, p.stock) AS stock,
+      pv.stock AS variant_stock,
 
       COALESCE(
         (
@@ -35,13 +38,17 @@ const getCartItemDetails = async (cartId, user_id = null) => {
       ) AS images,
 
       c.quantity,
-      (p.price * c.quantity) AS total_price,
+      (COALESCE(pv.price, p.price) * c.quantity) AS total_price,
       c.created_at
 
     FROM cart_items c
 
     JOIN lkp_products p
       ON p.id = c.item_id
+
+    LEFT JOIN product_variants pv
+      ON pv.id = c.variant_id
+      AND pv.product_id = c.item_id
 
     WHERE c.id = $1
       AND c.is_active = 1
@@ -62,13 +69,14 @@ const getCartItemDetails = async (cartId, user_id = null) => {
 
 
 // =====================================================
-// ADD ITEM — OPTIMIZED SINGLE DATABASE QUERY
+// ADD ITEM — VARIANT-AWARE + STOCK VALIDATION
 // =====================================================
 const addItem = async (data) => {
   const {
     user_id,
     item_id,
     quantity = 1,
+    variant_id = null,
   } = data;
 
   if (!user_id) {
@@ -81,9 +89,20 @@ const addItem = async (data) => {
 
   const cleanUserId = String(user_id).trim();
   const addQuantity = Number(quantity);
+  const cleanVariantId =
+    variant_id === null || variant_id === undefined || variant_id === ""
+      ? null
+      : Number(variant_id);
 
   if (!Number.isFinite(addQuantity) || addQuantity <= 0) {
     throw new Error("Quantity must be greater than zero");
+  }
+
+  if (
+    cleanVariantId !== null &&
+    (!Number.isInteger(cleanVariantId) || cleanVariantId <= 0)
+  ) {
+    throw new Error("Invalid variant ID");
   }
 
   const result = await pool.query(
@@ -92,21 +111,62 @@ const addItem = async (data) => {
       INSERT INTO cart_items (
         user_id,
         item_id,
+        variant_id,
         quantity,
         is_active
       )
-      VALUES ($1, $2, $3, 1)
 
-      ON CONFLICT (user_id, item_id)
+      SELECT
+        $1,
+        p.id,
+        $4,
+        $3,
+        1
+
+      FROM lkp_products p
+
+      LEFT JOIN product_variants pv
+        ON pv.id = $4
+        AND pv.product_id = p.id
+        AND pv.is_active = 1
+
+      WHERE p.id = $2
+        AND p.is_active = 1
+        AND ($4::INTEGER IS NULL OR pv.id IS NOT NULL)
+        AND COALESCE(pv.stock, p.stock) >= $3
+
+      ON CONFLICT (
+        user_id,
+        item_id,
+        (COALESCE(variant_id, 0))
+      )
       WHERE is_active = 1
 
       DO UPDATE SET
         quantity = cart_items.quantity + EXCLUDED.quantity
 
+      WHERE
+        cart_items.quantity + EXCLUDED.quantity <= COALESCE(
+          (
+            SELECT pv.stock
+            FROM product_variants pv
+            WHERE pv.id = cart_items.variant_id
+              AND pv.product_id = cart_items.item_id
+              AND pv.is_active = 1
+          ),
+          (
+            SELECT p.stock
+            FROM lkp_products p
+            WHERE p.id = cart_items.item_id
+              AND p.is_active = 1
+          )
+        )
+
       RETURNING
         id,
         user_id,
         item_id,
+        variant_id,
         quantity,
         created_at
     )
@@ -115,10 +175,14 @@ const addItem = async (data) => {
       c.id AS cart_id,
       c.user_id,
       c.item_id AS product_id,
+      c.variant_id,
+      pv.size AS variant_size,
       p.name AS product_name,
-      p.price,
+
+      COALESCE(pv.price, p.price) AS price,
       p.weight,
-      p.stock,
+      COALESCE(pv.stock, p.stock) AS stock,
+      pv.stock AS variant_stock,
 
       COALESCE(
         (
@@ -140,7 +204,7 @@ const addItem = async (data) => {
       ) AS images,
 
       c.quantity,
-      (p.price * c.quantity) AS total_price,
+      (COALESCE(pv.price, p.price) * c.quantity) AS total_price,
       c.created_at
 
     FROM cart_item c
@@ -148,13 +212,24 @@ const addItem = async (data) => {
     JOIN lkp_products p
       ON p.id = c.item_id
 
+    LEFT JOIN product_variants pv
+      ON pv.id = c.variant_id
+      AND pv.product_id = c.item_id
+
     WHERE p.is_active = 1
     `,
-    [cleanUserId, item_id, addQuantity]
+    [
+      cleanUserId,
+      item_id,
+      addQuantity,
+      cleanVariantId,
+    ]
   );
 
   if (result.rowCount === 0) {
-    throw new Error("Product not found or inactive");
+    throw new Error(
+      "Product or variant is unavailable, or requested quantity exceeds available stock"
+    );
   }
 
   return result.rows[0];
@@ -177,10 +252,14 @@ const getItems = async (user_id) => {
       c.id AS cart_id,
       c.user_id,
       c.item_id AS product_id,
+      c.variant_id,
+      pv.size AS variant_size,
       p.name AS product_name,
-      p.price,
+
+      COALESCE(pv.price, p.price) AS price,
       p.weight,
-      p.stock,
+      COALESCE(pv.stock, p.stock) AS stock,
+      pv.stock AS variant_stock,
 
       COALESCE(
         (
@@ -202,13 +281,17 @@ const getItems = async (user_id) => {
       ) AS images,
 
       c.quantity,
-      (p.price * c.quantity) AS total_price,
+      (COALESCE(pv.price, p.price) * c.quantity) AS total_price,
       c.created_at
 
     FROM cart_items c
 
     JOIN lkp_products p
       ON p.id = c.item_id
+
+    LEFT JOIN product_variants pv
+      ON pv.id = c.variant_id
+      AND pv.product_id = c.item_id
 
     WHERE c.user_id = $1
       AND c.is_active = 1
@@ -239,18 +322,57 @@ const getItemById = async (id, user_id) => {
 
 
 // =====================================================
-// UPDATE ITEM FOR SPECIFIC USER
+// UPDATE ITEM — STOCK VALIDATION
 // =====================================================
-const updateItem = async (
-  id,
-  user_id,
-  quantity
-) => {
+const updateItem = async (id, user_id, quantity) => {
   if (!user_id) {
     throw new Error("User ID is required");
   }
 
   const cleanUserId = String(user_id).trim();
+  const requestedQuantity = Number(quantity);
+
+  if (
+    !Number.isFinite(requestedQuantity) ||
+    requestedQuantity <= 0
+  ) {
+    throw new Error("Quantity must be greater than zero");
+  }
+
+  const existing = await pool.query(
+    `
+    SELECT
+      c.id,
+      COALESCE(pv.stock, p.stock) AS available_stock
+
+    FROM cart_items c
+
+    JOIN lkp_products p
+      ON p.id = c.item_id
+
+    LEFT JOIN product_variants pv
+      ON pv.id = c.variant_id
+      AND pv.product_id = c.item_id
+
+    WHERE c.id = $1
+      AND c.user_id = $2
+      AND c.is_active = 1
+      AND p.is_active = 1
+    `,
+    [id, cleanUserId]
+  );
+
+  if (existing.rowCount === 0) {
+    return null;
+  }
+
+  const availableStock = Number(existing.rows[0].available_stock);
+
+  if (requestedQuantity > availableStock) {
+    throw new Error(
+      `Only ${availableStock} units are available in stock`
+    );
+  }
 
   const result = await pool.query(
     `
@@ -258,10 +380,11 @@ const updateItem = async (
     SET quantity = $1
     WHERE id = $2
       AND user_id = $3
-    RETURNING *
+      AND is_active = 1
+    RETURNING id
     `,
     [
-      quantity,
+      requestedQuantity,
       id,
       cleanUserId,
     ]
@@ -271,20 +394,14 @@ const updateItem = async (
     return null;
   }
 
-  return await getCartItemDetails(
-    id,
-    cleanUserId
-  );
+  return await getCartItemDetails(id, cleanUserId);
 };
 
 
 // =====================================================
 // DELETE ITEM FOR SPECIFIC USER
 // =====================================================
-const deleteItem = async (
-  id,
-  user_id
-) => {
+const deleteItem = async (id, user_id) => {
   if (!user_id) {
     throw new Error("User ID is required");
   }
@@ -309,8 +426,7 @@ const deleteItem = async (
 
 
 // =====================================================
-// GET ALL CART ITEMS
-// ADMIN / INTERNAL USE ONLY
+// GET ALL CART ITEMS — ADMIN / INTERNAL USE
 // =====================================================
 const getAllItems = async () => {
   const result = await pool.query(
@@ -319,10 +435,14 @@ const getAllItems = async () => {
       c.id AS cart_id,
       c.user_id,
       c.item_id AS product_id,
+      c.variant_id,
+      pv.size AS variant_size,
       p.name AS product_name,
-      p.price,
+
+      COALESCE(pv.price, p.price) AS price,
       p.weight,
-      p.stock,
+      COALESCE(pv.stock, p.stock) AS stock,
+      pv.stock AS variant_stock,
 
       COALESCE(
         (
@@ -344,13 +464,17 @@ const getAllItems = async () => {
       ) AS images,
 
       c.quantity,
-      (p.price * c.quantity) AS total_price,
+      (COALESCE(pv.price, p.price) * c.quantity) AS total_price,
       c.created_at
 
     FROM cart_items c
 
     JOIN lkp_products p
       ON p.id = c.item_id
+
+    LEFT JOIN product_variants pv
+      ON pv.id = c.variant_id
+      AND pv.product_id = c.item_id
 
     WHERE c.is_active = 1
       AND p.is_active = 1
@@ -373,7 +497,7 @@ const getCartCount = async (user_id) => {
 
   const result = await pool.query(
     `
-    SELECT COUNT(item_id)::INTEGER AS count
+    SELECT COUNT(*)::INTEGER AS count
     FROM cart_items
     WHERE user_id = $1
       AND is_active = 1

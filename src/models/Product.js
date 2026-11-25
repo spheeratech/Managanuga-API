@@ -2,10 +2,36 @@ const pool = require("../../db");
 
 // Get all products
 
+
 const getProducts = async () => {
   const result = await pool.query(`
     SELECT
       p.*,
+
+      -- Default variant price and ID
+      COALESCE(dv.price, p.price) AS price,
+      dv.id AS variant_id,
+      dv.size AS variant_size,
+      dv.stock AS default_variant_stock,
+
+      -- Aggregate stock across all active variants
+      CASE
+        WHEN dv.id IS NOT NULL
+          THEN COALESCE(vd.total_stock, 0)
+        ELSE p.stock
+      END AS stock,
+
+      -- Variant availability
+      (dv.id IS NOT NULL) AS has_variants,
+
+      CASE
+        WHEN dv.id IS NOT NULL
+          THEN NOT COALESCE(vd.has_available_variant, FALSE)
+        ELSE COALESCE(p.stock, 0) <= 0
+      END AS is_out_of_stock,
+
+      -- All active variants, including out-of-stock variants
+      COALESCE(vd.variants, '[]'::json) AS variants,
 
       -- Category information
       c.name AS category_name,
@@ -63,8 +89,78 @@ const getProducts = async () => {
       ) AS product_views
 
     FROM public.lkp_products p
+
     LEFT JOIN public.lkp_categories c
       ON c.id = p.category_id
+
+    -- Select default variant: prefer 1L
+    LEFT JOIN LATERAL (
+      SELECT
+        pv.id,
+        pv.size,
+        pv.price,
+        pv.stock
+      FROM product_variants pv
+      WHERE pv.product_id = p.id
+        AND pv.is_active = 1
+
+ORDER BY
+  CASE
+    WHEN LOWER(REPLACE(TRIM(pv.size), ' ', '')) = '1l'
+    THEN 0
+    ELSE 1
+  END,
+  CASE
+    WHEN COALESCE(pv.stock, 0) > 0 THEN 0
+    ELSE 1
+  END,
+  CASE
+    WHEN LOWER(pv.size) ~ '^[0-9]+([.][0-9]+)?[[:space:]]*(kg|l)$'
+      THEN
+        CASE
+          WHEN LOWER(pv.size) LIKE '%kg'
+            THEN CAST(REGEXP_REPLACE(LOWER(pv.size), '[^0-9.]', '', 'g') AS NUMERIC) * 1000
+          ELSE CAST(REGEXP_REPLACE(LOWER(pv.size), '[^0-9.]', '', 'g') AS NUMERIC) * 1000
+        END
+    WHEN LOWER(pv.size) ~ '^[0-9]+([.][0-9]+)?[[:space:]]*(g|ml)$'
+      THEN CAST(REGEXP_REPLACE(LOWER(pv.size), '[^0-9.]', '', 'g') AS NUMERIC)
+    ELSE 0
+  END DESC,
+  pv.id
+
+      LIMIT 1
+    ) dv ON TRUE
+
+    -- Return all active variants and aggregate stock
+    LEFT JOIN LATERAL (
+      SELECT
+        json_agg(
+          json_build_object(
+            'id', pv.id,
+            'size', pv.size,
+            'price', pv.price,
+            'stock', pv.stock,
+            'is_available', COALESCE(pv.stock, 0) > 0
+          )
+          ORDER BY
+            CASE
+              WHEN LOWER(REPLACE(TRIM(pv.size), ' ', '')) = '1l'
+              THEN 0
+              ELSE 1
+            END,
+            pv.id
+        ) AS variants,
+
+        SUM(GREATEST(COALESCE(pv.stock, 0), 0))::integer
+          AS total_stock,
+
+        BOOL_OR(COALESCE(pv.stock, 0) > 0)
+          AS has_available_variant
+
+      FROM product_variants pv
+      WHERE pv.product_id = p.id
+        AND pv.is_active = 1
+    ) vd ON TRUE
 
     ORDER BY
       p.display_order ASC NULLS LAST,
@@ -73,6 +169,7 @@ const getProducts = async () => {
 
   return result.rows;
 };
+
 
 
 // Get product by ID

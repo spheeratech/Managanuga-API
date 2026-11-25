@@ -9,10 +9,11 @@ const Cart = require("../models/Cart");
 const addItem = async (req, res) => {
   try {
     const {
-      user_id,
-      item_id,
-      quantity,
-    } = req.body;
+  user_id,
+  item_id,
+  quantity,
+  variant_id,
+} = req.body;
 
     if (!user_id || !item_id) {
       return res.status(400).json({
@@ -36,7 +37,8 @@ const addItem = async (req, res) => {
       user_id,
       item_id,
       quantity,
-    });
+      variant_id,
+    }); 
 
     res.status(201).json({
       success: true,

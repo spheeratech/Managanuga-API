@@ -1,8 +1,10 @@
+
 const express = require("express");
 
 const {
   createReview,
   createOrderReview,
+  getOrderReview,
   getProductReviews,
 } = require("../controllers/productReviewController");
 
@@ -15,10 +17,13 @@ router.post("/:productId/reviews", createReview);
 
 /* --------------------------------
    ORDER REVIEW
-   One review -> all products
-   in that order
 -------------------------------- */
 router.post("/orders/:orderId/review", createOrderReview);
+
+/* --------------------------------
+   GET ORDER REVIEW
+-------------------------------- */
+router.get("/orders/:orderId/review", getOrderReview);
 
 /* --------------------------------
    GET PRODUCT REVIEWS

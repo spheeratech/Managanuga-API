@@ -20,6 +20,7 @@ const wishlistRoutes = require("./routes/wishlistRoutes");
 const addressRoutes = require("./routes/addressRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const paymentController = require("./controllers/paymentController");
 const subscriptionRoutes = require("./routes/subscriptionRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const legalContentRoutes = require("./routes/legalContentRoutes");
@@ -38,7 +39,20 @@ app.use(requestLogger);
 
 // mobile App APIS
 app.use(cors());
+
+// Razorpay webhook must receive the raw request body for signature verification.
+app.use(
+  "/api/payments/webhook",
+  express.raw({ type: "application/json" }),
+);
+
+
 app.use(express.json());
+app.post(
+  "/api/payments/webhook",
+  paymentController.razorpayWebhook,
+);
+
 // app.use("/images", express.static(uploadDir));
 app.use("/api/categories", categoryRoutes);
 app.use("/api/auth", authRoutes);
