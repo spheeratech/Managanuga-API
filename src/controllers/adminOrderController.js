@@ -1,9 +1,10 @@
-
 const { logException } = require("../utils/exceptionLogger.js");
 const pool = require("../../db");
 const AdminOrder = require("../models/AdminOrder");
 // const xpressbeesService = require("../services/xpressbeesService");
 const shiprocketService = require("../services/shiprocketService");
+const isShiprocketEnabled =
+  String(process.env.SHIPROCKET_ENABLED).toLowerCase() === "true";
 // const Warehouse = require("../models/Warehouse");
 const { sendSMS } = require("../services/smsService");
 const Notification = require("../models/Notification");
@@ -300,6 +301,119 @@ const verifyAdminOrder = async (req, res) => {
         message: "Order not found",
       });
     }
+    // --------------------------------
+    // GET CONFIRMED ORDER PACKAGING
+    // --------------------------------
+
+    let savedPackage = null;
+    let outerBox = null; //added
+
+    if (String(delivery_method).toUpperCase() === "MANAGANUGA") {
+      const packageResult = await pool.query(
+        `
+      SELECT
+        pckg_id,
+        pckg_name,
+        pckg_type,
+        dead_wt,
+        vol_wt,
+        chargeable_wt,
+        length,
+        breadth,
+        height,
+        pck_weight,
+        max_weight,
+        capacity_value,
+        capacity_unit,
+        gross_pckg_wt,
+        packing_status
+      FROM public.order_packages
+      WHERE order_id = $1
+        AND packing_status IN ('CONFIRMED', 'PACKED')
+      LIMIT 1
+    `,
+        [String(existingOrder.order_id)],
+      );
+
+      if (packageResult.rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Confirmed packaging details not found. Please confirm the order packages before accepting the order.",
+        });
+      }
+
+      savedPackage = packageResult.rows[0];
+      if (
+        !Array.isArray(savedPackage.length) ||
+        !Array.isArray(savedPackage.breadth) ||
+        !Array.isArray(savedPackage.height) ||
+        savedPackage.length.length === 0 ||
+        savedPackage.length.length !== savedPackage.breadth.length ||
+        savedPackage.length.length !== savedPackage.height.length ||
+        !savedPackage.length.every(
+          (v) => Number.isFinite(Number(v)) && Number(v) > 0,
+        ) ||
+        !savedPackage.breadth.every(
+          (v) => Number.isFinite(Number(v)) && Number(v) > 0,
+        ) ||
+        !savedPackage.height.every(
+          (v) => Number.isFinite(Number(v)) && Number(v) > 0,
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid package dimensions. Please check the saved packaging details.",
+        });
+      }
+
+      // Calculate the dimensions of one common outer shipping box.
+      outerBox = AdminOrder.calculateOuterBoxDimensions(
+        savedPackage.length.map((length, index) => ({
+          length,
+          breadth: savedPackage.breadth[index],
+          height: savedPackage.height[index],
+        })),
+      );
+
+      console.log("CALCULATED COMMON OUTER BOX:", outerBox);
+      if (
+        !outerBox ||
+        !Number.isFinite(Number(outerBox.length)) ||
+        !Number.isFinite(Number(outerBox.breadth)) ||
+        !Number.isFinite(Number(outerBox.height)) ||
+        Number(outerBox.length) <= 0 ||
+        Number(outerBox.breadth) <= 0 ||
+        Number(outerBox.height) <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Unable to calculate valid outer shipping box dimensions.",
+        });
+      }
+      if (
+        !Number.isFinite(Number(savedPackage.dead_wt)) ||
+        Number(savedPackage.dead_wt) <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid package dead weight. Please check the saved packaging.",
+        });
+      }
+
+      console.log("CONFIRMED ORDER PACKAGING:", {
+        order_id: existingOrder.order_id,
+        pckg_id: savedPackage.pckg_id,
+        dead_wt: savedPackage.dead_wt,
+        vol_wt: savedPackage.vol_wt,
+        chargeable_wt: savedPackage.chargeable_wt,
+        length: savedPackage.length,
+        breadth: savedPackage.breadth,
+        height: savedPackage.height,
+      });
+    }
     // Prevent duplicate shipment creation.
     if (
       String(delivery_method).toUpperCase() === "MANAGANUGA" &&
@@ -395,6 +509,27 @@ const verifyAdminOrder = async (req, res) => {
     // --------------------------------
 
     if (String(delivery_method).toUpperCase() === "MANAGANUGA") {
+      // --------------------------------
+      // TEMPORARILY SKIP SHIPROCKET
+      // --------------------------------
+
+      if (
+        String(delivery_method).toUpperCase() === "MANAGANUGA" &&
+        !isShiprocketEnabled
+      ) {
+        console.log(
+          `SHIPROCKET DISABLED: Skipping shipment creation for order ${order.id}`,
+        );
+
+        return res.status(200).json({
+          success: true,
+          message:
+            "Order verified and accepted successfully. Shiprocket shipment creation is temporarily disabled.",
+          data: order,
+          shipment: null,
+          shipment_skipped: true,
+        });
+      }
       // console.log(`Creating Xpressbees shipment for order ${order.id}`);
       console.log(`Creating Shiprocket shipment for order ${order.id}`);
 
@@ -638,11 +773,20 @@ const verifyAdminOrder = async (req, res) => {
         })),
 
         // Existing weight was 500 grams; Shiprocket expects kilograms.
+        //   packageDetails: {
+        //     weight: 0.5,
+        //     length: 10,
+        //     breadth: 10,
+        //     height: 10,
+        //   },
+        // };
+        // Read actual combined package weight from order_packages.
+        // Dimensions will be mapped after confirming the physical parcel arrangement.
         packageDetails: {
-          weight: 0.5,
-          length: 10,
-          breadth: 10,
-          height: 10,
+          weight: Number(savedPackage.dead_wt),
+          length: outerBox.length,
+          breadth: outerBox.breadth,
+          height: outerBox.height,
         },
       };
 
@@ -787,8 +931,6 @@ const verifyAdminOrder = async (req, res) => {
         );
       }
 
-      
-
       return res.status(200).json({
         success: true,
         message:
@@ -805,7 +947,6 @@ const verifyAdminOrder = async (req, res) => {
       message: "Order verified and accepted successfully",
       data: order,
     });
-   
   } catch (error) {
     void logException(error);
     console.error("VERIFY ADMIN ORDER ERROR:", error);
@@ -1118,6 +1259,51 @@ const getShiprocketTracking = async (req, res) => {
     });
   }
 };
+
+/* --------------------------------
+   SAVE ORDER PACKAGING
+-------------------------------- */
+
+const saveOrderPackages = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { packages } = req.body || {};
+
+    const orderId = Number(id);
+
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid order ID is required.",
+      });
+    }
+
+    if (!Array.isArray(packages) || packages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one package is required.",
+      });
+    }
+
+    const result = await AdminOrder.saveOrderPackages(orderId, packages);
+
+    return res.status(200).json({
+      success: true,
+      message: "Order packaging saved successfully.",
+      data: result,
+    });
+  } catch (error) {
+    void logException(error);
+
+    console.error("SAVE ORDER PACKAGES ERROR:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to save order packaging.",
+    });
+  }
+};
+
 module.exports = {
   // createAdminOrder,
   getAdminOrders,
@@ -1127,4 +1313,5 @@ module.exports = {
   // deleteAdminOrder,
   // deleteAllAdminOrders,
   verifyAdminOrder,
+  saveOrderPackages,
 };

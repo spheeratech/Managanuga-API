@@ -31,6 +31,7 @@ const faqRoutes = require("./routes/faqRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const combinedAPIRoutes = require("./routes/combinedAPIRoutes");
 const appUpdateRoutes = require("./routes/appUpdateRoutes");
+const packageRoutes = require("./routes/packageRoutes");
 const app = express();
 
 app.use(requestLogger);
@@ -63,6 +64,7 @@ app.use("/api/combined", combinedAPIRoutes);
 app.use("/api/hubs", hubRoutes);
 app.use("/api/admin/users", adminUserRoutes);
 app.use("/api/admin/orders", adminOrderRoutes);
+app.use("/api/packages", packageRoutes);
 
 //Common APIs
 app.use("/api/subscriptions", subscriptionRoutes);

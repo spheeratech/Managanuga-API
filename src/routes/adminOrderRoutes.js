@@ -11,6 +11,7 @@ const {
   deleteAdminOrder,
   deleteAllAdminOrders,
   verifyAdminOrder,
+  saveOrderPackages,
 } = require("../controllers/adminOrderController");
 
 // router.post("/", createAdminOrder);
@@ -24,6 +25,7 @@ router.get("/:id/tracking", getShiprocketTracking);
 router.get("/:id", getAdminOrderById);
 
 router.put("/:id/verify", verifyAdminOrder);
+router.post("/:id/packages", saveOrderPackages);
 
 router.put("/:id", updateAdminOrder);
 

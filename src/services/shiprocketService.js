@@ -1,9 +1,17 @@
-
 const { logException } = require("../utils/exceptionLogger.js");
 const axios = require("axios");
 const pool = require("../../db");
 
 const BASE_URL = "https://apiv2.shiprocket.in/v1/external";
+//added
+const isShiprocketEnabled =
+  String(process.env.SHIPROCKET_ENABLED).toLowerCase() === "true";
+
+const ensureShiprocketEnabled = () => {
+  if (!isShiprocketEnabled) {
+    throw new Error("Shiprocket integration is temporarily disabled.");
+  }
+};
 
 // =====================================================
 // SHIPROCKET LOG HELPER
@@ -63,6 +71,8 @@ let tokenExpiry = null;
 let loginPromise = null;
 
 const login = async () => {
+  // Stop all Shiprocket API requests when disabled.
+  ensureShiprocketEnabled();
   // Reuse an existing valid token.
   if (token && tokenExpiry && Date.now() < tokenExpiry) {
     return token;
@@ -331,10 +341,14 @@ const createShipment = async ({
   const amount = Number(order.total_amount);
   const deliveryCharge = Number(order.delivery_charge || 0);
 
-  const weight = Number(packageDetails?.weight ?? 0.5);
-  const length = Number(packageDetails?.length ?? 10);
-  const breadth = Number(packageDetails?.breadth ?? 10);
-  const height = Number(packageDetails?.height ?? 10);
+  // const weight = Number(packageDetails?.weight ?? 0.5);
+  // const length = Number(packageDetails?.length ?? 10);
+  // const breadth = Number(packageDetails?.breadth ?? 10);
+  // const height = Number(packageDetails?.height ?? 10);
+  const weight = Number(packageDetails?.weight);
+  const length = Number(packageDetails?.length);
+  const breadth = Number(packageDetails?.breadth);
+  const height = Number(packageDetails?.height);
 
   if (
     !Number.isFinite(weight) ||

@@ -1,13 +1,9 @@
-
 const { logException } = require("../utils/exceptionLogger.js");
 const jwt = require("jsonwebtoken");
 const pool = require("../../db");
 
-const requireAuthenticatedRole = (
-  requiredRole,
-  identityQueryParam,
-  identityRequired = false
-) =>
+const requireAuthenticatedRole =
+  (requiredRole, identityQueryParam, identityRequired = false) =>
   async (req, res, next) => {
     const authorization = req.get("authorization") || "";
     const [scheme, token] = authorization.split(" ");
@@ -49,9 +45,7 @@ const requireAuthenticatedRole = (
     }
 
     const requestedUserId = String(
-      req.query[identityQueryParam] ||
-        req.body?.[identityQueryParam] ||
-        ""
+      req.query[identityQueryParam] || req.body?.[identityQueryParam] || "",
     ).trim();
 
     if (identityRequired && !requestedUserId) {
@@ -74,7 +68,7 @@ const requireAuthenticatedRole = (
       ).map((role) => String(role).trim().toUpperCase());
       const result = await pool.query(
         `
-        SELECT 1
+        SELECT ur.role_name
         FROM user_login ul
         INNER JOIN lkp_user_roles ur
           ON ur.id = ul.role
@@ -83,7 +77,7 @@ const requireAuthenticatedRole = (
           AND UPPER(TRIM(ur.role_name)) = ANY($2::text[])
         LIMIT 1
         `,
-        [authenticatedUserId, requiredRoles]
+        [authenticatedUserId, requiredRoles],
       );
 
       if (!result.rows[0]) {
@@ -93,7 +87,13 @@ const requireAuthenticatedRole = (
         });
       }
 
+      // req.authenticatedUser = authenticatedUser;
+      // return next();
       req.authenticatedUser = authenticatedUser;
+      req.authenticatedRole = String(result.rows[0].role_name)
+        .trim()
+        .toUpperCase();
+
       return next();
     } catch (error) {
       void logException(error);
