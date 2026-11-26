@@ -9,18 +9,16 @@ const {
 
 const addAddress = async (req, res) => {
   try {
-    const { user_id } = req.body;
+    const authenticatedUserId = String(
+      req.authenticatedUser.id
+    ).trim();
 
-    if (!user_id) {
-      return res.status(400).json({
-        success: false,
-        message: "user_id is required",
-      });
-    }
+    const address = await Address.createAddress({
+      ...req.body,
+      user_id: authenticatedUserId,
+    });
 
-    const address = await Address.createAddress(req.body);
-
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Address added successfully",
       data: address,
@@ -42,7 +40,7 @@ const addAddress = async (req, res) => {
       });
     }
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Server Error",
     });
@@ -52,9 +50,16 @@ const addAddress = async (req, res) => {
 
 const getAddresses = async (req, res) => {
   try {
-    const addresses = await Address.getAddresses(req.query);
+    const authenticatedUserId = String(
+      req.authenticatedUser.id
+    ).trim();
 
-    res.status(200).json({
+    const addresses = await Address.getAddresses({
+      ...req.query,
+      user_id: authenticatedUserId,
+    });
+
+    return res.status(200).json({
       success: true,
       count: addresses.length,
       data: addresses,
@@ -63,7 +68,7 @@ const getAddresses = async (req, res) => {
     void logException(error);
     console.error("GET ADDRESSES ERROR:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Server Error",
     });
@@ -91,7 +96,7 @@ const getPincodeDetails = async (req, res) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data,
     });
@@ -99,7 +104,7 @@ const getPincodeDetails = async (req, res) => {
     void logException(error);
     console.error("PINCODE ERROR:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Server Error",
     });
@@ -111,7 +116,15 @@ const updateAddress = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const address = await Address.updateAddress(id, req.body);
+    const authenticatedUserId = String(
+      req.authenticatedUser.id
+    ).trim();
+
+    const address = await Address.updateAddress(
+      id,
+      req.body,
+      authenticatedUserId
+    );
 
     if (!address) {
       return res.status(404).json({
@@ -120,7 +133,7 @@ const updateAddress = async (req, res) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Address updated successfully",
       data: address,
@@ -129,7 +142,7 @@ const updateAddress = async (req, res) => {
     void logException(error);
     console.error("UPDATE ADDRESS ERROR:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Server Error",
     });
@@ -141,7 +154,14 @@ const deleteAddress = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const address = await Address.deleteAddress(id);
+    const authenticatedUserId = String(
+      req.authenticatedUser.id
+    ).trim();
+
+    const address = await Address.deleteAddress(
+      id,
+      authenticatedUserId
+    );
 
     if (!address) {
       return res.status(404).json({
@@ -150,7 +170,7 @@ const deleteAddress = async (req, res) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Address deleted successfully",
       data: address,
@@ -159,7 +179,6 @@ const deleteAddress = async (req, res) => {
     void logException(error);
     console.error("DELETE ADDRESS ERROR:", error);
 
-    // PostgreSQL foreign-key violation
     if (error.code === "23503") {
       return res.status(409).json({
         success: false,
@@ -168,7 +187,7 @@ const deleteAddress = async (req, res) => {
       });
     }
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Server Error",
     });
