@@ -126,9 +126,10 @@ const removeFromWishlist = async (req, res) => {
  */
 const saveForLater = async (req, res) => {
   try {
-    const { userId, cartId } = req.body;
+    const authenticatedUserId = req.authenticatedUser?.id;
+    const { cartId } = req.body;
 
-    if (!userId || !cartId) {
+    if (!authenticatedUserId || !cartId) {
       return res.status(400).json({
         success: false,
         message: "userId and cartId are required",
@@ -136,7 +137,7 @@ const saveForLater = async (req, res) => {
     }
 
     const result = await Wishlist.saveForLater(
-      userId,
+      authenticatedUserId,
       Number(cartId)
     );
 

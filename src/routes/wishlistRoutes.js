@@ -1,5 +1,7 @@
 const express = require("express");
 
+const requireAuthenticatedRole = require("../middleware/requireAuthenticatedRole");
+
 const {
   getWishlist,
   addToWishlist,
@@ -25,7 +27,11 @@ router.post("/", addToWishlist);
  * Save cart item for later
  * POST /api/wishlist/save-for-later
  */
-router.post("/save-for-later", saveForLater);
+router.post(
+  "/save-for-later",
+  requireAuthenticatedRole(["CUSTOMER", "USER"], "userId", true),
+  saveForLater
+);
 
 /*
  * Remove product from wishlist

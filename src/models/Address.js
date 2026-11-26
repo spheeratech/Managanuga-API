@@ -1,3 +1,4 @@
+
 const pool = require("../../db");
 
 const normalizeDefaultFlag = (value) =>
@@ -25,10 +26,7 @@ const resolvePublicUserId = async (publicUserId) => {
 
 
 /**
- * Create address
- *
- * New structure:
- *   user_id = public MGU user ID
+ * Create address for an authenticated user.
  */
 const createAddress = async (addressData) => {
   const publicUserId = addressData.user_id;
@@ -58,17 +56,7 @@ const createAddress = async (addressData) => {
       is_default
     )
     VALUES (
-      $1,
-      $2,
-      $3,
-      $4,
-      $5,
-      $6,
-      $7,
-      $8,
-      $9,
-      $10,
-      $11
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
     )
     RETURNING *;
   `;
@@ -94,25 +82,21 @@ const createAddress = async (addressData) => {
 
 
 /**
- * Get addresses
- *
- * New usage:
- *   GET /addresses?user_id=MGU260...
+ * Get addresses belonging only to the authenticated user.
  */
 const getAddresses = async (filters = {}) => {
+  if (!filters.user_id) {
+    throw new Error("user_id is required");
+  }
+
   let query = `
     SELECT *
     FROM user_address
-    WHERE 1=1
+    WHERE user_id = $1
   `;
 
-  const values = [];
-  let count = 1;
-
-  if (filters.user_id) {
-    query += ` AND user_id = $${count++}`;
-    values.push(String(filters.user_id));
-  }
+  const values = [String(filters.user_id)];
+  let count = 2;
 
   if (filters.city) {
     query += ` AND city = $${count++}`;
@@ -128,11 +112,15 @@ const getAddresses = async (filters = {}) => {
 
 
 /**
- * Update only actual address fields.
+ * Update an address only when it belongs to the authenticated user.
  *
  * user_id cannot be changed through this function.
  */
-const updateAddress = async (id, data) => {
+const updateAddress = async (id, data, userId) => {
+  if (!userId) {
+    throw new Error("Authenticated user is required");
+  }
+
   const allowedFields = [
     "address_type",
     "full_name",
@@ -152,6 +140,7 @@ const updateAddress = async (id, data) => {
   for (const field of allowedFields) {
     if (Object.prototype.hasOwnProperty.call(data, field)) {
       fields.push(field);
+
       values.push(
         field === "is_default"
           ? normalizeDefaultFlag(data[field])
@@ -169,11 +158,13 @@ const updateAddress = async (id, data) => {
     .join(", ");
 
   values.push(id);
+  values.push(String(userId));
 
   const query = `
     UPDATE user_address
     SET ${setClause}
-    WHERE id = $${values.length}
+    WHERE id = $${values.length - 1}
+      AND user_id = $${values.length}
     RETURNING *;
   `;
 
@@ -184,16 +175,24 @@ const updateAddress = async (id, data) => {
 
 
 /**
- * Delete address
+ * Delete an address only when it belongs to the authenticated user.
  */
-const deleteAddress = async (id) => {
+const deleteAddress = async (id, userId) => {
+  if (!userId) {
+    throw new Error("Authenticated user is required");
+  }
+
   const query = `
     DELETE FROM user_address
     WHERE id = $1
+      AND user_id = $2
     RETURNING *;
   `;
 
-  const result = await pool.query(query, [id]);
+  const result = await pool.query(query, [
+    id,
+    String(userId),
+  ]);
 
   return result.rows[0];
 };
